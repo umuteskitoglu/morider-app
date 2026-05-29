@@ -1,0 +1,37 @@
+flowchart TB
+    subgraph Client [Istemci]
+        MobileApp[Expo React Native App]
+    end
+    subgraph Edge [Edge]
+        Gateway[API Gateway 8080]
+    end
+    subgraph Services [Mikroservisler]
+        Auth[auth 8081]
+        User[user 8082]
+        Ride[ride 8083]
+        Route[route 8084]
+        Reward[reward 8085]
+        Telemetry[telemetry 8086]
+    end
+    subgraph Data [Veri Katmani]
+        PG[(PostgreSQL + PostGIS)]
+        Redis[(Redis)]
+        NATS[(NATS)]
+    end
+
+    MobileApp -->|HTTPS / WS| Gateway
+    Gateway --> Auth
+    Gateway --> User
+    Gateway --> Ride
+    Gateway --> Route
+    Gateway --> Reward
+    Gateway --> Telemetry
+
+    Auth --> PG
+    User --> PG
+    Ride --> PG
+    Route --> PG
+    Reward --> PG
+    Telemetry --> PG
+    Telemetry --> NATS
+    Ride -.cache.-> Redis

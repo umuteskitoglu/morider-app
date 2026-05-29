@@ -1,0 +1,107 @@
+import React, { useState } from 'react';
+import { Alert, KeyboardAvoidingView, Platform, StyleSheet, Text, View } from 'react-native';
+import { NativeStackScreenProps } from '@react-navigation/native-stack';
+import { LinearGradient } from 'expo-linear-gradient';
+import { MaterialCommunityIcons } from '@expo/vector-icons';
+
+import { AuthStackParams } from '../navigation/RootNavigator';
+import { useAuth } from '../store/auth';
+import { Button, TextField } from '../components/ui';
+import { errorMessage } from '../api/client';
+import { colors, gradients, shadow, spacing } from '../theme';
+
+type Props = NativeStackScreenProps<AuthStackParams, 'Login'>;
+
+export default function LoginScreen({ navigation }: Props) {
+  const { signIn } = useAuth();
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [loading, setLoading] = useState(false);
+
+  async function onSubmit() {
+    if (!email || !password) {
+      Alert.alert('Eksik bilgi', 'E-posta ve şifre gerekli.');
+      return;
+    }
+    try {
+      setLoading(true);
+      await signIn(email.trim(), password);
+    } catch (err) {
+      Alert.alert('Giriş başarısız', errorMessage(err));
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  return (
+    <LinearGradient colors={gradients.hero} style={styles.container}>
+      <KeyboardAvoidingView
+        style={styles.flex}
+        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+      >
+        <View style={styles.header}>
+          <LinearGradient colors={gradients.primary} style={styles.logoBadge}>
+            <MaterialCommunityIcons name="motorbike" size={44} color="#fff" />
+          </LinearGradient>
+          <Text style={styles.logo}>MORIDER</Text>
+          <Text style={styles.tagline}>SÜR · KAYDET · PAYLAŞ</Text>
+        </View>
+
+        <View style={styles.form}>
+          <TextField
+            label="E-posta"
+            icon="email-outline"
+            value={email}
+            onChangeText={setEmail}
+            autoCapitalize="none"
+            keyboardType="email-address"
+            placeholder="ornek@morider.app"
+          />
+          <TextField
+            label="Şifre"
+            icon="lock-outline"
+            value={password}
+            onChangeText={setPassword}
+            secureTextEntry
+            placeholder="••••••••"
+          />
+
+          <Button title="Giriş Yap" icon="login" onPress={onSubmit} loading={loading} />
+          <View style={{ height: spacing.md }} />
+          <Button
+            title="Hesap Oluştur"
+            variant="ghost"
+            icon="account-plus-outline"
+            onPress={() => navigation.navigate('Signup')}
+          />
+        </View>
+      </KeyboardAvoidingView>
+    </LinearGradient>
+  );
+}
+
+const styles = StyleSheet.create({
+  container: { flex: 1 },
+  flex: { flex: 1, padding: spacing.lg, justifyContent: 'center' },
+  header: { alignItems: 'center', marginBottom: spacing.xl },
+  logoBadge: {
+    width: 92,
+    height: 92,
+    borderRadius: 26,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: spacing.md,
+    transform: [{ rotate: '-6deg' }],
+    ...shadow.glow,
+  },
+  logo: { color: colors.text, fontSize: 40, fontWeight: '900', letterSpacing: 3 },
+  tagline: { color: colors.primary, marginTop: spacing.xs, fontWeight: '800', fontSize: 12, letterSpacing: 2 },
+  form: {
+    backgroundColor: colors.surface,
+    borderRadius: 22,
+    borderWidth: 1,
+    borderColor: colors.border,
+    padding: spacing.lg,
+    ...shadow.card,
+  },
+});

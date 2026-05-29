@@ -1,0 +1,82 @@
+import React, { createContext, useContext, useEffect, useMemo, useState } from 'react';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+
+import { api, TOKEN_KEY } from '../api/client';
+
+export type User = {
+  id: number;
+  name: string;
+  email: string;
+  country: string;
+};
+
+type AuthState = {
+  user: User | null;
+  token: string | null;
+  loading: boolean;
+  signIn: (email: string, password: string) => Promise<void>;
+  signUp: (name: string, email: string, password: string) => Promise<void>;
+  signOut: () => Promise<void>;
+};
+
+const AuthContext = createContext<AuthState | undefined>(undefined);
+
+const USER_KEY = 'morider.user';
+
+export function AuthProvider({ children }: { children: React.ReactNode }) {
+  const [user, setUser] = useState<User | null>(null);
+  const [token, setToken] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    (async () => {
+      const [storedToken, storedUser] = await Promise.all([
+        AsyncStorage.getItem(TOKEN_KEY),
+        AsyncStorage.getItem(USER_KEY),
+      ]);
+      if (storedToken) setToken(storedToken);
+      if (storedUser) setUser(JSON.parse(storedUser));
+      setLoading(false);
+    })();
+  }, []);
+
+  async function persist(nextToken: string, nextUser: User) {
+    setToken(nextToken);
+    setUser(nextUser);
+    await AsyncStorage.multiSet([
+      [TOKEN_KEY, nextToken],
+      [USER_KEY, JSON.stringify(nextUser)],
+    ]);
+  }
+
+  async function signIn(email: string, password: string) {
+    const { data } = await api.post('/api/auth/login', { email, password });
+    await persist(data.token, data.user);
+  }
+
+  async function signUp(name: string, email: string, password: string) {
+    const { data } = await api.post('/api/auth/signup', { name, email, password });
+    await persist(data.token, data.user);
+  }
+
+  async function signOut() {
+    setToken(null);
+    setUser(null);
+    await AsyncStorage.multiRemove([TOKEN_KEY, USER_KEY]);
+  }
+
+  const value = useMemo<AuthState>(
+    () => ({ user, token, loading, signIn, signUp, signOut }),
+    [user, token, loading],
+  );
+
+  return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
+}
+
+export function useAuth(): AuthState {
+  const ctx = useContext(AuthContext);
+  if (!ctx) {
+    throw new Error('useAuth must be used within AuthProvider');
+  }
+  return ctx;
+}

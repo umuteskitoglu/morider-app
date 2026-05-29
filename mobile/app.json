@@ -1,0 +1,46 @@
+{
+  "expo": {
+    "name": "Morider App",
+    "slug": "morider-app",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "scheme": "morider",
+    "userInterfaceStyle": "automatic",
+    "newArchEnabled": false,
+    "splash": {
+      "resizeMode": "contain",
+      "backgroundColor": "#0A0E16"
+    },
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "app.morider.mobile",
+      "infoPlist": {
+        "NSLocationWhenInUseUsageDescription": "Morider sürüşlerinizi kaydetmek için konumunuza erişir.",
+        "NSLocationAlwaysAndWhenInUseUsageDescription": "Morider arka planda sürüşlerinizi kaydetmek için konumunuza erişir.",
+        "UIBackgroundModes": ["location"]
+      }
+    },
+    "android": {
+      "package": "app.morider.mobile",
+      "permissions": [
+        "ACCESS_FINE_LOCATION",
+        "ACCESS_COARSE_LOCATION",
+        "ACCESS_BACKGROUND_LOCATION"
+      ]
+    },
+    "plugins": [
+      [
+        "expo-location",
+        {
+          "locationAlwaysAndWhenInUsePermission": "Morider sürüşlerinizi kaydetmek için konumunuza erişir."
+        }
+      ],
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "Morider, paylaşmak istediğin fotoğraflara erişir."
+        }
+      ]
+    ]
+  }
+}

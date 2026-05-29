@@ -1,0 +1,131 @@
+name: morider
+
+x-service-base: &service-base
+  build:
+    context: ./backend
+    dockerfile: Dockerfile
+  env_file: .env
+  restart: unless-stopped
+  depends_on:
+    postgres:
+      condition: service_healthy
+    redis:
+      condition: service_started
+    nats:
+      condition: service_started
+
+services:
+  postgres:
+    image: postgis/postgis:16-3.4
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-morider}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-morider_secret}
+      POSTGRES_DB: ${POSTGRES_DB:-morider}
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./backend/migrations:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-morider} -d ${POSTGRES_DB:-morider}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+
+  nats:
+    image: nats:2-alpine
+    ports:
+      - "4222:4222"
+      - "8222:8222"
+
+  prometheus:
+    image: prom/prometheus:v2.54.1
+    volumes:
+      - ./infra/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+    ports:
+      - "9090:9090"
+    restart: unless-stopped
+
+  # Self-hosted routing engine. Opt-in: only starts under the "routing" profile,
+  # and needs preprocessed data (run `make osrm-data` first). To use it, set
+  # ROUTING_URL=http://osrm:5000 in .env. See docs/routing.md.
+  osrm:
+    image: ghcr.io/project-osrm/osrm-backend:v5.27.1
+    profiles: ["routing"]
+    command: osrm-routed --algorithm mld /data/${OSRM_REGION:-turkey}.osrm
+    volumes:
+      - ./infra/osrm:/data:ro
+    # In-cluster services reach it at osrm:5000. The host port is configurable
+    # because macOS binds 5000 to AirPlay Receiver (set OSRM_HOST_PORT=5050).
+    ports:
+      - "${OSRM_HOST_PORT:-5000}:5000"
+    restart: unless-stopped
+
+  auth:
+    <<: *service-base
+    command: ["-service=auth"]
+    ports:
+      - "8081:8081"
+
+  user:
+    <<: *service-base
+    command: ["-service=user"]
+    ports:
+      - "8082:8082"
+
+  ride:
+    <<: *service-base
+    command: ["-service=ride"]
+    ports:
+      - "8083:8083"
+
+  route:
+    <<: *service-base
+    command: ["-service=route"]
+    ports:
+      - "8084:8084"
+
+  reward:
+    <<: *service-base
+    command: ["-service=reward"]
+    ports:
+      - "8085:8085"
+
+  telemetry:
+    <<: *service-base
+    command: ["-service=telemetry"]
+    ports:
+      - "8086:8086"
+
+  feed:
+    <<: *service-base
+    command: ["-service=feed"]
+    environment:
+      UPLOAD_DIR: /data/uploads
+    volumes:
+      - uploads:/data/uploads
+    ports:
+      - "8087:8087"
+
+  gateway:
+    <<: *service-base
+    command: ["-service=gateway"]
+    ports:
+      - "8080:8080"
+    depends_on:
+      - auth
+      - user
+      - ride
+      - route
+      - reward
+      - telemetry
+      - feed
+
+volumes:
+  pgdata:
+  uploads:

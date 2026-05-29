@@ -1,0 +1,34 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(go version *)",
+      "Bash(go vet *)",
+      "Bash(go build *)",
+      "Bash(go test *)",
+      "Bash(go get *)",
+      "Bash(go mod *)",
+      "Bash(docker compose *)",
+      "Bash(docker volume *)",
+      "Bash(docker exec *)",
+      "Bash(curl -s -X POST http://localhost:8081/api/auth/signup -H 'Content-Type: application/json' -d '{\"name\":\"Router\",\"email\":\"route___CMDSUB_OUTPUT__@morider.app\",\"password\":\"secret123\"}')",
+      "Bash(python3 -c \"import sys,json;d=json.load\\(sys.stdin\\);print\\('kayıt id:',d['id'],'| mesafe\\(km\\):',round\\(d['distance'],2\\),'| saklanan nokta:',len\\(d['points']\\)\\)\")",
+      "Bash(curl -s -o /dev/null -w '%{http_code}' http://192.168.1.7:8090)",
+      "Bash(echo \"Metro 8090: $\\(curl -s -o /dev/null -w '%{http_code}' http://192.168.1.7:8090\\)\")",
+      "Bash(curl -s -o /dev/null -w '%{http_code}' http://192.168.1.7:8080/health)",
+      "Bash(echo \"Backend 8080: $\\(curl -s -o /dev/null -w '%{http_code}' http://192.168.1.7:8080/health\\)\")",
+      "Bash(curl -s -X POST http://localhost:8080/api/auth/signup -H 'Content-Type: application/json' -d \"{\\\\\"name\\\\\":\\\\\"Profil\\\\\",\\\\\"email\\\\\":\\\\\"prof_$\\(date +%s\\)@m.app\\\\\",\\\\\"password\\\\\":\\\\\"secret123\\\\\"}\")",
+      "Bash(python3 -c \"import sys,json;d=json.load\\(sys.stdin\\);print\\('gönderi sayısı:',len\\(d['posts']\\)\\);[print\\(' -',p['caption'],'foto:',len\\(p['photos']\\)\\) for p in d['posts']]\")",
+      "Bash(npx tsc *)",
+      "Bash(echo \"tsc exit: $?\")",
+      "Bash(curl -s -o /dev/null -w '%{http_code}' http://192.168.1.7:8080/api/posts/mine)",
+      "Bash(echo \"mine ucu \\(gateway\\): $\\(curl -s -o /dev/null -w '%{http_code}' http://192.168.1.7:8080/api/posts/mine\\)\")",
+      "Bash(rm -rf /tmp/morider-export)",
+      "Bash(npx expo *)",
+      "Bash(echo \"exit: $?\")",
+      "Bash(make migrate *)",
+      "Bash(pkill -f \"expo start\")",
+      "Bash(cd /Users/umuteskitoglu/Desktop/projects/morider-app/mobile *)",
+      "Bash(echo \"Backend 8080: $\\(curl -s -o /dev/null -w '%{http_code}' http://192.168.1.7:8080/health || echo DOWN\\)\")"
+    ]
+  }
+}

@@ -1,0 +1,115 @@
+// Package user implements the user profile service.
+package user
+
+import (
+	"context"
+	"errors"
+	"net/http"
+	"strconv"
+
+	"github.com/gin-gonic/gin"
+	"github.com/jackc/pgx/v5"
+
+	"github.com/morider/backend/internal/server"
+	authpkg "github.com/morider/backend/pkg/auth"
+	"github.com/morider/backend/pkg/config"
+	"github.com/morider/backend/pkg/httpx"
+)
+
+// Run boots the user service.
+func Run(cfg config.Config) error {
+	deps, err := server.New(context.Background(), "user", cfg)
+	if err != nil {
+		return err
+	}
+	registerRoutes(deps)
+	return deps.Run(config.ResolvePort("USER_PORT", "8082"))
+}
+
+func registerRoutes(d *server.Deps) {
+	h := &handler{d: d}
+	g := d.Engine.Group("/api/users")
+	g.GET("/:id", h.get)
+	protected := g.Use(d.JWT.Middleware())
+	protected.PUT("/:id", h.update)
+
+	f := d.Engine.Group("/api/friends", d.JWT.Middleware())
+	f.GET("", h.listFriends)
+	f.POST("/requests", h.sendRequest)
+	f.GET("/requests", h.incomingRequests)
+	f.POST("/requests/:id/accept", h.acceptRequest)
+	f.POST("/requests/:id/decline", h.declineRequest)
+	f.GET("/status/:userId", h.friendStatus)
+	f.DELETE("/:userId", h.removeFriend)
+}
+
+type handler struct{ d *server.Deps }
+
+type profile struct {
+	ID      int64  `json:"id"`
+	Name    string `json:"name"`
+	Email   string `json:"email"`
+	Country string `json:"country"`
+}
+
+func (h *handler) get(c *gin.Context) {
+	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil {
+		httpx.BadRequest(c, "invalid user id")
+		return
+	}
+	var p profile
+	err = h.d.DB.QueryRow(c,
+		`SELECT id, name, email, COALESCE(country, '') FROM users WHERE id = $1`, id,
+	).Scan(&p.ID, &p.Name, &p.Email, &p.Country)
+	if errors.Is(err, pgx.ErrNoRows) {
+		httpx.Error(c, http.StatusNotFound, "user not found")
+		return
+	}
+	if err != nil {
+		httpx.Internal(c, "could not load user")
+		return
+	}
+	c.JSON(http.StatusOK, p)
+}
+
+type updateReq struct {
+	Name    string `json:"name"`
+	Country string `json:"country"`
+}
+
+func (h *handler) update(c *gin.Context) {
+	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil {
+		httpx.BadRequest(c, "invalid user id")
+		return
+	}
+	if authpkg.UserID(c) != id {
+		httpx.Error(c, http.StatusForbidden, "cannot edit another user")
+		return
+	}
+	var req updateReq
+	if err := c.ShouldBindJSON(&req); err != nil {
+		httpx.BadRequest(c, err.Error())
+		return
+	}
+	var p profile
+	err = h.d.DB.QueryRow(c,
+		`UPDATE users
+		 SET name = COALESCE(NULLIF($2, ''), name),
+		     country = COALESCE(NULLIF($3, ''), country),
+		     updated_at = now()
+		 WHERE id = $1
+		 RETURNING id, name, email, COALESCE(country, '')`,
+		id, req.Name, req.Country,
+	).Scan(&p.ID, &p.Name, &p.Email, &p.Country)
+	if errors.Is(err, pgx.ErrNoRows) {
+		httpx.Error(c, http.StatusNotFound, "user not found")
+		return
+	}
+	if err != nil {
+		httpx.Internal(c, "could not update user")
+		return
+	}
+	c.JSON(http.StatusOK, p)
+}

@@ -1,0 +1,32 @@
+# Go
+backend/bin/
+*.exe
+*.test
+*.out
+vendor/
+
+# Node / Expo
+node_modules/
+mobile/.expo/
+mobile/dist/
+mobile/web-build/
+npm-debug.*
+*.jks
+*.p8
+*.p12
+*.key
+*.mobileprovision
+*.orig.*
+
+# Env
+.env
+*.local
+
+# OSRM routing data (downloaded/preprocessed locally, large binaries)
+infra/osrm/
+
+# OS / Editor
+.DS_Store
+.idea/
+.vscode/
+*.log

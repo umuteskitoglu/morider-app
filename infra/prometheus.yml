@@ -1,0 +1,17 @@
+# Basic Prometheus scrape config for the Morider services.
+# Add a /metrics endpoint (e.g. with prometheus/client_golang) to each service
+# to make these targets meaningful.
+global:
+  scrape_interval: 15s
+
+scrape_configs:
+  - job_name: morider-services
+    static_configs:
+      - targets:
+          - "gateway:8080"
+          - "auth:8081"
+          - "user:8082"
+          - "ride:8083"
+          - "route:8084"
+          - "reward:8085"
+          - "telemetry:8086"

@@ -1,0 +1,50 @@
+erDiagram
+    USERS ||--o{ RIDES : "owns"
+    USERS ||--o{ ROUTES : "creates"
+    USERS ||--o{ REWARDS : "earns"
+    ROUTES ||--o{ RIDES : "is followed by"
+    RIDES ||--|{ TELEMETRY_POINTS : "contains"
+
+    USERS {
+        bigint id PK
+        text name
+        text email
+        text password_hash
+        text country
+        timestamptz created_at
+    }
+    ROUTES {
+        bigint id PK
+        bigint user_id FK
+        text name
+        text description
+        geometry path
+        double distance
+    }
+    RIDES {
+        bigint id PK
+        bigint user_id FK
+        bigint route_id FK
+        timestamptz start_time
+        timestamptz end_time
+        double distance
+        double avg_speed
+        double elevation_gain
+    }
+    TELEMETRY_POINTS {
+        bigint id PK
+        bigint ride_id FK
+        timestamptz ts
+        double lat
+        double lon
+        double altitude
+        double speed
+        geography geom
+    }
+    REWARDS {
+        bigint id PK
+        bigint user_id FK
+        text type
+        text description
+        timestamptz awarded_at
+    }
