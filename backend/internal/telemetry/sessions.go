@@ -94,6 +94,7 @@ func (h *handler) createSession(c *gin.Context) {
 		httpx.Internal(c, "could not join session")
 		return
 	}
+	h.leaveOtherActiveSessions(c, host, sessionID)
 	c.JSON(http.StatusCreated, gin.H{"session_id": sessionID, "code": code, "route_id": req.RouteID})
 }
 
@@ -122,6 +123,18 @@ func (h *handler) joinSession(c *gin.Context) {
 	}
 
 	if me != hostID {
+		var banned bool
+		if err := h.d.DB.QueryRow(c,
+			`SELECT EXISTS(SELECT 1 FROM session_bans WHERE session_id = $1 AND user_id = $2)`,
+			sessionID, me).Scan(&banned); err != nil {
+			httpx.Internal(c, "could not check ban")
+			return
+		}
+		if banned {
+			httpx.Error(c, http.StatusForbidden, "you are banned from this session")
+			return
+		}
+
 		mutual, err := h.areMutual(c, me, hostID)
 		if err != nil {
 			httpx.Internal(c, "could not verify follow")
@@ -139,6 +152,7 @@ func (h *handler) joinSession(c *gin.Context) {
 		httpx.Internal(c, "could not join session")
 		return
 	}
+	h.leaveOtherActiveSessions(c, me, sessionID)
 	c.JSON(http.StatusOK, gin.H{"session_id": sessionID, "code": code})
 }
 
@@ -163,9 +177,15 @@ func (h *handler) leaveSession(c *gin.Context) {
 	if me == hostID {
 		_, err = h.d.DB.Exec(c,
 			`UPDATE ride_sessions SET status = 'ended', ended_at = now() WHERE id = $1 AND status = 'active'`, sessionID)
+		if err == nil {
+			h.publishControl(sessionID, gin.H{"type": "ended", "session_id": sessionID})
+		}
 	} else {
 		_, err = h.d.DB.Exec(c,
 			`DELETE FROM session_participants WHERE session_id = $1 AND user_id = $2`, sessionID, me)
+		if err == nil {
+			h.publishControl(sessionID, gin.H{"type": "left", "user_id": me, "session_id": sessionID})
+		}
 	}
 	if err != nil {
 		httpx.Internal(c, "could not leave session")
@@ -176,18 +196,20 @@ func (h *handler) leaveSession(c *gin.Context) {
 
 // endSession lets the host end an active session.
 func (h *handler) endSession(c *gin.Context) {
-	tag, err := h.d.DB.Exec(c,
+	var sessionID int64
+	err := h.d.DB.QueryRow(c,
 		`UPDATE ride_sessions SET status = 'ended', ended_at = now()
-		 WHERE code = $1 AND host_id = $2 AND status = 'active'`,
-		c.Param("code"), authpkg.UserID(c))
+		 WHERE code = $1 AND host_id = $2 AND status = 'active' RETURNING id`,
+		c.Param("code"), authpkg.UserID(c)).Scan(&sessionID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		httpx.Error(c, http.StatusNotFound, "active session not found for host")
+		return
+	}
 	if err != nil {
 		httpx.Internal(c, "could not end session")
 		return
 	}
-	if tag.RowsAffected() == 0 {
-		httpx.Error(c, http.StatusNotFound, "active session not found for host")
-		return
-	}
+	h.publishControl(sessionID, gin.H{"type": "ended", "session_id": sessionID})
 	c.Status(http.StatusNoContent)
 }
 
@@ -267,6 +289,44 @@ func (h *handler) getSession(c *gin.Context) {
 	})
 }
 
+// myActiveSessions lists the active sessions the caller is a participant of, so
+// the app can offer to rejoin after a restart.
+func (h *handler) myActiveSessions(c *gin.Context) {
+	me := authpkg.UserID(c)
+	rows, err := h.d.DB.Query(c,
+		`SELECT s.id, s.code, s.host_id, COALESCE(s.route_id, 0),
+		        (SELECT COUNT(*) FROM session_participants p WHERE p.session_id = s.id)
+		 FROM ride_sessions s
+		 JOIN session_participants sp ON sp.session_id = s.id
+		 WHERE sp.user_id = $1 AND s.status = 'active'
+		 ORDER BY s.created_at DESC`, me)
+	if err != nil {
+		httpx.Internal(c, "could not list sessions")
+		return
+	}
+	defer rows.Close()
+
+	type item struct {
+		SessionID    int64  `json:"session_id"`
+		Code         string `json:"code"`
+		HostID       int64  `json:"host_id"`
+		RouteID      int64  `json:"route_id"`
+		Participants int64  `json:"participants"`
+		IsHost       bool   `json:"is_host"`
+	}
+	sessions := make([]item, 0)
+	for rows.Next() {
+		var it item
+		if err := rows.Scan(&it.SessionID, &it.Code, &it.HostID, &it.RouteID, &it.Participants); err != nil {
+			httpx.Internal(c, "could not read sessions")
+			return
+		}
+		it.IsHost = it.HostID == me
+		sessions = append(sessions, it)
+	}
+	c.JSON(http.StatusOK, gin.H{"sessions": sessions})
+}
+
 // areMutual reports whether a and b follow each other.
 func (h *handler) areMutual(ctx context.Context, a, b int64) (bool, error) {
 	var mutual bool
@@ -275,6 +335,155 @@ func (h *handler) areMutual(ctx context.Context, a, b int64) (bool, error) {
 		    AND EXISTS(SELECT 1 FROM follows WHERE follower_id = $2 AND followee_id = $1)`,
 		a, b).Scan(&mutual)
 	return mutual, err
+}
+
+type targetReq struct {
+	UserID int64 `json:"user_id" binding:"required"`
+}
+
+// publishControl fans a non-position control event (kick/ban/host) out to the
+// session's WebSocket clients. Control frames carry a "type" field; position
+// frames do not, so clients can tell them apart.
+func (h *handler) publishControl(sessionID int64, payload gin.H) {
+	if data, err := json.Marshal(payload); err == nil {
+		h.hub.publish(sessionID, data)
+	}
+}
+
+// leaveOtherActiveSessions removes the user from every active session except
+// keepID, ending any they host — enforcing a single active group ride. Best
+// effort: failures here must not block the join/create that triggered it.
+func (h *handler) leaveOtherActiveSessions(c *gin.Context, userID, keepID int64) {
+	rows, err := h.d.DB.Query(c,
+		`SELECT s.id, s.host_id FROM ride_sessions s
+		 JOIN session_participants sp ON sp.session_id = s.id
+		 WHERE sp.user_id = $1 AND s.status = 'active' AND s.id <> $2`, userID, keepID)
+	if err != nil {
+		return
+	}
+	type sess struct{ id, host int64 }
+	var others []sess
+	for rows.Next() {
+		var s sess
+		if err := rows.Scan(&s.id, &s.host); err == nil {
+			others = append(others, s)
+		}
+	}
+	rows.Close()
+
+	for _, s := range others {
+		if s.host == userID {
+			if _, err := h.d.DB.Exec(c,
+				`UPDATE ride_sessions SET status='ended', ended_at=now() WHERE id=$1 AND status='active'`, s.id); err == nil {
+				h.publishControl(s.id, gin.H{"type": "ended", "session_id": s.id})
+			}
+		} else {
+			if _, err := h.d.DB.Exec(c,
+				`DELETE FROM session_participants WHERE session_id=$1 AND user_id=$2`, s.id, userID); err == nil {
+				h.publishControl(s.id, gin.H{"type": "left", "user_id": userID, "session_id": s.id})
+			}
+		}
+	}
+}
+
+// hostOnly loads the session by code and verifies the caller is its host,
+// returning the session id. It writes the error response and returns ok=false
+// otherwise.
+func (h *handler) hostOnly(c *gin.Context, code string) (int64, int64, bool) {
+	var sessionID, hostID int64
+	err := h.d.DB.QueryRow(c, `SELECT id, host_id FROM ride_sessions WHERE code = $1`, code).Scan(&sessionID, &hostID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		httpx.Error(c, http.StatusNotFound, "session not found")
+		return 0, 0, false
+	}
+	if err != nil {
+		httpx.Internal(c, "could not load session")
+		return 0, 0, false
+	}
+	if authpkg.UserID(c) != hostID {
+		httpx.Error(c, http.StatusForbidden, "only the host can do this")
+		return 0, 0, false
+	}
+	return sessionID, hostID, true
+}
+
+// kickParticipant removes a participant; banParticipant also bars them from
+// rejoining. Host only.
+func (h *handler) kickParticipant(c *gin.Context) { h.removeParticipant(c, false) }
+func (h *handler) banParticipant(c *gin.Context)  { h.removeParticipant(c, true) }
+
+func (h *handler) removeParticipant(c *gin.Context, ban bool) {
+	var req targetReq
+	if err := c.ShouldBindJSON(&req); err != nil {
+		httpx.BadRequest(c, err.Error())
+		return
+	}
+	sessionID, hostID, ok := h.hostOnly(c, c.Param("code"))
+	if !ok {
+		return
+	}
+	if req.UserID == hostID {
+		httpx.BadRequest(c, "host cannot be removed")
+		return
+	}
+
+	if _, err := h.d.DB.Exec(c,
+		`DELETE FROM session_participants WHERE session_id = $1 AND user_id = $2`,
+		sessionID, req.UserID); err != nil {
+		httpx.Internal(c, "could not remove participant")
+		return
+	}
+	if ban {
+		if _, err := h.d.DB.Exec(c,
+			`INSERT INTO session_bans (session_id, user_id) VALUES ($1, $2) ON CONFLICT DO NOTHING`,
+			sessionID, req.UserID); err != nil {
+			httpx.Internal(c, "could not ban participant")
+			return
+		}
+	}
+
+	kind := "kick"
+	if ban {
+		kind = "ban"
+	}
+	h.publishControl(sessionID, gin.H{"type": kind, "user_id": req.UserID, "session_id": sessionID})
+	c.Status(http.StatusNoContent)
+}
+
+// transferHost hands the host role to another participant. Host only.
+func (h *handler) transferHost(c *gin.Context) {
+	var req targetReq
+	if err := c.ShouldBindJSON(&req); err != nil {
+		httpx.BadRequest(c, err.Error())
+		return
+	}
+	sessionID, hostID, ok := h.hostOnly(c, c.Param("code"))
+	if !ok {
+		return
+	}
+	if req.UserID == hostID {
+		httpx.BadRequest(c, "already the host")
+		return
+	}
+
+	var isParticipant bool
+	if err := h.d.DB.QueryRow(c,
+		`SELECT EXISTS(SELECT 1 FROM session_participants WHERE session_id = $1 AND user_id = $2)`,
+		sessionID, req.UserID).Scan(&isParticipant); err != nil {
+		httpx.Internal(c, "could not verify participant")
+		return
+	}
+	if !isParticipant {
+		httpx.BadRequest(c, "user is not a participant")
+		return
+	}
+
+	if _, err := h.d.DB.Exec(c, `UPDATE ride_sessions SET host_id = $2 WHERE id = $1`, sessionID, req.UserID); err != nil {
+		httpx.Internal(c, "could not transfer host")
+		return
+	}
+	h.publishControl(sessionID, gin.H{"type": "host", "host_id": req.UserID, "session_id": sessionID})
+	c.Status(http.StatusNoContent)
 }
 
 type wsPositionIn struct {

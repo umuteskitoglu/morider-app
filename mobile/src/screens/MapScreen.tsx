@@ -3,16 +3,16 @@ import { Alert, Pressable, StyleSheet, Text, View } from 'react-native';
 import MapView, { Polyline, Region } from 'react-native-maps';
 import * as Location from 'expo-location';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
-import type { BottomTabScreenProps } from '@react-navigation/bottom-tabs';
+import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 
-import { AppTabParams } from '../navigation/RootNavigator';
+import { RideStackParams } from '../navigation/RootNavigator';
 import { Button, Card } from '../components/ui';
 import { api, errorMessage } from '../api/client';
 import { colors, radius, shadow, spacing } from '../theme';
 
 type Coord = { latitude: number; longitude: number };
 type Sample = Coord & { altitude: number; speed: number; ts: string };
-type Props = BottomTabScreenProps<AppTabParams, 'Ride'>;
+type Props = NativeStackScreenProps<RideStackParams, 'RideMain'>;
 
 const INITIAL_REGION: Region = {
   latitude: 41.0082,
@@ -234,7 +234,11 @@ export default function MapScreen({ route, navigation }: Props) {
         {recording ? (
           <Button title="Sürüşü Bitir" variant="danger" icon="stop-circle" onPress={stopRecording} loading={saving} />
         ) : (
-          <Button title="Sürüşü Başlat" icon="motorbike" onPress={startRecording} loading={saving} />
+          <>
+            <Button title="Sürüşü Başlat" icon="motorbike" onPress={startRecording} loading={saving} />
+            <View style={{ height: spacing.sm }} />
+            <Button title="Grup Sürüşü" variant="ghost" icon="account-group" onPress={() => navigation.navigate('GroupJoin')} />
+          </>
         )}
       </Card>
     </View>
