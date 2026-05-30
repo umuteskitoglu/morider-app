@@ -35,6 +35,7 @@ export default function RouteDetailScreen({ route, navigation }: Props) {
   const [ratingCount, setRatingCount] = useState(0);
   const [myRating, setMyRating] = useState(0);
   const [deleting, setDeleting] = useState(false);
+  const [startingGroup, setStartingGroup] = useState(false);
   const mapRef = useRef<MapView | null>(null);
 
   const isOwner = user?.id === ownerId;
@@ -81,6 +82,18 @@ export default function RouteDetailScreen({ route, navigation }: Props) {
 
   function rideThisRoute() {
     navigation.getParent<BottomTabNavigationProp<AppTabParams>>()?.navigate('Ride', { followRouteId: id });
+  }
+
+  async function startGroupRide() {
+    try {
+      setStartingGroup(true);
+      const { data } = await api.post('/api/sessions', { route_id: id });
+      navigation.navigate('GroupRide', { code: data.code });
+    } catch (err) {
+      Alert.alert('Başlatılamadı', errorMessage(err));
+    } finally {
+      setStartingGroup(false);
+    }
   }
 
   async function rate(score: number) {
@@ -153,6 +166,8 @@ export default function RouteDetailScreen({ route, navigation }: Props) {
 
         <View style={{ height: spacing.md }} />
         <Button title="Bu Rotada Sür" icon="motorbike" onPress={rideThisRoute} />
+        <View style={{ height: spacing.sm }} />
+        <Button title="Grup Sürüşü Başlat" variant="ghost" icon="account-group" onPress={startGroupRide} loading={startingGroup} />
         {isOwner ? (
           <>
             <View style={{ height: spacing.sm }} />

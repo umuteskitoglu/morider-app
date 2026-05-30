@@ -72,6 +72,15 @@ Endpoint'ler (hepsi korumalı):
 
 > En karmaşık faz. **Arkadaşlık (Faz 4) önce bitmeli** (davet/katılım izinleri için). Mevcut telemetry WS + NATS fan-out deseni temel alınır.
 
+> **Durum: Uygulandı.** Migration `0010_ride_sessions.sql` (0009 follows'a gittiği için). Servis:
+> `internal/telemetry`'ye `sessions.go` (REST + WS) + `hub.go` (NATS/in-memory fan-out) eklendi;
+> `pkg/events`'e `SubjectSessionPositions` + `LivePosition`. Gateway `/api/sessions` → telemetry.
+> **Katılım izni = karşılıklı takip** (host ile mutual follow) — `joinSession` `areMutual` ile zorlar.
+> Mobil: `GroupJoinScreen` (oluştur/kodla katıl) + `GroupRideScreen` (canlı harita, WS, katılımcı
+> marker'ları, host "Bitir" / "Ayrıl"). Giriş: RotalarIM başlığında grup ikonu + RotaDetay "Grup
+> Sürüşü Başlat". Doğrulandı: create/join/get, mutual-follow 403, WS fan-out, non-participant 403,
+> host-only end, ended→409.
+
 ### 5.1 Veri modeli — `migrations/0009_ride_sessions.sql`
 - [ ] `ride_sessions (id BIGSERIAL PK, code TEXT UNIQUE, host_id BIGINT FK users, route_id BIGINT FK routes NULL, status TEXT in ('active','ended'), created_at, ended_at NULL)`.
 - [ ] `session_participants (session_id BIGINT FK, user_id BIGINT FK, joined_at, PRIMARY KEY(session_id, user_id))`.

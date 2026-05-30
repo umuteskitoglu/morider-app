@@ -32,6 +32,7 @@ func Run(cfg config.Config) error {
 	} else {
 		h.nats = nc
 	}
+	h.hub = newSessionHub(h.nats)
 
 	registerRoutes(deps, h)
 	return deps.Run(config.ResolvePort("TELEMETRY_PORT", "8086"))
@@ -43,11 +44,24 @@ func registerRoutes(d *server.Deps, h *handler) {
 	g.POST("", d.JWT.Middleware(), h.batch)
 	// WebSocket auth uses ?token= because browsers cannot set custom headers.
 	g.GET("/ws", h.ws)
+
+	// Live group ride sessions. REST endpoints use the bearer header; the
+	// WebSocket uses ?token= (browsers cannot set custom headers), so JWT is
+	// applied per-route rather than on the whole group.
+	s := d.Engine.Group("/api/sessions")
+	jwt := d.JWT.Middleware()
+	s.POST("", jwt, h.createSession)
+	s.GET("/:code", jwt, h.getSession)
+	s.POST("/:code/join", jwt, h.joinSession)
+	s.POST("/:code/leave", jwt, h.leaveSession)
+	s.POST("/:code/end", jwt, h.endSession)
+	s.GET("/:code/ws", h.sessionWS)
 }
 
 type handler struct {
 	d    *server.Deps
 	nats *nats.Conn
+	hub  *sessionHub
 }
 
 // Point is a single GPS sample.

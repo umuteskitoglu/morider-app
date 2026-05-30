@@ -29,6 +29,7 @@ func Run(cfg config.Config) error {
 		{"/api/rewards", cfg.RewardURL},
 		{"/api/leaderboard", cfg.RewardURL},
 		{"/api/telemetry", cfg.TelemetryURL},
+		{"/api/sessions", cfg.TelemetryURL},
 		{"/api/feed", cfg.FeedURL},
 		{"/api/posts", cfg.FeedURL},
 	}

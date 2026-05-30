@@ -16,6 +16,8 @@ import RoutesScreen from '../screens/RoutesScreen';
 import ExploreScreen from '../screens/ExploreScreen';
 import RouteCreateScreen from '../screens/RouteCreateScreen';
 import RouteDetailScreen from '../screens/RouteDetailScreen';
+import GroupJoinScreen from '../screens/GroupJoinScreen';
+import GroupRideScreen from '../screens/GroupRideScreen';
 import FeedScreen from '../screens/FeedScreen';
 import CreatePostScreen from '../screens/CreatePostScreen';
 import LocationPickerScreen from '../screens/LocationPickerScreen';
@@ -34,6 +36,8 @@ export type RoutesStackParams = {
   Explore: undefined;
   RouteCreate: undefined;
   RouteDetail: { id: number; name: string };
+  GroupJoin: undefined;
+  GroupRide: { code: string };
 };
 
 export type FeedStackParams = {
@@ -125,15 +129,22 @@ function RoutesNavigator() {
         options={({ navigation }) => ({
           title: 'Rotalarım',
           headerRight: () => (
-            <Pressable onPress={() => navigation.navigate('Explore')} hitSlop={12} style={{ marginRight: spacing.sm }}>
-              <MaterialCommunityIcons name="compass-outline" size={24} color={colors.primary} />
-            </Pressable>
+            <View style={{ flexDirection: 'row', gap: spacing.md, marginRight: spacing.sm }}>
+              <Pressable onPress={() => navigation.navigate('GroupJoin')} hitSlop={12}>
+                <MaterialCommunityIcons name="account-group" size={24} color={colors.primary} />
+              </Pressable>
+              <Pressable onPress={() => navigation.navigate('Explore')} hitSlop={12}>
+                <MaterialCommunityIcons name="compass-outline" size={24} color={colors.primary} />
+              </Pressable>
+            </View>
           ),
         })}
       />
       <RoutesStack.Screen name="Explore" component={ExploreScreen} options={{ title: 'Keşfet' }} />
       <RoutesStack.Screen name="RouteCreate" component={RouteCreateScreen} options={{ title: 'Yeni Rota' }} />
       <RoutesStack.Screen name="RouteDetail" component={RouteDetailScreen} options={{ title: 'Rota' }} />
+      <RoutesStack.Screen name="GroupJoin" component={GroupJoinScreen} options={{ title: 'Grup Sürüşü' }} />
+      <RoutesStack.Screen name="GroupRide" component={GroupRideScreen} options={{ title: 'Grup Sürüşü' }} />
     </RoutesStack.Navigator>
   );
 }
