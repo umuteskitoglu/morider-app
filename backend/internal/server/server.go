@@ -55,7 +55,7 @@ func assemble(name string, cfg config.Config, log zerolog.Logger, pool *pgxpool.
 	engine.Use(gin.Recovery())
 	engine.Use(m.Middleware())
 	engine.Use(requestLogger(log))
-	engine.Use(ratelimit.Middleware(rate.Limit(50), 100))
+	engine.Use(ratelimit.Middleware(rate.Limit(cfg.RateLimitRPS), cfg.RateLimitBurst))
 	m.Expose(engine)
 	httpx.Health(engine, name)
 
