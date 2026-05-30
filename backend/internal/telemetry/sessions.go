@@ -427,10 +427,15 @@ func (h *handler) removeParticipant(c *gin.Context, ban bool) {
 		return
 	}
 
-	if _, err := h.d.DB.Exec(c,
+	tag, err := h.d.DB.Exec(c,
 		`DELETE FROM session_participants WHERE session_id = $1 AND user_id = $2`,
-		sessionID, req.UserID); err != nil {
+		sessionID, req.UserID)
+	if err != nil {
 		httpx.Internal(c, "could not remove participant")
+		return
+	}
+	if tag.RowsAffected() == 0 {
+		httpx.BadRequest(c, "user is not a participant")
 		return
 	}
 	if ban {
