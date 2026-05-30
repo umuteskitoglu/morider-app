@@ -68,6 +68,22 @@ func TestEvaluate(t *testing.T) {
 			want:   []string{"first_ride", "speedster_100"},
 			absent: []string{"speedster_140"},
 		},
+		{
+			name:   "first group ride in a pair",
+			stats:  Stats{GroupRideCount: 1, MaxGroupSize: 2},
+			want:   []string{"group_first"},
+			absent: []string{"group_5", "pack_5"},
+		},
+		{
+			name:  "many group rides in big packs",
+			stats: Stats{GroupRideCount: 20, MaxGroupSize: 10},
+			want:  []string{"group_first", "group_5", "group_20", "pack_5", "pack_10"},
+		},
+		{
+			name:   "solo session does not earn group badges",
+			stats:  Stats{GroupRideCount: 0, MaxGroupSize: 1},
+			absent: []string{"group_first", "pack_5"},
+		},
 	}
 
 	for _, tc := range cases {
