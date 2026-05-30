@@ -34,3 +34,15 @@ type LivePosition struct {
 	Speed     float64 `json:"speed"`
 	Ts        int64   `json:"ts"` // unix milliseconds
 }
+
+// SubjectSessionRoster is published by the telemetry service whenever a group
+// ride's participant set changes, and consumed by the reward service to award
+// group-ride badges to every current participant.
+const SubjectSessionRoster = "session.roster"
+
+// SessionRoster is the payload published on SubjectSessionRoster: the current
+// participant user IDs of a session.
+type SessionRoster struct {
+	SessionID      int64   `json:"session_id"`
+	ParticipantIDs []int64 `json:"participant_ids"`
+}

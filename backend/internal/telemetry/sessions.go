@@ -153,6 +153,8 @@ func (h *handler) joinSession(c *gin.Context) {
 		return
 	}
 	h.leaveOtherActiveSessions(c, me, sessionID)
+	// Roster grew → re-evaluate group-ride badges for the whole pack.
+	h.publishRoster(c, sessionID)
 	c.JSON(http.StatusOK, gin.H{"session_id": sessionID, "code": code})
 }
 
@@ -347,6 +349,30 @@ type targetReq struct {
 func (h *handler) publishControl(sessionID int64, payload gin.H) {
 	if data, err := json.Marshal(payload); err == nil {
 		h.hub.publish(sessionID, data)
+	}
+}
+
+// publishRoster announces a session's current participant set on NATS so the
+// reward service can award group-ride badges to the whole pack. Best effort and
+// a no-op without NATS.
+func (h *handler) publishRoster(ctx context.Context, sessionID int64) {
+	if h.nats == nil {
+		return
+	}
+	rows, err := h.d.DB.Query(ctx, `SELECT user_id FROM session_participants WHERE session_id = $1`, sessionID)
+	if err != nil {
+		return
+	}
+	ids := make([]int64, 0)
+	for rows.Next() {
+		var id int64
+		if err := rows.Scan(&id); err == nil {
+			ids = append(ids, id)
+		}
+	}
+	rows.Close()
+	if data, err := json.Marshal(events.SessionRoster{SessionID: sessionID, ParticipantIDs: ids}); err == nil {
+		_ = h.nats.Publish(events.SubjectSessionRoster, data)
 	}
 }
 
