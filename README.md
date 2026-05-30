@@ -1,38 +1,55 @@
 # Morider App
 
-Motosiklet tutkunları için **Strava benzeri** bir mobil uygulama: GPS ile sürüş takibi, rota planlama, topluluk paylaşımı ve ödül/rozet sistemi.
+Motosiklet tutkunları için **Strava + Instagram benzeri** bir mobil uygulama: GPS ile sürüş takibi, rota planlama ve paylaşımı, foto akışı, takip (follow) tabanlı sosyal ağ, **canlı grup sürüşü** ve ödül/rozet sistemi.
 
 Bu repo bir **monorepo**'dur:
 
 | Klasör | İçerik |
 |--------|--------|
-| [`backend/`](backend/) | Go (Gin) mikroservis backend — auth, user, ride, route, reward, telemetry + api-gateway |
+| [`backend/`](backend/) | Go (Gin) mikroservis backend — auth, user, ride, route, reward, telemetry, feed + api-gateway |
 | [`mobile/`](mobile/) | Expo (managed) React Native uygulaması |
-| [`docs/`](docs/) | Mimari, API tasarımı ve ER diyagram dokümanları |
+| [`docs/`](docs/) | Mimari, API tasarımı, sosyal özellikler ve ER diyagram dokümanları |
 | [`infra/`](infra/) | Monitoring / yardımcı altyapı konfigürasyonları |
+
+## Özellikler
+
+- **Sürüş takibi** — GPS ile canlı kayıt, mesafe/hız/rota; sürüş geçmişi.
+- **Rotalar** — rota oluştur (yol-takipli snap), görünürlük seç (gizli / herkese açık / arkadaşlar), kaydedilen bir rotada sür (haritada rehber çizgi), **kaydırarak silme**.
+- **Keşfet & puanlama** — herkese açık rotaları keşfet, 5 yıldız üzerinden puanla.
+- **Foto akışı** — Instagram tarzı çoklu-foto paylaşımları, beğeni & yorum, konum etiketi.
+- **Takip sistemi** — tek yönlü takip (profilden veya Keşfet'ten tek dokunuşla); `arkadaşlar` görünürlüğü = **karşılıklı takip**.
+- **Canlı grup sürüşü** — kod ile oturuma katıl, katılımcıların konumunu gerçek zamanlı ortak haritada gör (WebSocket + NATS fan-out). Host **moderasyonu** (at / banla / host devret), tek aktif oturum kuralı, otomatik yeniden bağlanma ve devam eden sürüşe geri dönme.
+- **Ödüller** — sürüşlere göre rozetler ve liderlik tablosu.
 
 ## Mimari (özet)
 
 ```mermaid
 flowchart TB
     MobileApp[Expo React Native App] -->|HTTPS| Gateway[API Gateway :8080]
+    MobileApp -. WebSocket .-> Telemetry
     Gateway --> Auth[auth :8081]
     Gateway --> User[user :8082]
     Gateway --> Ride[ride :8083]
     Gateway --> Route[route :8084]
     Gateway --> Reward[reward :8085]
     Gateway --> Telemetry[telemetry :8086]
+    Gateway --> Feed[feed :8087]
     Auth --> PG[(PostgreSQL + PostGIS)]
     User --> PG
     Ride --> PG
     Route --> PG
     Reward --> PG
     Telemetry --> PG
+    Feed --> PG
     Ride --> Redis[(Redis)]
-    Telemetry --> NATS[(NATS)]
+    Ride -->|ride.completed| NATS[(NATS)]
+    NATS --> Reward
+    Telemetry <-->|grup sürüşü konum fan-out| NATS
 ```
 
-Detaylar için [`docs/architecture.md`](docs/architecture.md).
+> **user** servisi `/api/follows` (takip), **telemetry** `/api/telemetry` (canlı GPS) + `/api/sessions` (grup sürüşü WebSocket), **feed** `/api/feed` + `/api/posts` (foto paylaşımları) rotalarını karşılar.
+
+Detaylar için [`docs/architecture.md`](docs/architecture.md) ve [`docs/social-features.md`](docs/social-features.md).
 
 ## Hızlı Başlangıç
 
