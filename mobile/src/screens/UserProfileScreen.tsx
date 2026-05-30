@@ -1,5 +1,5 @@
 import React, { useCallback, useLayoutEffect, useState } from 'react';
-import { Alert, Image, Pressable, RefreshControl, ScrollView, StyleSheet, Text, useWindowDimensions, View } from 'react-native';
+import { Image, Pressable, RefreshControl, ScrollView, StyleSheet, Text, useWindowDimensions, View } from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -7,13 +7,12 @@ import { MaterialCommunityIcons } from '@expo/vector-icons';
 
 import { FeedStackParams } from '../navigation/RootNavigator';
 import { PostDetail, DetailPost } from '../components/PostDetail';
-import { Button } from '../components/ui';
+import FollowButton from '../components/FollowButton';
 import { useAuth } from '../store/auth';
-import { api, apiBaseURL, errorMessage } from '../api/client';
+import { api, apiBaseURL } from '../api/client';
 import { colors, gradients, radius, shadow, spacing } from '../theme';
 
 type Badge = { id: number; type: string; description: string };
-type FriendState = 'none' | 'pending_out' | 'pending_in' | 'friends';
 type Props = NativeStackScreenProps<FeedStackParams, 'UserProfile'>;
 
 export default function UserProfileScreen({ route, navigation }: Props) {
@@ -24,8 +23,7 @@ export default function UserProfileScreen({ route, navigation }: Props) {
   const [badges, setBadges] = useState<Badge[]>([]);
   const [viewer, setViewer] = useState<DetailPost | null>(null);
   const [refreshing, setRefreshing] = useState(false);
-  const [friendState, setFriendState] = useState<FriendState>('none');
-  const [requestId, setRequestId] = useState<number | null>(null);
+  const [following, setFollowing] = useState(false);
 
   const isSelf = user?.id === userId;
 
@@ -41,37 +39,15 @@ export default function UserProfileScreen({ route, navigation }: Props) {
         api.get(`/api/feed/user/${userId}`),
         api.get(`/api/rewards/user/${userId}`),
       ];
-      if (!isSelf) reqs.push(api.get(`/api/friends/status/${userId}`));
+      if (!isSelf) reqs.push(api.get(`/api/follows/status/${userId}`));
       const [p, b, s] = await Promise.all(reqs);
       setPosts(p.data.posts ?? []);
       setBadges(b.data.rewards ?? []);
-      if (s) {
-        setFriendState(s.data.status ?? 'none');
-        setRequestId(s.data.request_id ?? null);
-      }
+      if (s) setFollowing(s.data.following ?? false);
     } catch {
       // ignore
     }
   }, [userId, isSelf]);
-
-  async function addFriend() {
-    try {
-      await api.post('/api/friends/requests', { user_id: userId });
-      setFriendState('pending_out');
-    } catch (err) {
-      Alert.alert('Gönderilemedi', errorMessage(err));
-    }
-  }
-
-  async function acceptFriend() {
-    if (!requestId) return;
-    try {
-      await api.post(`/api/friends/requests/${requestId}/accept`);
-      setFriendState('friends');
-    } catch (err) {
-      Alert.alert('Hata', errorMessage(err));
-    }
-  }
 
   useFocusEffect(
     useCallback(() => {
@@ -110,17 +86,8 @@ export default function UserProfileScreen({ route, navigation }: Props) {
           )}
         </LinearGradient>
 
-        {!isSelf && friendState === 'none' && (
-          <Button title="Arkadaş Ekle" icon="account-plus" onPress={addFriend} />
-        )}
-        {!isSelf && friendState === 'pending_out' && (
-          <Button title="İstek Gönderildi" variant="ghost" icon="clock-outline" disabled onPress={() => {}} />
-        )}
-        {!isSelf && friendState === 'pending_in' && (
-          <Button title="İsteği Kabul Et" icon="account-check" onPress={acceptFriend} />
-        )}
-        {!isSelf && friendState === 'friends' && (
-          <Button title="Arkadaşsınız" variant="ghost" icon="check" disabled onPress={() => {}} />
+        {!isSelf && (
+          <FollowButton userId={userId} following={following} onChange={setFollowing} />
         )}
 
         {posts.length === 0 ? (
