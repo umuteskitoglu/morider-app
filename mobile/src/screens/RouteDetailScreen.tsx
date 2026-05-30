@@ -81,14 +81,18 @@ export default function RouteDetailScreen({ route, navigation }: Props) {
   );
 
   function rideThisRoute() {
-    navigation.getParent<BottomTabNavigationProp<AppTabParams>>()?.navigate('Ride', { followRouteId: id });
+    navigation
+      .getParent<BottomTabNavigationProp<AppTabParams>>()
+      ?.navigate('Ride', { screen: 'RideMain', params: { followRouteId: id } });
   }
 
   async function startGroupRide() {
     try {
       setStartingGroup(true);
       const { data } = await api.post('/api/sessions', { route_id: id });
-      navigation.navigate('GroupRide', { code: data.code });
+      navigation
+        .getParent<BottomTabNavigationProp<AppTabParams>>()
+        ?.navigate('Ride', { screen: 'GroupRide', params: { code: data.code } });
     } catch (err) {
       Alert.alert('Başlatılamadı', errorMessage(err));
     } finally {
