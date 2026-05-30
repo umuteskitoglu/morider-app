@@ -36,6 +36,9 @@ func Run(cfg config.Config) error {
 		if _, err := nc.Subscribe(events.SubjectRideCompleted, h.onRideCompleted); err != nil {
 			deps.Log.Error().Err(err).Msg("could not subscribe to ride.completed")
 		}
+		if _, err := nc.Subscribe(events.SubjectSessionRoster, h.onSessionRoster); err != nil {
+			deps.Log.Error().Err(err).Msg("could not subscribe to session.roster")
+		}
 	}
 
 	registerRoutes(deps, h)

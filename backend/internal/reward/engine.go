@@ -23,6 +23,34 @@ func (h *handler) onRideCompleted(msg *nats.Msg) {
 	h.evaluateAndAward(context.Background(), evt.UserID)
 }
 
+// onSessionRoster is the NATS handler for session.roster events. A session with
+// 2+ riders is a real group ride: it durably logs each participant (keeping the
+// largest pack size seen) and re-evaluates their badges so the whole pack earns
+// them as the group grows. Re-reading each rider's stats keeps it idempotent.
+func (h *handler) onSessionRoster(msg *nats.Msg) {
+	var evt events.SessionRoster
+	if err := json.Unmarshal(msg.Data, &evt); err != nil {
+		h.d.Log.Error().Err(err).Msg("invalid session.roster event")
+		return
+	}
+	size := len(evt.ParticipantIDs)
+	if size < 2 {
+		return // a solo session isn't a group ride
+	}
+	ctx := context.Background()
+	for _, uid := range evt.ParticipantIDs {
+		if _, err := h.d.DB.Exec(ctx,
+			`INSERT INTO group_ride_logs (user_id, session_id, size) VALUES ($1, $2, $3)
+			 ON CONFLICT (user_id, session_id) DO UPDATE SET size = GREATEST(group_ride_logs.size, EXCLUDED.size)`,
+			uid, evt.SessionID, size,
+		); err != nil {
+			h.d.Log.Error().Err(err).Int64("user_id", uid).Msg("could not log group ride")
+			continue
+		}
+		h.evaluateAndAward(ctx, uid)
+	}
+}
+
 // evaluateAndAward loads the rider's stats, runs the rules and persists any
 // newly earned badges. Existing badges are left untouched (ON CONFLICT).
 func (h *handler) evaluateAndAward(ctx context.Context, userID int64) {
@@ -85,5 +113,13 @@ func (h *handler) statsFor(ctx context.Context, userID int64) (Stats, error) {
 	s.LongestStreak = LongestStreak(days)
 	s.BestWeekDistance = BestWeekDistance(points)
 	s.BestMonthDistance = BestMonthDistance(points)
+
+	// Group-ride metrics from the durable participation log: how many group rides
+	// (2+ riders) this rider has joined, and the largest pack they rode in.
+	if err := h.d.DB.QueryRow(ctx,
+		`SELECT COUNT(*), COALESCE(MAX(size), 0) FROM group_ride_logs WHERE user_id = $1`, userID,
+	).Scan(&s.GroupRideCount, &s.MaxGroupSize); err != nil {
+		return s, err
+	}
 	return s, nil
 }
