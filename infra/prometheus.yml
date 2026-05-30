@@ -1,6 +1,5 @@
-# Basic Prometheus scrape config for the Morider services.
-# Add a /metrics endpoint (e.g. with prometheus/client_golang) to each service
-# to make these targets meaningful.
+# Prometheus scrape config for the Morider services. Each service exposes
+# /metrics via pkg/metrics (prometheus/client_golang). Grafana reads from here.
 global:
   scrape_interval: 15s
 
@@ -15,3 +14,4 @@ scrape_configs:
           - "route:8084"
           - "reward:8085"
           - "telemetry:8086"
+          - "feed:8087"

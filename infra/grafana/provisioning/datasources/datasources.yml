@@ -1,0 +1,29 @@
+# Auto-provisioned Grafana datasources. Loaded on every Grafana start.
+apiVersion: 1
+
+datasources:
+  # Service metrics scraped from each backend's /metrics endpoint.
+  - name: Prometheus
+    type: prometheus
+    uid: prometheus
+    access: proxy
+    url: http://prometheus:9090
+    isDefault: true
+    editable: false
+
+  # The app database, queried read-only for per-user activity dashboards.
+  # Credentials come from the env vars set on the grafana container.
+  - name: Postgres
+    type: postgres
+    uid: postgres
+    access: proxy
+    url: postgres:5432
+    database: $POSTGRES_DB
+    user: $POSTGRES_USER
+    secureJsonData:
+      password: $POSTGRES_PASSWORD
+    jsonData:
+      sslmode: disable
+      postgresVersion: 1600
+      timescaledb: false
+    editable: false

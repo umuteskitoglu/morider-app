@@ -23,6 +23,10 @@ type Config struct {
 	JWTSecret string
 	JWTTTL    time.Duration
 
+	// Per-client-IP rate limit applied by every service (token bucket).
+	RateLimitRPS   float64
+	RateLimitBurst int
+
 	// Routing engine (OSRM-compatible) used by the route service.
 	RoutingURL     string
 	RoutingProfile string
@@ -52,6 +56,9 @@ func Load() Config {
 
 		JWTSecret: getEnv("JWT_SECRET", defaultJWTSecret),
 		JWTTTL:    time.Duration(ttlHours) * time.Hour,
+
+		RateLimitRPS:   getFloat("RATE_LIMIT_RPS", 50),
+		RateLimitBurst: getInt("RATE_LIMIT_BURST", 100),
 
 		RoutingURL:     getEnv("ROUTING_URL", "https://router.project-osrm.org"),
 		RoutingProfile: getEnv("ROUTING_PROFILE", "driving"),
@@ -94,6 +101,15 @@ func getEnv(key, fallback string) string {
 func getInt(key string, fallback int) int {
 	if v, ok := os.LookupEnv(key); ok && v != "" {
 		if n, err := strconv.Atoi(v); err == nil {
+			return n
+		}
+	}
+	return fallback
+}
+
+func getFloat(key string, fallback float64) float64 {
+	if v, ok := os.LookupEnv(key); ok && v != "" {
+		if n, err := strconv.ParseFloat(v, 64); err == nil {
 			return n
 		}
 	}

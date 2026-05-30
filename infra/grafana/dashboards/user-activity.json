@@ -1,0 +1,122 @@
+{
+  "uid": "morider-activity",
+  "title": "Morider — Kullanıcı Aktivitesi",
+  "tags": ["morider", "activity"],
+  "timezone": "browser",
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "1m",
+  "time": { "from": "now-30d", "to": "now" },
+  "panels": [
+    {
+      "id": 1,
+      "title": "Toplam kullanıcı",
+      "type": "stat",
+      "gridPos": { "h": 4, "w": 6, "x": 0, "y": 0 },
+      "datasource": { "type": "postgres", "uid": "postgres" },
+      "targets": [
+        { "refId": "A", "format": "table", "rawSql": "SELECT count(*) AS value FROM users;" }
+      ]
+    },
+    {
+      "id": 2,
+      "title": "Toplam sürüş",
+      "type": "stat",
+      "gridPos": { "h": 4, "w": 6, "x": 6, "y": 0 },
+      "datasource": { "type": "postgres", "uid": "postgres" },
+      "targets": [
+        { "refId": "A", "format": "table", "rawSql": "SELECT count(*) AS value FROM rides;" }
+      ]
+    },
+    {
+      "id": 3,
+      "title": "Toplam paylaşım",
+      "type": "stat",
+      "gridPos": { "h": 4, "w": 6, "x": 12, "y": 0 },
+      "datasource": { "type": "postgres", "uid": "postgres" },
+      "targets": [
+        { "refId": "A", "format": "table", "rawSql": "SELECT count(*) AS value FROM posts;" }
+      ]
+    },
+    {
+      "id": 4,
+      "title": "Toplam takip ilişkisi",
+      "type": "stat",
+      "gridPos": { "h": 4, "w": 6, "x": 18, "y": 0 },
+      "datasource": { "type": "postgres", "uid": "postgres" },
+      "targets": [
+        { "refId": "A", "format": "table", "rawSql": "SELECT count(*) AS value FROM follows;" }
+      ]
+    },
+    {
+      "id": 5,
+      "title": "Yeni kayıtlar (günlük)",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 8, "x": 0, "y": 4 },
+      "datasource": { "type": "postgres", "uid": "postgres" },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "time_series",
+          "rawSql": "SELECT $__timeGroupAlias(created_at, '1d'), count(*) AS \"yeni kullanıcı\" FROM users WHERE $__timeFilter(created_at) GROUP BY 1 ORDER BY 1;"
+        }
+      ]
+    },
+    {
+      "id": 6,
+      "title": "Sürüşler (günlük)",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 8, "x": 8, "y": 4 },
+      "datasource": { "type": "postgres", "uid": "postgres" },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "time_series",
+          "rawSql": "SELECT $__timeGroupAlias(created_at, '1d'), count(*) AS \"sürüş\" FROM rides WHERE $__timeFilter(created_at) GROUP BY 1 ORDER BY 1;"
+        }
+      ]
+    },
+    {
+      "id": 7,
+      "title": "Paylaşımlar (günlük)",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 8, "x": 16, "y": 4 },
+      "datasource": { "type": "postgres", "uid": "postgres" },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "time_series",
+          "rawSql": "SELECT $__timeGroupAlias(created_at, '1d'), count(*) AS \"paylaşım\" FROM posts WHERE $__timeFilter(created_at) GROUP BY 1 ORDER BY 1;"
+        }
+      ]
+    },
+    {
+      "id": 8,
+      "title": "En aktif kullanıcılar (seçili dönem)",
+      "type": "table",
+      "gridPos": { "h": 10, "w": 12, "x": 0, "y": 12 },
+      "datasource": { "type": "postgres", "uid": "postgres" },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "table",
+          "rawSql": "SELECT u.name AS \"kullanıcı\", u.email, count(DISTINCT r.id) AS \"sürüş\", count(DISTINCT p.id) AS \"paylaşım\", round(coalesce(sum(DISTINCT r.distance),0)::numeric/1000, 1) AS \"km\" FROM users u LEFT JOIN rides r ON r.user_id = u.id AND $__timeFilter(r.created_at) LEFT JOIN posts p ON p.user_id = u.id AND $__timeFilter(p.created_at) GROUP BY u.id, u.name, u.email ORDER BY \"sürüş\" DESC, \"paylaşım\" DESC LIMIT 50;"
+        }
+      ]
+    },
+    {
+      "id": 9,
+      "title": "Son aktiviteler (kim ne yaptı)",
+      "type": "table",
+      "gridPos": { "h": 10, "w": 12, "x": 12, "y": 12 },
+      "datasource": { "type": "postgres", "uid": "postgres" },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "table",
+          "rawSql": "SELECT t.created_at AS \"zaman\", u.name AS \"kullanıcı\", t.eylem, t.detay FROM ( SELECT r.created_at, r.user_id, 'sürüş' AS eylem, ('mesafe ' || round((r.distance/1000)::numeric,1) || ' km') AS detay FROM rides r UNION ALL SELECT p.created_at, p.user_id, 'paylaşım' AS eylem, coalesce(p.location_name, p.caption, '') AS detay FROM posts p UNION ALL SELECT f.created_at, f.follower_id, 'takip' AS eylem, ('kullanıcı #' || f.followee_id || ' takip edildi') AS detay FROM follows f UNION ALL SELECT rw.awarded_at, rw.user_id, 'rozet' AS eylem, rw.type AS detay FROM rewards rw ) t JOIN users u ON u.id = t.user_id WHERE $__timeFilter(t.created_at) ORDER BY t.created_at DESC LIMIT 100;"
+        }
+      ]
+    }
+  ]
+}
