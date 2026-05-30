@@ -1,0 +1,154 @@
+{
+  "uid": "morider-perf",
+  "title": "Morider — Servis Performansı",
+  "tags": ["morider", "performance"],
+  "timezone": "browser",
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "30s",
+  "time": { "from": "now-6h", "to": "now" },
+  "templating": {
+    "list": [
+      {
+        "name": "service",
+        "label": "Servis",
+        "type": "query",
+        "datasource": { "type": "prometheus", "uid": "prometheus" },
+        "query": "label_values(http_requests_total, service)",
+        "includeAll": true,
+        "multi": true,
+        "current": { "text": "All", "value": "$__all" }
+      }
+    ]
+  },
+  "panels": [
+    {
+      "id": 1,
+      "title": "İstek hızı (req/s) — servise göre",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 0 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "unit": "reqps" }, "overrides": [] },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (service) (rate(http_requests_total{service=~\"$service\"}[5m]))",
+          "legendFormat": "{{service}}"
+        }
+      ]
+    },
+    {
+      "id": 2,
+      "title": "Hata oranı (5xx %) — servise göre",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 0 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "red", "value": 0.05 }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (service) (rate(http_requests_total{service=~\"$service\",status=~\"5..\"}[5m])) / clamp_min(sum by (service) (rate(http_requests_total{service=~\"$service\"}[5m])), 0.0001)",
+          "legendFormat": "{{service}}"
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "title": "Gecikme p95 (s) — servise göre",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 8 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "unit": "s" }, "overrides": [] },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "histogram_quantile(0.95, sum by (service, le) (rate(http_request_duration_seconds_bucket{service=~\"$service\"}[5m])))",
+          "legendFormat": "{{service}}"
+        }
+      ]
+    },
+    {
+      "id": 4,
+      "title": "Gecikme p99 (s) — servise göre",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 8 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "unit": "s" }, "overrides": [] },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "histogram_quantile(0.99, sum by (service, le) (rate(http_request_duration_seconds_bucket{service=~\"$service\"}[5m])))",
+          "legendFormat": "{{service}}"
+        }
+      ]
+    },
+    {
+      "id": 7,
+      "title": "Reddedilen / hatalı istekler (4xx & 429) — servise göre",
+      "type": "timeseries",
+      "description": "429 = rate limit; diğer 4xx = yetkisiz/bulunamadı vb. Yük altında rate limiter'ın ne kadar reddettiğini buradan görürsün.",
+      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 24 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "unit": "reqps" }, "overrides": [] },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (service) (rate(http_requests_total{service=~\"$service\",status=\"429\"}[5m]))",
+          "legendFormat": "{{service}} 429 (rate limit)"
+        },
+        {
+          "refId": "B",
+          "expr": "sum by (service) (rate(http_requests_total{service=~\"$service\",status=~\"4..\",status!=\"429\"}[5m]))",
+          "legendFormat": "{{service}} diğer 4xx"
+        }
+      ]
+    },
+    {
+      "id": 5,
+      "title": "En çok çağrılan endpoint'ler (5m hız)",
+      "type": "table",
+      "gridPos": { "h": 9, "w": 12, "x": 0, "y": 16 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "table",
+          "instant": true,
+          "expr": "topk(15, sum by (service, method, path) (rate(http_requests_total{service=~\"$service\"}[5m])))"
+        }
+      ],
+      "transformations": [
+        { "id": "labelsToFields", "options": {} },
+        { "id": "organize", "options": { "excludeByName": { "Time": true }, "renameByName": { "Value": "req/s" } } }
+      ]
+    },
+    {
+      "id": 6,
+      "title": "Bellek kullanımı (RSS) — instance'a göre",
+      "type": "timeseries",
+      "description": "process_resident_memory_bytes Go/process collector'dan gelir ve service label'ı taşımaz; instance (host:port) ile ayrışır.",
+      "gridPos": { "h": 9, "w": 12, "x": 12, "y": 16 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": { "defaults": { "unit": "bytes" }, "overrides": [] },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "process_resident_memory_bytes",
+          "legendFormat": "{{instance}}"
+        }
+      ]
+    }
+  ]
+}

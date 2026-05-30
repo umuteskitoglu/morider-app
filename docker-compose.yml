@@ -51,6 +51,30 @@ services:
       - "9090:9090"
     restart: unless-stopped
 
+  # Dashboards over Prometheus (service health/latency/error rate) and over
+  # Postgres directly (per-user activity). Datasources and dashboards are
+  # provisioned from infra/grafana, so no manual setup is needed after boot.
+  grafana:
+    image: grafana/grafana:11.2.0
+    environment:
+      GF_SECURITY_ADMIN_USER: ${GRAFANA_ADMIN_USER:-admin}
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-admin}
+      GF_USERS_ALLOW_SIGN_UP: "false"
+      # Read by the provisioned Postgres datasource (infra/grafana/...).
+      POSTGRES_USER: ${POSTGRES_USER:-morider}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-morider_secret}
+      POSTGRES_DB: ${POSTGRES_DB:-morider}
+    volumes:
+      - ./infra/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./infra/grafana/dashboards:/var/lib/grafana/dashboards:ro
+      - grafana-data:/var/lib/grafana
+    ports:
+      - "3000:3000"
+    restart: unless-stopped
+    depends_on:
+      - prometheus
+      - postgres
+
   # Self-hosted routing engine. Opt-in: only starts under the "routing" profile,
   # and needs preprocessed data (run `make osrm-data` first). To use it, set
   # ROUTING_URL=http://osrm:5000 in .env. See docs/routing.md.
@@ -129,3 +153,4 @@ services:
 volumes:
   pgdata:
   uploads:
+  grafana-data:
