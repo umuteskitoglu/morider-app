@@ -64,9 +64,16 @@ export default function GroupRideScreen({ route, navigation }: Props) {
     [participants],
   );
 
-  const loadSession = useCallback(async () => {
+  const loadSession = useCallback(async (fit = true) => {
     try {
       const { data } = await api.get(`/api/sessions/${code}`);
+      // Don't sit on a dead session: if it ended (or we're gone), bail out.
+      if (data.status && data.status !== 'active') {
+        closed.current = true;
+        Alert.alert('Grup sürüşü bitti', 'Bu sürüş artık aktif değil.');
+        navigation.goBack();
+        return;
+      }
       setParticipants(data.participants ?? []);
       setHostId(data.host_id ?? null);
       const pts: Coord[] = (data.route_points ?? []).map((p: { lat: number; lon: number }) => ({
@@ -75,7 +82,7 @@ export default function GroupRideScreen({ route, navigation }: Props) {
       }));
       setRoutePath(pts);
       hasRoute.current = pts.length > 1;
-      if (pts.length > 1) {
+      if (fit && pts.length > 1) {
         setTimeout(
           () => mapRef.current?.fitToCoordinates(pts, { edgePadding: { top: 100, right: 60, bottom: 240, left: 60 }, animated: true }),
           400,
@@ -109,7 +116,7 @@ export default function GroupRideScreen({ route, navigation }: Props) {
         return;
       }
       const delay = Math.min(1000 * reconnectAttempts.current, 5000);
-      reconnectTimer.current = setTimeout(() => connectWS(), delay);
+      reconnectTimer.current = setTimeout(() => reconnect(), delay);
     };
     socket.onmessage = (e) => {
       try {
@@ -170,6 +177,27 @@ export default function GroupRideScreen({ route, navigation }: Props) {
     };
   }, [code]);
 
+  // Before reconnecting, make sure the session is still joinable. A permanent
+  // failure (ended session, or we were kicked/banned while disconnected) returns
+  // 200-not-active / not-a-participant — stop retrying and leave instead of
+  // hammering the server. A network error just retries the socket.
+  async function reconnect() {
+    if (closed.current) return;
+    try {
+      const { data } = await api.get(`/api/sessions/${code}`);
+      const stillIn = (data.participants ?? []).some((p: Participant) => p.id === user?.id);
+      if (data.status !== 'active' || !stillIn) {
+        closed.current = true;
+        Alert.alert('Grup sürüşü', 'Bu sürüşe artık bağlı değilsin.');
+        navigation.goBack();
+        return;
+      }
+    } catch {
+      // couldn't verify (likely transient/offline) → just try the socket again
+    }
+    connectWS();
+  }
+
   // Ask for location permission once and stream our own GPS over whatever socket
   // is currently open (ws.current is swapped on reconnect).
   const startLocationWatch = useCallback(async () => {
@@ -179,11 +207,13 @@ export default function GroupRideScreen({ route, navigation }: Props) {
       return;
     }
 
+    if (closed.current) return;
+
     // Snap the map onto the rider straight away (like the solo ride screen),
     // unless a target route is set — then loadSession fits to the route.
     centerOnUser();
 
-    locSub.current = await Location.watchPositionAsync(
+    const sub = await Location.watchPositionAsync(
       { accuracy: Location.Accuracy.High, distanceInterval: 5, timeInterval: 3000 },
       (loc) => {
         const coord = { latitude: loc.coords.latitude, longitude: loc.coords.longitude };
@@ -202,6 +232,13 @@ export default function GroupRideScreen({ route, navigation }: Props) {
         }
       },
     );
+    // If the screen was torn down while we awaited, drop the fresh subscription
+    // so the GPS watch doesn't leak past the screen's lifetime.
+    if (closed.current) {
+      sub.remove();
+      return;
+    }
+    locSub.current = sub;
   }, []);
 
   // Center the map on the rider's current position (no-op if a route is loaded).
@@ -233,19 +270,31 @@ export default function GroupRideScreen({ route, navigation }: Props) {
       if (reconnectTimer.current) clearTimeout(reconnectTimer.current);
       locSub.current?.remove();
       locSub.current = null;
-      ws.current?.close();
-      ws.current = null;
+      detachSocket();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [code]);
+
+  // Close the socket after detaching its handlers, so a stale onclose from a
+  // socket we're discarding can't schedule a reconnect to the old session.
+  function detachSocket() {
+    const s = ws.current;
+    if (s) {
+      s.onopen = null;
+      s.onclose = null;
+      s.onmessage = null;
+      s.onerror = null;
+      s.close();
+    }
+    ws.current = null;
+  }
 
   function teardown() {
     closed.current = true;
     if (reconnectTimer.current) clearTimeout(reconnectTimer.current);
     locSub.current?.remove();
     locSub.current = null;
-    ws.current?.close();
-    ws.current = null;
+    detachSocket();
   }
 
   async function shareCode() {
@@ -397,7 +446,7 @@ export default function GroupRideScreen({ route, navigation }: Props) {
           <Pressable
             style={styles.countWrap}
             onPress={() => {
-              loadSession();
+              loadSession(false); // refresh the roster without re-fitting the map
               setShowParticipants(true);
             }}
             hitSlop={8}
