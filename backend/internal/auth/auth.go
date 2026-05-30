@@ -55,10 +55,11 @@ type authResp struct {
 }
 
 type user struct {
-	ID      int64  `json:"id"`
-	Name    string `json:"name"`
-	Email   string `json:"email"`
-	Country string `json:"country"`
+	ID        int64  `json:"id"`
+	Name      string `json:"name"`
+	Email     string `json:"email"`
+	Country   string `json:"country"`
+	AvatarURL string `json:"avatar_url"`
 }
 
 func (h *handler) signup(c *gin.Context) {
@@ -78,9 +79,9 @@ func (h *handler) signup(c *gin.Context) {
 	err = h.d.DB.QueryRow(c,
 		`INSERT INTO users (name, email, password_hash, country)
 		 VALUES ($1, $2, $3, $4)
-		 RETURNING id, name, email, COALESCE(country, '')`,
+		 RETURNING id, name, email, COALESCE(country, ''), COALESCE(avatar_url, '')`,
 		req.Name, req.Email, string(hash), req.Country,
-	).Scan(&u.ID, &u.Name, &u.Email, &u.Country)
+	).Scan(&u.ID, &u.Name, &u.Email, &u.Country, &u.AvatarURL)
 	if err != nil {
 		var pgErr *pgconn.PgError
 		if errors.As(err, &pgErr) && pgErr.Code == "23505" { // unique_violation
@@ -106,9 +107,9 @@ func (h *handler) login(c *gin.Context) {
 		hash string
 	)
 	err := h.d.DB.QueryRow(c,
-		`SELECT id, name, email, COALESCE(country, ''), password_hash
+		`SELECT id, name, email, COALESCE(country, ''), COALESCE(avatar_url, ''), password_hash
 		 FROM users WHERE email = $1`, req.Email,
-	).Scan(&u.ID, &u.Name, &u.Email, &u.Country, &hash)
+	).Scan(&u.ID, &u.Name, &u.Email, &u.Country, &u.AvatarURL, &hash)
 	if errors.Is(err, pgx.ErrNoRows) {
 		httpx.Error(c, http.StatusUnauthorized, "invalid credentials")
 		return

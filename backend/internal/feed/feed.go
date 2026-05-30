@@ -50,6 +50,7 @@ func registerRoutes(d *server.Deps, h *handler) {
 	g := d.Engine.Group("/api", d.JWT.Middleware())
 	g.GET("/feed", h.list)
 	g.GET("/feed/user/:uid", h.userPosts)
+	g.POST("/feed/avatar", h.uploadAvatar)
 	g.GET("/posts/mine", h.mine)
 	g.POST("/posts", h.create)
 	g.POST("/posts/:id/like", h.like)
@@ -164,6 +165,31 @@ func (h *handler) create(c *gin.Context) {
 	post.Photos = urls
 	post.Author = authpkg.Email(c) // best-effort; list endpoint returns the real name
 	c.JSON(http.StatusCreated, post)
+}
+
+// uploadAvatar stores a single (already client-cropped) profile photo and returns
+// its public media URL. The caller persists that URL on their user record via
+// the user service. Reuses the same storage and public /media/ serving as posts.
+func (h *handler) uploadAvatar(c *gin.Context) {
+	fh, err := c.FormFile("photo")
+	if err != nil {
+		httpx.BadRequest(c, "a photo is required")
+		return
+	}
+	if fh.Size > maxPhotoBytes {
+		httpx.BadRequest(c, "photo too large (max 10MB)")
+		return
+	}
+	if ct := fh.Header.Get("Content-Type"); ct != "" && !strings.HasPrefix(ct, "image/") {
+		httpx.BadRequest(c, "only image files are allowed")
+		return
+	}
+	name := randomName() + normalizeExt(fh.Filename, fh.Header.Get("Content-Type"))
+	if err := c.SaveUploadedFile(fh, filepath.Join(h.uploadDir, name)); err != nil {
+		httpx.Internal(c, "could not save photo")
+		return
+	}
+	c.JSON(http.StatusCreated, gin.H{"url": mediaURLPrefix + name})
 }
 
 // list returns the global feed (newest first).
