@@ -23,7 +23,7 @@ func Run(cfg config.Config) error {
 	}{
 		{"/api/auth", cfg.AuthURL},
 		{"/api/users", cfg.UserURL},
-		{"/api/friends", cfg.UserURL},
+		{"/api/follows", cfg.UserURL},
 		{"/api/rides", cfg.RideURL},
 		{"/api/routes", cfg.RouteURL},
 		{"/api/rewards", cfg.RewardURL},

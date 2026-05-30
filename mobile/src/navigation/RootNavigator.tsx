@@ -22,7 +22,7 @@ import LocationPickerScreen from '../screens/LocationPickerScreen';
 import UserProfileScreen from '../screens/UserProfileScreen';
 import CommentsScreen from '../screens/CommentsScreen';
 import ProfileScreen from '../screens/ProfileScreen';
-import FriendsScreen from '../screens/FriendsScreen';
+import FollowsScreen from '../screens/FollowsScreen';
 
 export type AuthStackParams = {
   Login: undefined;
@@ -46,7 +46,7 @@ export type FeedStackParams = {
 
 export type ProfileStackParams = {
   ProfileMain: undefined;
-  Friends: undefined;
+  Follows: undefined;
 };
 
 export type AppTabParams = {
@@ -79,13 +79,13 @@ function ProfileNavigator() {
         options={({ navigation }) => ({
           title: 'Profil',
           headerRight: () => (
-            <Pressable onPress={() => navigation.navigate('Friends')} hitSlop={12} style={{ marginRight: spacing.sm }}>
+            <Pressable onPress={() => navigation.navigate('Follows')} hitSlop={12} style={{ marginRight: spacing.sm }}>
               <MaterialCommunityIcons name="account-multiple" size={24} color={colors.primary} />
             </Pressable>
           ),
         })}
       />
-      <ProfileStack.Screen name="Friends" component={FriendsScreen} options={{ title: 'Arkadaşlar' }} />
+      <ProfileStack.Screen name="Follows" component={FollowsScreen} options={{ title: 'Takip' }} />
     </ProfileStack.Navigator>
   );
 }

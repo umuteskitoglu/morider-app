@@ -65,6 +65,7 @@ type Route struct {
 	AvgRating   float64 `json:"avg_rating"`
 	RatingCount int64   `json:"rating_count"`
 	MyRating    int     `json:"my_rating"`
+	IFollow     bool    `json:"i_follow"`
 	Points      []Point `json:"points"`
 }
 
@@ -177,7 +178,8 @@ func (h *handler) list(c *gin.Context) {
 func (h *handler) explore(c *gin.Context) {
 	rows, err := h.d.DB.Query(c,
 		`SELECT r.id, r.user_id, r.name, COALESCE(r.description, ''), r.distance, r.visibility, u.name,
-		        COALESCE(ag.avg, 0), COALESCE(ag.cnt, 0), COALESCE(mine.score, 0)
+		        COALESCE(ag.avg, 0), COALESCE(ag.cnt, 0), COALESCE(mine.score, 0),
+		        EXISTS (SELECT 1 FROM follows f WHERE f.follower_id = $1 AND f.followee_id = r.user_id)
 		 FROM routes r
 		 JOIN users u ON u.id = r.user_id
 		 LEFT JOIN (SELECT route_id, AVG(score)::float8 AS avg, COUNT(*) AS cnt
@@ -196,7 +198,7 @@ func (h *handler) explore(c *gin.Context) {
 	for rows.Next() {
 		var r Route
 		if err := rows.Scan(&r.ID, &r.UserID, &r.Name, &r.Description, &r.Distance, &r.Visibility, &r.OwnerName,
-			&r.AvgRating, &r.RatingCount, &r.MyRating); err != nil {
+			&r.AvgRating, &r.RatingCount, &r.MyRating, &r.IFollow); err != nil {
 			httpx.Internal(c, "could not read explore feed")
 			return
 		}
@@ -284,11 +286,9 @@ func (h *handler) get(c *gin.Context) {
 		 WHERE r.id = $1 AND (
 		     r.user_id = $2
 		     OR r.visibility = 'public'
-		     OR (r.visibility = 'friends' AND EXISTS (
-		         SELECT 1 FROM friendships f
-		         WHERE f.status = 'accepted'
-		           AND ((f.requester_id = $2 AND f.addressee_id = r.user_id)
-		             OR (f.requester_id = r.user_id AND f.addressee_id = $2))))
+		     OR (r.visibility = 'friends'
+		         AND EXISTS (SELECT 1 FROM follows a WHERE a.follower_id = $2 AND a.followee_id = r.user_id)
+		         AND EXISTS (SELECT 1 FROM follows b WHERE b.follower_id = r.user_id AND b.followee_id = $2))
 		 )`, id, authpkg.UserID(c),
 	).Scan(&r.ID, &r.UserID, &r.Name, &r.Description, &r.Distance, &r.Visibility, &r.OwnerName,
 		&r.AvgRating, &r.RatingCount, &r.MyRating, &geojson)

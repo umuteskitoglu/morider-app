@@ -15,6 +15,13 @@ Bu doküman, [`social-features.md`](social-features.md)'deki Faz 4 (Arkadaşlık
 
 ## FAZ 4 — Arkadaşlık + "friends" görünürlüğü
 
+> **Güncelleme (Faz 5 hazırlığı):** Karşılıklı istek/kabul "arkadaşlık" modeli, Instagram tarzı
+> **tek yönlü takip**le değiştirildi. `friendships` tablosu kaldırıldı (`0009_follows.sql`),
+> yerine `follows (follower_id, followee_id)` geldi. Uçlar `/api/follows` altında:
+> `PUT/DELETE /:userId`, `GET /following`, `GET /followers`, `GET /status/:userId`
+> (`{following, followed_by}`). **`friends` görünürlüğü = karşılıklı takip** (iki yönlü `follows`).
+> Faz 5 grup daveti bu modele dayanacak. Aşağıdaki orijinal arkadaşlık planı tarihsel referanstır.
+
 ### 4.1 Veri modeli — `migrations/0008_friendships.sql`
 - [ ] `friendships (id BIGSERIAL PK, requester_id BIGINT FK users, addressee_id BIGINT FK users, status TEXT CHECK in ('pending','accepted'), created_at TIMESTAMPTZ)`.
 - [ ] `UNIQUE(requester_id, addressee_id)`; `CHECK (requester_id <> addressee_id)`.

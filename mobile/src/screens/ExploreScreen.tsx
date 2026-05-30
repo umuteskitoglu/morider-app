@@ -6,17 +6,20 @@ import { MaterialCommunityIcons } from '@expo/vector-icons';
 
 import { RoutesStackParams } from '../navigation/RootNavigator';
 import { Card, Stars } from '../components/ui';
+import FollowButton from '../components/FollowButton';
 import { api, errorMessage } from '../api/client';
 import { colors, spacing } from '../theme';
 
 type PublicRoute = {
   id: number;
+  user_id: number;
   name: string;
   description: string;
   distance: number;
   owner_name: string;
   avg_rating: number;
   rating_count: number;
+  i_follow: boolean;
 };
 type Props = NativeStackScreenProps<RoutesStackParams, 'Explore'>;
 
@@ -69,7 +72,17 @@ export default function ExploreScreen({ navigation }: Props) {
                 <Text style={styles.name} numberOfLines={1}>{item.name}</Text>
                 <View style={styles.ownerRow}>
                   <MaterialCommunityIcons name="account-circle-outline" size={14} color={colors.textMuted} />
-                  <Text style={styles.owner}>{item.owner_name}</Text>
+                  <Text style={styles.owner} numberOfLines={1}>{item.owner_name}</Text>
+                  <FollowButton
+                    userId={item.user_id}
+                    following={item.i_follow}
+                    onChange={(f) =>
+                      setRoutes((prev) =>
+                        prev.map((r) => (r.user_id === item.user_id ? { ...r, i_follow: f } : r)),
+                      )
+                    }
+                    compact
+                  />
                 </View>
                 <View style={styles.metaRow}>
                   <Text style={styles.distance}>{item.distance.toFixed(2)} km</Text>
@@ -99,8 +112,8 @@ const styles = StyleSheet.create({
   },
   cardBody: { flex: 1 },
   name: { color: colors.text, fontSize: 17, fontWeight: '800' },
-  ownerRow: { flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 2 },
-  owner: { color: colors.textMuted, fontSize: 13 },
+  ownerRow: { flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 4 },
+  owner: { color: colors.textMuted, fontSize: 13, flex: 1 },
   metaRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, marginTop: 2 },
   distance: { color: colors.primary, fontWeight: '800' },
   emptyWrap: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: spacing.md, marginTop: spacing.xxl },

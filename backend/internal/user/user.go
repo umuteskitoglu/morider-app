@@ -33,14 +33,12 @@ func registerRoutes(d *server.Deps) {
 	protected := g.Use(d.JWT.Middleware())
 	protected.PUT("/:id", h.update)
 
-	f := d.Engine.Group("/api/friends", d.JWT.Middleware())
-	f.GET("", h.listFriends)
-	f.POST("/requests", h.sendRequest)
-	f.GET("/requests", h.incomingRequests)
-	f.POST("/requests/:id/accept", h.acceptRequest)
-	f.POST("/requests/:id/decline", h.declineRequest)
-	f.GET("/status/:userId", h.friendStatus)
-	f.DELETE("/:userId", h.removeFriend)
+	f := d.Engine.Group("/api/follows", d.JWT.Middleware())
+	f.GET("/following", h.listFollowing)
+	f.GET("/followers", h.listFollowers)
+	f.GET("/status/:userId", h.followStatus)
+	f.PUT("/:userId", h.follow)
+	f.DELETE("/:userId", h.unfollow)
 }
 
 type handler struct{ d *server.Deps }
