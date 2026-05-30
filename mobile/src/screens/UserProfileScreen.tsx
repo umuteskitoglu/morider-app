@@ -24,6 +24,7 @@ export default function UserProfileScreen({ route, navigation }: Props) {
   const [viewer, setViewer] = useState<DetailPost | null>(null);
   const [refreshing, setRefreshing] = useState(false);
   const [following, setFollowing] = useState(false);
+  const [avatarUrl, setAvatarUrl] = useState('');
 
   const isSelf = user?.id === userId;
 
@@ -36,11 +37,13 @@ export default function UserProfileScreen({ route, navigation }: Props) {
   const load = useCallback(async () => {
     try {
       const reqs: Promise<any>[] = [
+        api.get(`/api/users/${userId}`),
         api.get(`/api/feed/user/${userId}`),
         api.get(`/api/rewards/user/${userId}`),
       ];
       if (!isSelf) reqs.push(api.get(`/api/follows/status/${userId}`));
-      const [p, b, s] = await Promise.all(reqs);
+      const [u, p, b, s] = await Promise.all(reqs);
+      setAvatarUrl(u.data.avatar_url ?? '');
       setPosts(p.data.posts ?? []);
       setBadges(b.data.rewards ?? []);
       if (s) setFollowing(s.data.following ?? false);
@@ -69,9 +72,13 @@ export default function UserProfileScreen({ route, navigation }: Props) {
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.primary} />}
       >
         <LinearGradient colors={gradients.surface} style={styles.header}>
-          <LinearGradient colors={gradients.primary} style={styles.avatar}>
-            <Text style={styles.avatarText}>{name?.charAt(0).toUpperCase() ?? 'M'}</Text>
-          </LinearGradient>
+          {avatarUrl ? (
+            <Image source={{ uri: apiBaseURL() + avatarUrl }} style={styles.avatar} />
+          ) : (
+            <LinearGradient colors={gradients.primary} style={styles.avatar}>
+              <Text style={styles.avatarText}>{name?.charAt(0).toUpperCase() ?? 'M'}</Text>
+            </LinearGradient>
+          )}
           <Text style={styles.name}>{name}</Text>
           <Text style={styles.muted}>{posts.length} paylaşım</Text>
           {badges.length > 0 && (

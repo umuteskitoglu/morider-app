@@ -38,7 +38,8 @@
       [
         "expo-image-picker",
         {
-          "photosPermission": "Morider, paylaşmak istediğin fotoğraflara erişir."
+          "photosPermission": "Morider, paylaşmak istediğin fotoğraflara erişir.",
+          "cameraPermission": "Morider, profil fotoğrafı çekmek için kameraya erişir."
         }
       ]
     ]

@@ -44,10 +44,11 @@ func registerRoutes(d *server.Deps) {
 type handler struct{ d *server.Deps }
 
 type profile struct {
-	ID      int64  `json:"id"`
-	Name    string `json:"name"`
-	Email   string `json:"email"`
-	Country string `json:"country"`
+	ID        int64  `json:"id"`
+	Name      string `json:"name"`
+	Email     string `json:"email"`
+	Country   string `json:"country"`
+	AvatarURL string `json:"avatar_url"`
 }
 
 func (h *handler) get(c *gin.Context) {
@@ -58,8 +59,8 @@ func (h *handler) get(c *gin.Context) {
 	}
 	var p profile
 	err = h.d.DB.QueryRow(c,
-		`SELECT id, name, email, COALESCE(country, '') FROM users WHERE id = $1`, id,
-	).Scan(&p.ID, &p.Name, &p.Email, &p.Country)
+		`SELECT id, name, email, COALESCE(country, ''), COALESCE(avatar_url, '') FROM users WHERE id = $1`, id,
+	).Scan(&p.ID, &p.Name, &p.Email, &p.Country, &p.AvatarURL)
 	if errors.Is(err, pgx.ErrNoRows) {
 		httpx.Error(c, http.StatusNotFound, "user not found")
 		return
@@ -72,8 +73,9 @@ func (h *handler) get(c *gin.Context) {
 }
 
 type updateReq struct {
-	Name    string `json:"name"`
-	Country string `json:"country"`
+	Name      string `json:"name"`
+	Country   string `json:"country"`
+	AvatarURL string `json:"avatar_url"`
 }
 
 func (h *handler) update(c *gin.Context) {
@@ -96,11 +98,12 @@ func (h *handler) update(c *gin.Context) {
 		`UPDATE users
 		 SET name = COALESCE(NULLIF($2, ''), name),
 		     country = COALESCE(NULLIF($3, ''), country),
+		     avatar_url = COALESCE(NULLIF($4, ''), avatar_url),
 		     updated_at = now()
 		 WHERE id = $1
-		 RETURNING id, name, email, COALESCE(country, '')`,
-		id, req.Name, req.Country,
-	).Scan(&p.ID, &p.Name, &p.Email, &p.Country)
+		 RETURNING id, name, email, COALESCE(country, ''), COALESCE(avatar_url, '')`,
+		id, req.Name, req.Country, req.AvatarURL,
+	).Scan(&p.ID, &p.Name, &p.Email, &p.Country, &p.AvatarURL)
 	if errors.Is(err, pgx.ErrNoRows) {
 		httpx.Error(c, http.StatusNotFound, "user not found")
 		return

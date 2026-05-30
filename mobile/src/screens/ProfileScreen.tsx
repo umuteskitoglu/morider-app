@@ -1,5 +1,7 @@
 import React, { useCallback, useState } from 'react';
 import {
+  ActivityIndicator,
+  Alert,
   Image,
   Modal,
   Pressable,
@@ -12,20 +14,22 @@ import {
 } from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
 import { LinearGradient } from 'expo-linear-gradient';
+import * as ImagePicker from 'expo-image-picker';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 
 import { Button, Card } from '../components/ui';
 import { PostDetail, DetailPost } from '../components/PostDetail';
 import { useAuth } from '../store/auth';
-import { api, apiBaseURL } from '../api/client';
+import { api, apiBaseURL, errorMessage } from '../api/client';
 import { colors, gradients, radius, shadow, spacing } from '../theme';
 
 type Reward = { id: number; type: string; description: string; showcased: boolean };
 type LeaderEntry = { user_id: number; name: string; total_distance: number; ride_count: number };
 
 export default function ProfileScreen() {
-  const { user, signOut } = useAuth();
+  const { user, signOut, updateUser } = useAuth();
   const { width } = useWindowDimensions();
+  const [uploadingAvatar, setUploadingAvatar] = useState(false);
   const [rewards, setRewards] = useState<Reward[]>([]);
   const [leaders, setLeaders] = useState<LeaderEntry[]>([]);
   const [posts, setPosts] = useState<DetailPost[]>([]);
@@ -65,6 +69,54 @@ export default function ProfileScreen() {
     setRefreshing(false);
   }, [load]);
 
+  function changeAvatar() {
+    Alert.alert('Profil fotoğrafı', 'Bir kaynak seç', [
+      { text: 'Kameradan Çek', onPress: () => pickAvatar('camera') },
+      { text: 'Galeriden Seç', onPress: () => pickAvatar('library') },
+      { text: 'Vazgeç', style: 'cancel' },
+    ]);
+  }
+
+  async function pickAvatar(source: 'camera' | 'library') {
+    const perm =
+      source === 'camera'
+        ? await ImagePicker.requestCameraPermissionsAsync()
+        : await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if (!perm.granted) {
+      Alert.alert('İzin gerekli', source === 'camera' ? 'Kamera izni vermelisin.' : 'Galeri izni vermelisin.');
+      return;
+    }
+    // allowsEditing + 1:1 aspect gives the native square crop UI.
+    const opts: ImagePicker.ImagePickerOptions = {
+      mediaTypes: ['images'],
+      allowsEditing: true,
+      aspect: [1, 1],
+      quality: 0.7,
+    };
+    const res = source === 'camera' ? await ImagePicker.launchCameraAsync(opts) : await ImagePicker.launchImageLibraryAsync(opts);
+    if (!res.canceled && res.assets[0]) {
+      await uploadAvatar(res.assets[0]);
+    }
+  }
+
+  async function uploadAvatar(asset: ImagePicker.ImagePickerAsset) {
+    if (!user) return;
+    try {
+      setUploadingAvatar(true);
+      const type = asset.mimeType ?? 'image/jpeg';
+      const ext = type.split('/')[1] ?? 'jpg';
+      const form = new FormData();
+      form.append('photo', { uri: asset.uri, name: `avatar.${ext}`, type } as any);
+      const { data } = await api.post('/api/feed/avatar', form, { headers: { 'Content-Type': 'multipart/form-data' } });
+      await api.put(`/api/users/${user.id}`, { avatar_url: data.url });
+      await updateUser({ avatar_url: data.url });
+    } catch (err) {
+      Alert.alert('Yüklenemedi', errorMessage(err));
+    } finally {
+      setUploadingAvatar(false);
+    }
+  }
+
   function openManage() {
     setSelected(showcased.map((r) => r.type));
     setManage(true);
@@ -95,9 +147,22 @@ export default function ProfileScreen() {
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.primary} />}
       >
         <LinearGradient colors={gradients.surface} style={styles.profile}>
-          <LinearGradient colors={gradients.primary} style={styles.avatar}>
-            <Text style={styles.avatarText}>{user?.name?.charAt(0).toUpperCase() ?? 'M'}</Text>
-          </LinearGradient>
+          <Pressable onPress={changeAvatar} disabled={uploadingAvatar}>
+            {user?.avatar_url ? (
+              <Image source={{ uri: apiBaseURL() + user.avatar_url }} style={styles.avatar} />
+            ) : (
+              <LinearGradient colors={gradients.primary} style={styles.avatar}>
+                <Text style={styles.avatarText}>{user?.name?.charAt(0).toUpperCase() ?? 'M'}</Text>
+              </LinearGradient>
+            )}
+            <View style={styles.avatarBadge}>
+              {uploadingAvatar ? (
+                <ActivityIndicator size="small" color="#fff" />
+              ) : (
+                <MaterialCommunityIcons name="camera" size={15} color="#fff" />
+              )}
+            </View>
+          </Pressable>
           <Text style={styles.name}>{user?.name}</Text>
           <Text style={styles.email}>{user?.email}</Text>
           {showcased.length > 0 && (
@@ -236,6 +301,19 @@ const styles = StyleSheet.create({
   },
   avatar: { width: 84, height: 84, borderRadius: 42, alignItems: 'center', justifyContent: 'center', marginBottom: spacing.sm, ...shadow.glow },
   avatarText: { color: '#fff', fontSize: 34, fontWeight: '900' },
+  avatarBadge: {
+    position: 'absolute',
+    right: -2,
+    bottom: spacing.sm - 2,
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    backgroundColor: colors.primary,
+    borderWidth: 2,
+    borderColor: colors.surface,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
   name: { color: colors.text, fontSize: 22, fontWeight: '900' },
   email: { color: colors.textMuted, marginTop: 2 },
   badges: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.xs, justifyContent: 'center', marginTop: spacing.md, paddingHorizontal: spacing.md },
