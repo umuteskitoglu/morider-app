@@ -8,6 +8,7 @@ export type User = {
   name: string;
   email: string;
   country: string;
+  avatar_url?: string;
 };
 
 type AuthState = {
@@ -17,6 +18,7 @@ type AuthState = {
   signIn: (email: string, password: string) => Promise<void>;
   signUp: (name: string, email: string, password: string) => Promise<void>;
   signOut: () => Promise<void>;
+  updateUser: (partial: Partial<User>) => Promise<void>;
 };
 
 const AuthContext = createContext<AuthState | undefined>(undefined);
@@ -65,8 +67,15 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     await AsyncStorage.multiRemove([TOKEN_KEY, USER_KEY]);
   }
 
+  async function updateUser(partial: Partial<User>) {
+    if (!user) return;
+    const next = { ...user, ...partial };
+    setUser(next);
+    await AsyncStorage.setItem(USER_KEY, JSON.stringify(next));
+  }
+
   const value = useMemo<AuthState>(
-    () => ({ user, token, loading, signIn, signUp, signOut }),
+    () => ({ user, token, loading, signIn, signUp, signOut, updateUser }),
     [user, token, loading],
   );
 
