@@ -24,6 +24,8 @@ type Stats struct {
 	BestWeekDistance  float64 // most km ridden within a single ISO week
 	BestMonthDistance float64 // most km ridden within a single calendar month
 	MaxAvgSpeed       float64 // highest single-ride average speed in km/h
+	GroupRideCount    int64   // distinct group rides joined that had 2+ participants
+	MaxGroupSize      int64   // largest participant count among joined group rides
 }
 
 // RidePoint pairs a ride's timestamp with its distance. It is the input to the
@@ -72,6 +74,15 @@ var rules = []rule{
 	// data layer to ignore implausible GPS spikes; full anti-cheat is future work.
 	{Badge{"speedster_100", "Ortalama 100 km/s sürüş"}, func(s Stats) bool { return s.MaxAvgSpeed >= 100 }},
 	{Badge{"speedster_140", "Ortalama 140 km/s sürüş"}, func(s Stats) bool { return s.MaxAvgSpeed >= 140 }},
+
+	// Group rides (sessions ridden with at least one other rider).
+	{Badge{"group_first", "İlk grup sürüşü"}, func(s Stats) bool { return s.GroupRideCount >= 1 }},
+	{Badge{"group_5", "5 grup sürüşü"}, func(s Stats) bool { return s.GroupRideCount >= 5 }},
+	{Badge{"group_20", "20 grup sürüşü"}, func(s Stats) bool { return s.GroupRideCount >= 20 }},
+
+	// Group size (largest pack ridden with).
+	{Badge{"pack_5", "5 kişilik grupla sürüş"}, func(s Stats) bool { return s.MaxGroupSize >= 5 }},
+	{Badge{"pack_10", "10 kişilik grupla sürüş"}, func(s Stats) bool { return s.MaxGroupSize >= 10 }},
 }
 
 // Evaluate returns every badge earned for the given stats, in rule order.
