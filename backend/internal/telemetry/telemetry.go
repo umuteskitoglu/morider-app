@@ -51,10 +51,14 @@ func registerRoutes(d *server.Deps, h *handler) {
 	s := d.Engine.Group("/api/sessions")
 	jwt := d.JWT.Middleware()
 	s.POST("", jwt, h.createSession)
+	s.GET("", jwt, h.myActiveSessions)
 	s.GET("/:code", jwt, h.getSession)
 	s.POST("/:code/join", jwt, h.joinSession)
 	s.POST("/:code/leave", jwt, h.leaveSession)
 	s.POST("/:code/end", jwt, h.endSession)
+	s.POST("/:code/kick", jwt, h.kickParticipant)
+	s.POST("/:code/ban", jwt, h.banParticipant)
+	s.POST("/:code/transfer", jwt, h.transferHost)
 	s.GET("/:code/ws", h.sessionWS)
 }
 

@@ -1,6 +1,6 @@
 import React from 'react';
-import { ActivityIndicator, Pressable, View, StyleSheet } from 'react-native';
-import { NavigationContainer, DefaultTheme } from '@react-navigation/native';
+import { ActivityIndicator, Pressable, Text, View, StyleSheet } from 'react-native';
+import { NavigationContainer, DefaultTheme, NavigatorScreenParams, getFocusedRouteNameFromRoute } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -36,6 +36,11 @@ export type RoutesStackParams = {
   Explore: undefined;
   RouteCreate: undefined;
   RouteDetail: { id: number; name: string };
+};
+
+// Group riding lives under the Ride tab — it is a way to ride, not a route list.
+export type RideStackParams = {
+  RideMain: { followRouteId?: number } | undefined;
   GroupJoin: undefined;
   GroupRide: { code: string };
 };
@@ -54,7 +59,7 @@ export type ProfileStackParams = {
 };
 
 export type AppTabParams = {
-  Ride: { followRouteId?: number } | undefined;
+  Ride: NavigatorScreenParams<RideStackParams> | undefined;
   Feed: undefined;
   Rides: undefined;
   Routes: undefined;
@@ -62,10 +67,53 @@ export type AppTabParams = {
 };
 
 const AuthStack = createNativeStackNavigator<AuthStackParams>();
+const RideStack = createNativeStackNavigator<RideStackParams>();
 const RoutesStack = createNativeStackNavigator<RoutesStackParams>();
 const FeedStack = createNativeStackNavigator<FeedStackParams>();
 const ProfileStack = createNativeStackNavigator<ProfileStackParams>();
 const Tabs = createBottomTabNavigator<AppTabParams>();
+
+type IconName = React.ComponentProps<typeof MaterialCommunityIcons>['name'];
+
+// Consistent, evenly-spaced header action button (does not rely on flex `gap`).
+function HeaderIconButton({ icon, onPress }: { icon: IconName; onPress: () => void }) {
+  return (
+    <Pressable onPress={onPress} hitSlop={8} style={styles.headerBtn}>
+      <MaterialCommunityIcons name={icon} size={22} color={colors.primary} />
+    </Pressable>
+  );
+}
+
+// The Ride tab: solo ride map plus the group-ride flow, so "ride together" is
+// reachable right where you start a ride.
+function RideNavigator() {
+  return (
+    <RideStack.Navigator
+      screenOptions={{
+        headerStyle: { backgroundColor: colors.surface },
+        headerTitleStyle: { color: colors.text, fontWeight: '800' },
+        headerTintColor: colors.primary,
+        contentStyle: { backgroundColor: colors.bg },
+      }}
+    >
+      <RideStack.Screen
+        name="RideMain"
+        component={MapScreen}
+        options={({ navigation }) => ({
+          title: 'Sürüş',
+          headerRight: () => (
+            <Pressable onPress={() => navigation.navigate('GroupJoin')} hitSlop={8} style={styles.headerGroupBtn}>
+              <MaterialCommunityIcons name="account-group" size={16} color="#fff" />
+              <Text style={styles.headerGroupText}>Grup</Text>
+            </Pressable>
+          ),
+        })}
+      />
+      <RideStack.Screen name="GroupJoin" component={GroupJoinScreen} options={{ title: 'Grup Sürüşü' }} />
+      <RideStack.Screen name="GroupRide" component={GroupRideScreen} options={{ title: 'Grup Sürüşü' }} />
+    </RideStack.Navigator>
+  );
+}
 
 function ProfileNavigator() {
   return (
@@ -83,9 +131,9 @@ function ProfileNavigator() {
         options={({ navigation }) => ({
           title: 'Profil',
           headerRight: () => (
-            <Pressable onPress={() => navigation.navigate('Follows')} hitSlop={12} style={{ marginRight: spacing.sm }}>
-              <MaterialCommunityIcons name="account-multiple" size={24} color={colors.primary} />
-            </Pressable>
+            <View style={styles.headerRow}>
+              <HeaderIconButton icon="account-multiple" onPress={() => navigation.navigate('Follows')} />
+            </View>
           ),
         })}
       />
@@ -129,13 +177,8 @@ function RoutesNavigator() {
         options={({ navigation }) => ({
           title: 'Rotalarım',
           headerRight: () => (
-            <View style={{ flexDirection: 'row', gap: spacing.md, marginRight: spacing.sm }}>
-              <Pressable onPress={() => navigation.navigate('GroupJoin')} hitSlop={12}>
-                <MaterialCommunityIcons name="account-group" size={24} color={colors.primary} />
-              </Pressable>
-              <Pressable onPress={() => navigation.navigate('Explore')} hitSlop={12}>
-                <MaterialCommunityIcons name="compass-outline" size={24} color={colors.primary} />
-              </Pressable>
+            <View style={styles.headerRow}>
+              <HeaderIconButton icon="compass-outline" onPress={() => navigation.navigate('Explore')} />
             </View>
           ),
         })}
@@ -143,8 +186,6 @@ function RoutesNavigator() {
       <RoutesStack.Screen name="Explore" component={ExploreScreen} options={{ title: 'Keşfet' }} />
       <RoutesStack.Screen name="RouteCreate" component={RouteCreateScreen} options={{ title: 'Yeni Rota' }} />
       <RoutesStack.Screen name="RouteDetail" component={RouteDetailScreen} options={{ title: 'Rota' }} />
-      <RoutesStack.Screen name="GroupJoin" component={GroupJoinScreen} options={{ title: 'Grup Sürüşü' }} />
-      <RoutesStack.Screen name="GroupRide" component={GroupRideScreen} options={{ title: 'Grup Sürüşü' }} />
     </RoutesStack.Navigator>
   );
 }
@@ -161,8 +202,6 @@ const navTheme = {
   },
 };
 
-type IconName = React.ComponentProps<typeof MaterialCommunityIcons>['name'];
-
 function tabIcon(name: IconName) {
   return ({ color, size }: { color: string; size: number }) => (
     <MaterialCommunityIcons name={name} color={color} size={size} />
@@ -171,19 +210,20 @@ function tabIcon(name: IconName) {
 
 function AppTabs() {
   const insets = useSafeAreaInsets();
+  const tabBarStyle = {
+    backgroundColor: colors.surface,
+    borderTopColor: colors.border,
+    height: 58 + insets.bottom,
+    paddingTop: 8,
+    paddingBottom: Math.max(insets.bottom, 8),
+  };
   return (
     <Tabs.Navigator
       screenOptions={{
         headerStyle: { backgroundColor: colors.surface, shadowColor: 'transparent', elevation: 0 },
         headerTitleStyle: { color: colors.text, fontWeight: '800', letterSpacing: 0.5 },
         headerTintColor: colors.primary,
-        tabBarStyle: {
-          backgroundColor: colors.surface,
-          borderTopColor: colors.border,
-          height: 58 + insets.bottom,
-          paddingTop: 8,
-          paddingBottom: Math.max(insets.bottom, 8),
-        },
+        tabBarStyle,
         tabBarLabelStyle: { fontSize: 11, fontWeight: '700', marginBottom: 2 },
         tabBarActiveTintColor: colors.primary,
         tabBarInactiveTintColor: colors.textMuted,
@@ -191,8 +231,14 @@ function AppTabs() {
     >
       <Tabs.Screen
         name="Ride"
-        component={MapScreen}
-        options={{ title: 'Sürüş', tabBarIcon: tabIcon('motorbike') }}
+        component={RideNavigator}
+        options={({ route }) => ({
+          title: 'Sürüş',
+          headerShown: false,
+          tabBarIcon: tabIcon('motorbike'),
+          // Hide the tab bar on the immersive live group-ride map.
+          tabBarStyle: getFocusedRouteNameFromRoute(route) === 'GroupRide' ? { display: 'none' } : tabBarStyle,
+        })}
       />
       <Tabs.Screen
         name="Feed"
@@ -247,4 +293,17 @@ export default function RootNavigator() {
 
 const styles = StyleSheet.create({
   center: { flex: 1, backgroundColor: colors.bg, alignItems: 'center', justifyContent: 'center' },
+  headerRow: { flexDirection: 'row', alignItems: 'center', paddingRight: spacing.xs },
+  headerBtn: { paddingHorizontal: spacing.xs, paddingVertical: spacing.xs, alignItems: 'center', justifyContent: 'center' },
+  headerGroupBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+    backgroundColor: colors.primary,
+    paddingHorizontal: 12,
+    paddingVertical: 7,
+    borderRadius: 999,
+    marginRight: spacing.sm,
+  },
+  headerGroupText: { color: '#fff', fontWeight: '800', fontSize: 13 },
 });

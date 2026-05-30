@@ -1,5 +1,6 @@
-import React, { useCallback, useState } from 'react';
-import { FlatList, Pressable, RefreshControl, StyleSheet, Text, View } from 'react-native';
+import React, { useCallback, useRef, useState } from 'react';
+import { Alert, FlatList, Pressable, RefreshControl, StyleSheet, Text, View } from 'react-native';
+import { Swipeable } from 'react-native-gesture-handler';
 import { useFocusEffect } from '@react-navigation/native';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
@@ -7,7 +8,7 @@ import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { RoutesStackParams } from '../navigation/RootNavigator';
 import { Button, Card } from '../components/ui';
 import { api, errorMessage } from '../api/client';
-import { colors, spacing } from '../theme';
+import { colors, radius, spacing } from '../theme';
 
 type RouteItem = { id: number; name: string; description: string; distance: number };
 type Props = NativeStackScreenProps<RoutesStackParams, 'RoutesList'>;
@@ -36,6 +37,25 @@ export default function RoutesScreen({ navigation }: Props) {
     }, [load]),
   );
 
+  const remove = useCallback((item: RouteItem, close: () => void) => {
+    Alert.alert('Rotayı sil', `"${item.name}" silinsin mi?`, [
+      { text: 'Vazgeç', style: 'cancel', onPress: close },
+      {
+        text: 'Sil',
+        style: 'destructive',
+        onPress: async () => {
+          try {
+            await api.delete(`/api/routes/${item.id}`);
+            setRoutes((prev) => prev.filter((r) => r.id !== item.id));
+          } catch (err) {
+            Alert.alert('Silinemedi', errorMessage(err));
+            close();
+          }
+        },
+      },
+    ]);
+  }, []);
+
   return (
     <View style={styles.container}>
       <FlatList
@@ -53,22 +73,52 @@ export default function RoutesScreen({ navigation }: Props) {
           ) : null
         }
         renderItem={({ item }) => (
-          <Pressable onPress={() => navigation.navigate('RouteDetail', { id: item.id, name: item.name })}>
-            <Card style={styles.card}>
-              <View style={styles.iconBadge}>
-                <MaterialCommunityIcons name="map-marker-path" size={22} color={colors.primary} />
-              </View>
-              <View style={styles.cardBody}>
-                <Text style={styles.name} numberOfLines={1}>{item.name}</Text>
-                {item.description ? <Text style={styles.desc} numberOfLines={1}>{item.description}</Text> : null}
-                <Text style={styles.distance}>{item.distance.toFixed(2)} km</Text>
-              </View>
-              <MaterialCommunityIcons name="chevron-right" size={24} color={colors.textMuted} />
-            </Card>
-          </Pressable>
+          <RouteRow
+            item={item}
+            onOpen={() => navigation.navigate('RouteDetail', { id: item.id, name: item.name })}
+            onDelete={remove}
+          />
         )}
       />
     </View>
+  );
+}
+
+function RouteRow({
+  item,
+  onOpen,
+  onDelete,
+}: {
+  item: RouteItem;
+  onOpen: () => void;
+  onDelete: (item: RouteItem, close: () => void) => void;
+}) {
+  const ref = useRef<Swipeable>(null);
+
+  // Red "Sil" panel revealed by swiping the row left.
+  const renderRightActions = () => (
+    <Pressable style={styles.deleteAction} onPress={() => onDelete(item, () => ref.current?.close())}>
+      <MaterialCommunityIcons name="trash-can-outline" size={24} color="#fff" />
+      <Text style={styles.deleteText}>Sil</Text>
+    </Pressable>
+  );
+
+  return (
+    <Swipeable ref={ref} renderRightActions={renderRightActions} overshootRight={false} rightThreshold={40}>
+      <Pressable onPress={onOpen}>
+        <Card style={styles.card}>
+          <View style={styles.iconBadge}>
+            <MaterialCommunityIcons name="map-marker-path" size={22} color={colors.primary} />
+          </View>
+          <View style={styles.cardBody}>
+            <Text style={styles.name} numberOfLines={1}>{item.name}</Text>
+            {item.description ? <Text style={styles.desc} numberOfLines={1}>{item.description}</Text> : null}
+            <Text style={styles.distance}>{item.distance.toFixed(2)} km</Text>
+          </View>
+          <MaterialCommunityIcons name="chevron-right" size={24} color={colors.textMuted} />
+        </Card>
+      </Pressable>
+    </Swipeable>
   );
 }
 
@@ -88,6 +138,16 @@ const styles = StyleSheet.create({
   name: { color: colors.text, fontSize: 17, fontWeight: '800' },
   distance: { color: colors.primary, fontWeight: '800', marginTop: 2 },
   desc: { color: colors.textMuted, fontSize: 13 },
+  deleteAction: {
+    backgroundColor: colors.danger,
+    justifyContent: 'center',
+    alignItems: 'center',
+    width: 84,
+    borderRadius: radius.md,
+    marginLeft: spacing.sm,
+    gap: 2,
+  },
+  deleteText: { color: '#fff', fontWeight: '800', fontSize: 12 },
   emptyWrap: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: spacing.md, marginTop: spacing.xxl },
   empty: { color: colors.textMuted, textAlign: 'center', lineHeight: 22 },
 });
