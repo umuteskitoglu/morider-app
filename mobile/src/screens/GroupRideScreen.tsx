@@ -47,6 +47,8 @@ export default function GroupRideScreen({ route, navigation }: Props) {
   const closed = useRef(false); // screen torn down → stop reconnecting
   const reconnectTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const reconnectAttempts = useRef(0);
+  const lastCoord = useRef<{ lat: number; lon: number; speed: number } | null>(null);
+  const heartbeat = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const isHost = hostId != null && user?.id === hostId;
 
@@ -198,8 +200,17 @@ export default function GroupRideScreen({ route, navigation }: Props) {
     connectWS();
   }
 
-  // Ask for location permission once and stream our own GPS over whatever socket
-  // is currently open (ws.current is swapped on reconnect).
+  // Push our latest position over whatever socket is currently open.
+  function sendPosition() {
+    const c = lastCoord.current;
+    if (c && ws.current?.readyState === WebSocket.OPEN) {
+      ws.current.send(JSON.stringify({ lat: c.lat, lon: c.lon, speed: c.speed }));
+    }
+  }
+
+  // Ask for location permission once and stream our own GPS. We send on every
+  // GPS update AND on a steady heartbeat, so a stationary rider still appears to
+  // the rest of the group (watchPositionAsync alone fires only when you move).
   const startLocationWatch = useCallback(async () => {
     const { status } = await Location.requestForegroundPermissionsAsync();
     if (status !== 'granted') {
@@ -209,27 +220,44 @@ export default function GroupRideScreen({ route, navigation }: Props) {
 
     if (closed.current) return;
 
-    // Snap the map onto the rider straight away (like the solo ride screen),
-    // unless a target route is set — then loadSession fits to the route.
-    centerOnUser();
+    // Seed an immediate position so the group sees us right away, and center.
+    try {
+      const loc = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
+      lastCoord.current = {
+        lat: loc.coords.latitude,
+        lon: loc.coords.longitude,
+        speed: Math.max(0, (loc.coords.speed ?? 0) * 3.6),
+      };
+      sendPosition();
+      if (!centered.current && !hasRoute.current) {
+        centered.current = true;
+        mapRef.current?.animateToRegion(
+          { latitude: loc.coords.latitude, longitude: loc.coords.longitude, latitudeDelta: 0.01, longitudeDelta: 0.01 },
+          600,
+        );
+      }
+    } catch {
+      // ignore — the watch below will still pick up a fix
+    }
+
+    if (closed.current) return;
 
     const sub = await Location.watchPositionAsync(
       { accuracy: Location.Accuracy.High, distanceInterval: 5, timeInterval: 3000 },
       (loc) => {
-        const coord = { latitude: loc.coords.latitude, longitude: loc.coords.longitude };
+        lastCoord.current = {
+          lat: loc.coords.latitude,
+          lon: loc.coords.longitude,
+          speed: Math.max(0, (loc.coords.speed ?? 0) * 3.6),
+        };
         if (!centered.current && !hasRoute.current) {
           centered.current = true;
-          mapRef.current?.animateToRegion({ ...coord, latitudeDelta: 0.01, longitudeDelta: 0.01 }, 600);
-        }
-        if (ws.current?.readyState === WebSocket.OPEN) {
-          ws.current.send(
-            JSON.stringify({
-              lat: coord.latitude,
-              lon: coord.longitude,
-              speed: Math.max(0, (loc.coords.speed ?? 0) * 3.6),
-            }),
+          mapRef.current?.animateToRegion(
+            { latitude: loc.coords.latitude, longitude: loc.coords.longitude, latitudeDelta: 0.01, longitudeDelta: 0.01 },
+            600,
           );
         }
+        sendPosition();
       },
     );
     // If the screen was torn down while we awaited, drop the fresh subscription
@@ -239,22 +267,11 @@ export default function GroupRideScreen({ route, navigation }: Props) {
       return;
     }
     locSub.current = sub;
-  }, []);
 
-  // Center the map on the rider's current position (no-op if a route is loaded).
-  async function centerOnUser() {
-    try {
-      const loc = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
-      if (hasRoute.current) return;
-      centered.current = true;
-      mapRef.current?.animateToRegion(
-        { latitude: loc.coords.latitude, longitude: loc.coords.longitude, latitudeDelta: 0.01, longitudeDelta: 0.01 },
-        600,
-      );
-    } catch {
-      // ignore — keep default region
-    }
-  }
+    // Heartbeat: re-broadcast the last position every 3s even when stationary.
+    if (heartbeat.current) clearInterval(heartbeat.current);
+    heartbeat.current = setInterval(sendPosition, 3000);
+  }, []);
 
   useEffect(() => {
     // Reset per-ride state so switching sessions (code change) starts clean.
@@ -268,6 +285,7 @@ export default function GroupRideScreen({ route, navigation }: Props) {
     return () => {
       closed.current = true;
       if (reconnectTimer.current) clearTimeout(reconnectTimer.current);
+      if (heartbeat.current) clearInterval(heartbeat.current);
       locSub.current?.remove();
       locSub.current = null;
       detachSocket();
@@ -292,6 +310,7 @@ export default function GroupRideScreen({ route, navigation }: Props) {
   function teardown() {
     closed.current = true;
     if (reconnectTimer.current) clearTimeout(reconnectTimer.current);
+    if (heartbeat.current) clearInterval(heartbeat.current);
     locSub.current?.remove();
     locSub.current = null;
     detachSocket();
@@ -412,7 +431,19 @@ export default function GroupRideScreen({ route, navigation }: Props) {
     <View style={styles.container}>
       <MapView ref={mapRef} style={StyleSheet.absoluteFill} initialRegion={INITIAL_REGION} showsUserLocation showsMyLocationButton={false}>
         {routePath.length > 1 && (
-          <Polyline coordinates={routePath} strokeColor={colors.accent} strokeWidth={5} lineDashPattern={[2, 8]} />
+          <>
+            <Polyline coordinates={routePath} strokeColor={colors.accent} strokeWidth={5} lineDashPattern={[2, 8]} />
+            <Marker coordinate={routePath[0]} title="Başlangıç" anchor={{ x: 0.5, y: 0.5 }}>
+              <View style={[styles.routePin, styles.routePinStart]}>
+                <MaterialCommunityIcons name="flag" size={16} color="#fff" />
+              </View>
+            </Marker>
+            <Marker coordinate={routePath[routePath.length - 1]} title="Bitiş" anchor={{ x: 0.5, y: 0.5 }}>
+              <View style={[styles.routePin, styles.routePinEnd]}>
+                <MaterialCommunityIcons name="flag-checkered" size={16} color="#fff" />
+              </View>
+            </Marker>
+          </>
         )}
         {others.map((m) => (
           <Marker
@@ -529,6 +560,18 @@ const styles = StyleSheet.create({
     ...shadow.card,
   },
   markerText: { color: '#fff', fontWeight: '900', fontSize: 14 },
+  routePin: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    borderWidth: 2,
+    borderColor: '#fff',
+    alignItems: 'center',
+    justifyContent: 'center',
+    ...shadow.card,
+  },
+  routePinStart: { backgroundColor: colors.success },
+  routePinEnd: { backgroundColor: colors.danger },
   badgeWrap: { position: 'absolute', top: spacing.lg, left: 0, right: 0, alignItems: 'center' },
   badge: {
     flexDirection: 'row',
