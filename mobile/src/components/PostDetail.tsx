@@ -2,7 +2,6 @@ import React, { useEffect, useRef, useState } from 'react';
 import {
   Animated,
   FlatList,
-  Image,
   Modal,
   NativeScrollEvent,
   NativeSyntheticEvent,
@@ -15,8 +14,11 @@ import {
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { GestureHandlerRootView } from 'react-native-gesture-handler';
 
 import { api, apiBaseURL } from '../api/client';
+import { ZoomableImage } from './ZoomableImage';
 import { CommentsView } from './CommentsView';
 import { LikersSheet } from './LikersSheet';
 import { colors, spacing } from '../theme';
@@ -37,6 +39,7 @@ export type DetailPost = {
 // actions, a likers list and inline comments. Used from the profile grids.
 export function PostDetail({ post, onClose }: { post: DetailPost | null; onClose: () => void }) {
   const { width, height } = useWindowDimensions();
+  const insets = useSafeAreaInsets();
   const [idx, setIdx] = useState(0);
   const [liked, setLiked] = useState(false);
   const [likeCount, setLikeCount] = useState(0);
@@ -45,6 +48,8 @@ export function PostDetail({ post, onClose }: { post: DetailPost | null; onClose
   const [showLikers, setShowLikers] = useState(false);
 
   const translateY = useRef(new Animated.Value(0)).current;
+  const lastTap = useRef(0);
+  const heart = useRef(new Animated.Value(0)).current;
   const onCloseRef = useRef(onClose);
   onCloseRef.current = onClose;
 
@@ -91,9 +96,44 @@ export function PostDetail({ post, onClose }: { post: DetailPost | null; onClose
     setIdx(Math.round(e.nativeEvent.contentOffset.x / width));
   }
 
+  // Pop a heart burst in the centre of the photo.
+  function playHeart() {
+    heart.setValue(0);
+    Animated.sequence([
+      Animated.spring(heart, { toValue: 1, friction: 4, useNativeDriver: true }),
+      Animated.timing(heart, { toValue: 0, duration: 350, delay: 300, useNativeDriver: true }),
+    ]).start();
+  }
+
+  // Double-tap always likes (never unlikes), Instagram-style.
+  async function likeViaDoubleTap() {
+    if (!post) return;
+    playHeart();
+    if (liked) return;
+    setLiked(true);
+    setLikeCount((n) => n + 1);
+    try {
+      await api.post(`/api/posts/${post.id}/like`);
+    } catch {
+      setLiked(false);
+      setLikeCount((n) => n - 1);
+    }
+  }
+
+  function onPhotoTap() {
+    const now = Date.now();
+    if (now - lastTap.current < 280) {
+      lastTap.current = 0;
+      likeViaDoubleTap();
+    } else {
+      lastTap.current = now;
+    }
+  }
+
   return (
     <Modal visible={!!post} animationType="fade" statusBarTranslucent onRequestClose={onClose}>
-      <View style={styles.bg}>
+      {/* GestureHandlerRootView is required for pinch-to-zoom inside a Modal on Android. */}
+      <GestureHandlerRootView style={styles.bg}>
         {post && (
           <Animated.View style={[styles.flex, { transform: [{ translateY }] }]} {...pan.panHandlers}>
             <FlatList
@@ -104,9 +144,21 @@ export function PostDetail({ post, onClose }: { post: DetailPost | null; onClose
               showsHorizontalScrollIndicator={false}
               onMomentumScrollEnd={onScroll}
               renderItem={({ item }) => (
-                <Image source={{ uri: apiBaseURL() + item }} style={{ width, height }} resizeMode="contain" />
+                <Pressable onPress={onPhotoTap}>
+                  <ZoomableImage uri={apiBaseURL() + item} width={width} height={height} style={{ width, height }} />
+                </Pressable>
               )}
             />
+
+            <Animated.View
+              pointerEvents="none"
+              style={[
+                styles.heartBurst,
+                { opacity: heart, transform: [{ scale: heart.interpolate({ inputRange: [0, 1], outputRange: [0.3, 1] }) }] },
+              ]}
+            >
+              <MaterialCommunityIcons name="heart" size={120} color="rgba(255,255,255,0.92)" />
+            </Animated.View>
 
             {post.photos.length > 1 && (
               <View style={styles.counter}>
@@ -157,11 +209,11 @@ export function PostDetail({ post, onClose }: { post: DetailPost | null; onClose
             </LinearGradient>
           </Animated.View>
         )}
-      </View>
+      </GestureHandlerRootView>
 
       {/* Comments sheet */}
       <Modal visible={showComments} animationType="slide" onRequestClose={() => setShowComments(false)}>
-        <View style={styles.sheetHeader}>
+        <View style={[styles.sheetHeader, { paddingTop: insets.top + spacing.sm }]}>
           <Text style={styles.sheetTitle}>Yorumlar</Text>
           <Pressable onPress={() => setShowComments(false)} hitSlop={12}>
             <MaterialCommunityIcons name="close" size={24} color={colors.text} />
@@ -236,4 +288,5 @@ const styles = StyleSheet.create({
     borderBottomColor: colors.border,
   },
   sheetTitle: { color: colors.text, fontWeight: '800', fontSize: 16 },
+  heartBurst: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, alignItems: 'center', justifyContent: 'center' },
 });

@@ -19,6 +19,25 @@ api.interceptors.request.use(async (config) => {
   return config;
 });
 
+// When any request comes back 401 (expired/invalid token), notify the app so it
+// can clear the session and send the user back to login instead of surfacing a
+// confusing "invalid or expired token" alert on whichever screen made the call.
+let onUnauthorized: (() => void) | null = null;
+
+export function setUnauthorizedHandler(fn: (() => void) | null): void {
+  onUnauthorized = fn;
+}
+
+api.interceptors.response.use(
+  (res) => res,
+  (err) => {
+    if (axios.isAxiosError(err) && err.response?.status === 401) {
+      onUnauthorized?.();
+    }
+    return Promise.reject(err);
+  },
+);
+
 export function apiBaseURL(): string {
   return baseURL;
 }

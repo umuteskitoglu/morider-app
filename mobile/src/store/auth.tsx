@@ -1,11 +1,12 @@
 import React, { createContext, useContext, useEffect, useMemo, useState } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
-import { api, TOKEN_KEY } from '../api/client';
+import { api, setUnauthorizedHandler, TOKEN_KEY } from '../api/client';
 
 export type User = {
   id: number;
   name: string;
+  username: string;
   email: string;
   country: string;
   avatar_url?: string;
@@ -66,6 +67,17 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     setUser(null);
     await AsyncStorage.multiRemove([TOKEN_KEY, USER_KEY]);
   }
+
+  // Any 401 from the API (expired/invalid token) clears the session so the app
+  // falls back to the login screen instead of showing a stale-token error.
+  useEffect(() => {
+    setUnauthorizedHandler(() => {
+      setToken(null);
+      setUser(null);
+      AsyncStorage.multiRemove([TOKEN_KEY, USER_KEY]).catch(() => {});
+    });
+    return () => setUnauthorizedHandler(null);
+  }, []);
 
   async function updateUser(partial: Partial<User>) {
     if (!user) return;

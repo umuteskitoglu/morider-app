@@ -4,14 +4,14 @@ import MapView, { MapPressEvent, Marker, Polyline } from 'react-native-maps';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 
-import { RoutesStackParams } from '../navigation/RootNavigator';
+import { ProfileStackParams } from '../navigation/RootNavigator';
 import { Button, Card, TextField } from '../components/ui';
 import { api, errorMessage } from '../api/client';
 import { colors, radius, spacing } from '../theme';
 
 type Coord = { latitude: number; longitude: number };
 type PlanInfo = { distance: number; duration: number; steps: number };
-type Props = NativeStackScreenProps<RoutesStackParams, 'RouteCreate'>;
+type Props = NativeStackScreenProps<ProfileStackParams, 'RouteCreate'>;
 
 export default function RouteCreateScreen({ navigation }: Props) {
   const [name, setName] = useState('');

@@ -5,13 +5,13 @@ import { useFocusEffect } from '@react-navigation/native';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 
-import { RoutesStackParams } from '../navigation/RootNavigator';
+import { ProfileStackParams } from '../navigation/RootNavigator';
 import { Button, Card } from '../components/ui';
 import { api, errorMessage } from '../api/client';
 import { colors, radius, spacing } from '../theme';
 
 type RouteItem = { id: number; name: string; description: string; distance: number };
-type Props = NativeStackScreenProps<RoutesStackParams, 'RoutesList'>;
+type Props = NativeStackScreenProps<ProfileStackParams, 'RoutesList'>;
 
 export default function RoutesScreen({ navigation }: Props) {
   const [routes, setRoutes] = useState<RouteItem[]>([]);
