@@ -17,7 +17,9 @@
       "infoPlist": {
         "NSLocationWhenInUseUsageDescription": "Morider sürüşlerinizi kaydetmek için konumunuza erişir.",
         "NSLocationAlwaysAndWhenInUseUsageDescription": "Morider arka planda sürüşlerinizi kaydetmek için konumunuza erişir.",
-        "UIBackgroundModes": ["location"]
+        "UIBackgroundModes": [
+          "location"
+        ]
       }
     },
     "android": {
@@ -41,7 +43,8 @@
           "photosPermission": "Morider, paylaşmak istediğin fotoğraflara erişir.",
           "cameraPermission": "Morider, profil fotoğrafı çekmek için kameraya erişir."
         }
-      ]
+      ],
+      "@react-native-community/datetimepicker"
     ]
   }
 }

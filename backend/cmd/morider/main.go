@@ -10,6 +10,7 @@ import (
 	"os"
 
 	"github.com/morider/backend/internal/auth"
+	"github.com/morider/backend/internal/event"
 	"github.com/morider/backend/internal/feed"
 	"github.com/morider/backend/internal/gateway"
 	"github.com/morider/backend/internal/reward"
@@ -21,7 +22,7 @@ import (
 )
 
 func main() {
-	service := flag.String("service", "", "service to run: gateway|auth|user|ride|route|reward|telemetry|feed")
+	service := flag.String("service", "", "service to run: gateway|auth|user|ride|route|reward|telemetry|feed|event")
 	flag.Parse()
 
 	// Allow selecting the service via env too (handy in containers).
@@ -44,11 +45,12 @@ func main() {
 		"reward":    reward.Run,
 		"telemetry": telemetry.Run,
 		"feed":      feed.Run,
+		"event":     event.Run,
 	}
 
 	run, ok := runners[name]
 	if !ok {
-		fmt.Println("usage: morider -service=gateway|auth|user|ride|route|reward|telemetry|feed")
+		fmt.Println("usage: morider -service=gateway|auth|user|ride|route|reward|telemetry|feed|event")
 		os.Exit(2)
 	}
 

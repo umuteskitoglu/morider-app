@@ -42,6 +42,7 @@ type Config struct {
 	RewardURL    string
 	TelemetryURL string
 	FeedURL      string
+	EventURL     string
 }
 
 // Load reads configuration from the environment, applying sane defaults so the
@@ -72,6 +73,7 @@ func Load() Config {
 		RewardURL:    getEnv("REWARD_SERVICE_URL", "http://localhost:8085"),
 		TelemetryURL: getEnv("TELEMETRY_SERVICE_URL", "http://localhost:8086"),
 		FeedURL:      getEnv("FEED_SERVICE_URL", "http://localhost:8087"),
+		EventURL:     getEnv("EVENT_SERVICE_URL", "http://localhost:8088"),
 	}
 }
 

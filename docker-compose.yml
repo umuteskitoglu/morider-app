@@ -136,6 +136,12 @@ services:
     ports:
       - "8087:8087"
 
+  event:
+    <<: *service-base
+    command: ["-service=event"]
+    ports:
+      - "8088:8088"
+
   gateway:
     <<: *service-base
     command: ["-service=gateway"]
@@ -149,6 +155,7 @@ services:
       - reward
       - telemetry
       - feed
+      - event
 
 volumes:
   pgdata:

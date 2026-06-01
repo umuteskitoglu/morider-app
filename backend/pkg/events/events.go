@@ -35,6 +35,13 @@ type LivePosition struct {
 	Ts        int64   `json:"ts"` // unix milliseconds
 }
 
+// SubjectEventChat returns the NATS subject carrying chat messages for an event.
+// Each event service replica subscribes to it so messages fan out across replicas
+// to every connected participant.
+func SubjectEventChat(eventID int64) string {
+	return fmt.Sprintf("event.%d.chat", eventID)
+}
+
 // SubjectSessionRoster is published by the telemetry service whenever a group
 // ride's participant set changes, and consumed by the reward service to award
 // group-ride badges to every current participant.

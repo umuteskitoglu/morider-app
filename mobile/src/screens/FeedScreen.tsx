@@ -1,5 +1,6 @@
-import React, { useCallback, useState } from 'react';
+import React, { useCallback, useRef, useState } from 'react';
 import {
+  Animated,
   FlatList,
   Image,
   LayoutChangeEvent,
@@ -13,6 +14,7 @@ import {
 } from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 
@@ -37,6 +39,7 @@ type Props = NativeStackScreenProps<FeedStackParams, 'FeedList'>;
 
 export default function FeedScreen({ navigation }: Props) {
   const { width } = useWindowDimensions();
+  const insets = useSafeAreaInsets();
   const [posts, setPosts] = useState<Post[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [height, setHeight] = useState(0);
@@ -89,6 +92,14 @@ export default function FeedScreen({ navigation }: Props) {
         />
       )}
 
+      <Pressable
+        style={[styles.searchBtn, { top: insets.top + spacing.sm }]}
+        onPress={() => navigation.navigate('UserSearch')}
+        hitSlop={8}
+      >
+        <MaterialCommunityIcons name="account-search" size={22} color="#fff" />
+      </Pressable>
+
       <Pressable style={styles.fab} onPress={() => navigation.navigate('CreatePost')}>
         <MaterialCommunityIcons name="plus" size={28} color="#fff" />
       </Pressable>
@@ -116,6 +127,8 @@ function PostItem({
   const [idx, setIdx] = useState(0);
   const [liked, setLiked] = useState(post.liked);
   const [likeCount, setLikeCount] = useState(post.like_count);
+  const lastTap = useRef(0);
+  const heart = useRef(new Animated.Value(0)).current;
 
   function onScroll(e: NativeSyntheticEvent<NativeScrollEvent>) {
     setIdx(Math.round(e.nativeEvent.contentOffset.x / width));
@@ -134,6 +147,39 @@ function PostItem({
     }
   }
 
+  // Pop a heart burst in the centre of the photo.
+  function playHeart() {
+    heart.setValue(0);
+    Animated.sequence([
+      Animated.spring(heart, { toValue: 1, friction: 4, useNativeDriver: true }),
+      Animated.timing(heart, { toValue: 0, duration: 350, delay: 300, useNativeDriver: true }),
+    ]).start();
+  }
+
+  // Double-tap always likes (never unlikes), Instagram-style.
+  async function likeViaDoubleTap() {
+    playHeart();
+    if (liked) return;
+    setLiked(true);
+    setLikeCount((n) => n + 1);
+    try {
+      await api.post(`/api/posts/${post.id}/like`);
+    } catch {
+      setLiked(false);
+      setLikeCount((n) => n - 1);
+    }
+  }
+
+  function onPhotoTap() {
+    const now = Date.now();
+    if (now - lastTap.current < 280) {
+      lastTap.current = 0;
+      likeViaDoubleTap();
+    } else {
+      lastTap.current = now;
+    }
+  }
+
   return (
     <View style={{ width, height, backgroundColor: '#000' }}>
       <FlatList
@@ -144,9 +190,21 @@ function PostItem({
         showsHorizontalScrollIndicator={false}
         onMomentumScrollEnd={onScroll}
         renderItem={({ item }) => (
-          <Image source={{ uri: apiBaseURL() + item }} style={{ width, height }} resizeMode="contain" />
+          <Pressable onPress={onPhotoTap}>
+            <Image source={{ uri: apiBaseURL() + item }} style={{ width, height }} resizeMode="contain" />
+          </Pressable>
         )}
       />
+
+      <Animated.View
+        pointerEvents="none"
+        style={[
+          styles.heartBurst,
+          { opacity: heart, transform: [{ scale: heart.interpolate({ inputRange: [0, 1], outputRange: [0.3, 1] }) }] },
+        ]}
+      >
+        <MaterialCommunityIcons name="heart" size={120} color="rgba(255,255,255,0.92)" />
+      </Animated.View>
 
       {post.photos.length > 1 && (
         <View style={styles.counter}>
@@ -222,6 +280,16 @@ const styles = StyleSheet.create({
     shadowOffset: { width: 0, height: 4 },
     elevation: 8,
   },
+  searchBtn: {
+    position: 'absolute',
+    left: spacing.md,
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: 'rgba(0,0,0,0.45)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
   counter: {
     position: 'absolute',
     top: spacing.lg,
@@ -232,6 +300,7 @@ const styles = StyleSheet.create({
     borderRadius: 999,
   },
   counterText: { color: '#fff', fontSize: 12, fontWeight: '700' },
+  heartBurst: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, alignItems: 'center', justifyContent: 'center' },
   overlay: {
     position: 'absolute',
     left: 0,
