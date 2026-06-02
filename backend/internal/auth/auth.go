@@ -4,7 +4,11 @@ package auth
 import (
 	"context"
 	"errors"
+	"fmt"
+	"math/rand"
 	"net/http"
+	"regexp"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 	"github.com/jackc/pgx/v5"
@@ -57,9 +61,31 @@ type authResp struct {
 type user struct {
 	ID        int64  `json:"id"`
 	Name      string `json:"name"`
+	Username  string `json:"username"`
 	Email     string `json:"email"`
 	Country   string `json:"country"`
 	AvatarURL string `json:"avatar_url"`
+}
+
+// usernameSanitiser strips characters not allowed in a @username.
+var usernameSanitiser = regexp.MustCompile(`[^a-z0-9_]`)
+
+// generateUsername derives a base handle from the email local-part. The caller
+// appends a numeric suffix on collision; a "rider" fallback keeps it valid when
+// the local-part sanitises to fewer than 3 chars.
+func generateUsername(email string) string {
+	local := email
+	if i := strings.IndexByte(email, '@'); i >= 0 {
+		local = email[:i]
+	}
+	base := usernameSanitiser.ReplaceAllString(strings.ToLower(local), "")
+	if len(base) > 16 {
+		base = base[:16]
+	}
+	if len(base) < 3 {
+		base = "rider"
+	}
+	return base
 }
 
 func (h *handler) signup(c *gin.Context) {
@@ -75,24 +101,36 @@ func (h *handler) signup(c *gin.Context) {
 		return
 	}
 
+	// Auto-assign a unique @username derived from the email; on collision retry
+	// with a numeric suffix. Users can change it later from their profile.
+	base := generateUsername(req.Email)
 	var u user
-	err = h.d.DB.QueryRow(c,
-		`INSERT INTO users (name, email, password_hash, country)
-		 VALUES ($1, $2, $3, $4)
-		 RETURNING id, name, email, COALESCE(country, ''), COALESCE(avatar_url, '')`,
-		req.Name, req.Email, string(hash), req.Country,
-	).Scan(&u.ID, &u.Name, &u.Email, &u.Country, &u.AvatarURL)
-	if err != nil {
+	for attempt := 0; attempt < 5; attempt++ {
+		username := base
+		if attempt > 0 {
+			username = fmt.Sprintf("%s%d", base, rand.Intn(9000)+1000)
+		}
+		err = h.d.DB.QueryRow(c,
+			`INSERT INTO users (name, username, email, password_hash, country)
+			 VALUES ($1, $2, $3, $4, $5)
+			 RETURNING id, name, COALESCE(username, ''), email, COALESCE(country, ''), COALESCE(avatar_url, '')`,
+			req.Name, username, req.Email, string(hash), req.Country,
+		).Scan(&u.ID, &u.Name, &u.Username, &u.Email, &u.Country, &u.AvatarURL)
+		if err == nil {
+			h.respondWithToken(c, http.StatusCreated, u)
+			return
+		}
 		var pgErr *pgconn.PgError
 		if errors.As(err, &pgErr) && pgErr.Code == "23505" { // unique_violation
+			if pgErr.ConstraintName == "idx_users_username_lower" {
+				continue // username clash: pick another suffix
+			}
 			httpx.Error(c, http.StatusConflict, "email already registered")
 			return
 		}
-		httpx.Internal(c, "could not create user")
-		return
+		break // non-unique error: stop retrying
 	}
-
-	h.respondWithToken(c, http.StatusCreated, u)
+	httpx.Internal(c, "could not create user")
 }
 
 func (h *handler) login(c *gin.Context) {
@@ -107,9 +145,9 @@ func (h *handler) login(c *gin.Context) {
 		hash string
 	)
 	err := h.d.DB.QueryRow(c,
-		`SELECT id, name, email, COALESCE(country, ''), COALESCE(avatar_url, ''), password_hash
+		`SELECT id, name, COALESCE(username, ''), email, COALESCE(country, ''), COALESCE(avatar_url, ''), password_hash
 		 FROM users WHERE email = $1`, req.Email,
-	).Scan(&u.ID, &u.Name, &u.Email, &u.Country, &u.AvatarURL, &hash)
+	).Scan(&u.ID, &u.Name, &u.Username, &u.Email, &u.Country, &u.AvatarURL, &hash)
 	if errors.Is(err, pgx.ErrNoRows) {
 		httpx.Error(c, http.StatusUnauthorized, "invalid credentials")
 		return

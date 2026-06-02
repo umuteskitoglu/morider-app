@@ -1,19 +1,25 @@
 import React, { useCallback, useLayoutEffect, useState } from 'react';
 import { Image, Pressable, RefreshControl, ScrollView, StyleSheet, Text, useWindowDimensions, View } from 'react-native';
-import { useFocusEffect } from '@react-navigation/native';
-import { NativeStackScreenProps } from '@react-navigation/native-stack';
+import { RouteProp, useFocusEffect } from '@react-navigation/native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 
-import { FeedStackParams } from '../navigation/RootNavigator';
 import { PostDetail, DetailPost } from '../components/PostDetail';
+import { AvatarViewer } from '../components/AvatarViewer';
 import FollowButton from '../components/FollowButton';
 import { useAuth } from '../store/auth';
 import { api, apiBaseURL } from '../api/client';
 import { colors, gradients, radius, shadow, spacing } from '../theme';
 
 type Badge = { id: number; type: string; description: string };
-type Props = NativeStackScreenProps<FeedStackParams, 'UserProfile'>;
+
+// Stack-agnostic props: this screen is registered in both the Feed and Profile
+// stacks. It only needs the route params and setOptions, so we avoid binding it
+// to a single navigator's param list.
+type Props = {
+  route: RouteProp<{ UserProfile: { userId: number; name: string } }, 'UserProfile'>;
+  navigation: { setOptions: (opts: { title?: string }) => void };
+};
 
 export default function UserProfileScreen({ route, navigation }: Props) {
   const { userId, name } = route.params;
@@ -25,6 +31,8 @@ export default function UserProfileScreen({ route, navigation }: Props) {
   const [refreshing, setRefreshing] = useState(false);
   const [following, setFollowing] = useState(false);
   const [avatarUrl, setAvatarUrl] = useState('');
+  const [username, setUsername] = useState('');
+  const [zoomUri, setZoomUri] = useState<string | null>(null);
 
   const isSelf = user?.id === userId;
 
@@ -44,6 +52,7 @@ export default function UserProfileScreen({ route, navigation }: Props) {
       if (!isSelf) reqs.push(api.get(`/api/follows/status/${userId}`));
       const [u, p, b, s] = await Promise.all(reqs);
       setAvatarUrl(u.data.avatar_url ?? '');
+      setUsername(u.data.username ?? '');
       setPosts(p.data.posts ?? []);
       setBadges(b.data.rewards ?? []);
       if (s) setFollowing(s.data.following ?? false);
@@ -73,13 +82,16 @@ export default function UserProfileScreen({ route, navigation }: Props) {
       >
         <LinearGradient colors={gradients.surface} style={styles.header}>
           {avatarUrl ? (
-            <Image source={{ uri: apiBaseURL() + avatarUrl }} style={styles.avatar} />
+            <Pressable onPress={() => setZoomUri(apiBaseURL() + avatarUrl)}>
+              <Image source={{ uri: apiBaseURL() + avatarUrl }} style={styles.avatar} />
+            </Pressable>
           ) : (
             <LinearGradient colors={gradients.primary} style={styles.avatar}>
               <Text style={styles.avatarText}>{name?.charAt(0).toUpperCase() ?? 'M'}</Text>
             </LinearGradient>
           )}
           <Text style={styles.name}>{name}</Text>
+          {username ? <Text style={styles.handle}>@{username}</Text> : null}
           <Text style={styles.muted}>{posts.length} paylaşım</Text>
           {badges.length > 0 && (
             <View style={styles.badges}>
@@ -115,6 +127,7 @@ export default function UserProfileScreen({ route, navigation }: Props) {
         )}
       </ScrollView>
       <PostDetail post={viewer} onClose={() => setViewer(null)} />
+      <AvatarViewer uri={zoomUri} onClose={() => setZoomUri(null)} />
     </>
   );
 }
@@ -133,6 +146,7 @@ const styles = StyleSheet.create({
   avatar: { width: 84, height: 84, borderRadius: 42, alignItems: 'center', justifyContent: 'center', marginBottom: spacing.sm, ...shadow.glow },
   avatarText: { color: '#fff', fontSize: 34, fontWeight: '900' },
   name: { color: colors.text, fontSize: 22, fontWeight: '900' },
+  handle: { color: colors.primary, fontWeight: '700', marginTop: 2 },
   muted: { color: colors.textMuted, marginTop: 2 },
   badges: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.xs, justifyContent: 'center', marginTop: spacing.md, paddingHorizontal: spacing.md },
   chip: {

@@ -1,9 +1,11 @@
 import React, { useCallback, useState } from 'react';
 import { Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } from 'react-native';
-import { useFocusEffect } from '@react-navigation/native';
+import { useFocusEffect, useNavigation } from '@react-navigation/native';
+import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 
 import { Card } from '../components/ui';
 import FollowButton from '../components/FollowButton';
+import { ProfileStackParams } from '../navigation/RootNavigator';
 import { api } from '../api/client';
 import { colors, radius, spacing } from '../theme';
 
@@ -11,6 +13,7 @@ type FollowUser = { id: number; name: string; email: string };
 type Tab = 'following' | 'followers';
 
 export default function FollowsScreen() {
+  const navigation = useNavigation<NativeStackNavigationProp<ProfileStackParams>>();
   const [tab, setTab] = useState<Tab>('following');
   const [following, setFollowing] = useState<FollowUser[]>([]);
   const [followers, setFollowers] = useState<FollowUser[]>([]);
@@ -78,11 +81,16 @@ export default function FollowsScreen() {
       ) : (
         list.map((u) => (
           <Card key={u.id} style={styles.row}>
-            <Avatar name={u.name} />
-            <View style={styles.info}>
-              <Text style={styles.name}>{u.name}</Text>
-              <Text style={styles.email}>{u.email}</Text>
-            </View>
+            <Pressable
+              style={styles.rowTap}
+              onPress={() => navigation.navigate('UserProfile', { userId: u.id, name: u.name })}
+            >
+              <Avatar name={u.name} />
+              <View style={styles.info}>
+                <Text style={styles.name}>{u.name}</Text>
+                <Text style={styles.email}>{u.email}</Text>
+              </View>
+            </Pressable>
             <FollowButton
               userId={u.id}
               following={followedIds.has(u.id)}
@@ -129,6 +137,7 @@ const styles = StyleSheet.create({
   tabText: { color: colors.textMuted, fontWeight: '800', fontSize: 13 },
   tabTextActive: { color: colors.text },
   row: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
+  rowTap: { flex: 1, flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
   info: { flex: 1 },
   name: { color: colors.text, fontWeight: '800' },
   email: { color: colors.textMuted, fontSize: 12 },

@@ -23,9 +23,9 @@ import (
 )
 
 const (
-	maxPhotos       = 10
-	maxPhotoBytes   = 10 << 20 // 10 MB
-	mediaURLPrefix  = "/api/feed/media/"
+	maxPhotos      = 10
+	maxPhotoBytes  = 10 << 20 // 10 MB
+	mediaURLPrefix = "/api/feed/media/"
 )
 
 // Run boots the feed service.
@@ -58,6 +58,8 @@ func registerRoutes(d *server.Deps, h *handler) {
 	g.GET("/posts/:id/likes", h.likes)
 	g.GET("/posts/:id/comments", h.listComments)
 	g.POST("/posts/:id/comments", h.addComment)
+	g.POST("/comments/:cid/like", h.likeComment)
+	g.DELETE("/comments/:cid/like", h.unlikeComment)
 }
 
 type handler struct {
@@ -81,12 +83,16 @@ type Post struct {
 	Liked        bool      `json:"liked"`
 }
 
-// Comment is the API representation of a post comment.
+// Comment is the API representation of a post comment. ParentID is null for a
+// top-level comment; the client builds the reply tree from these edges.
 type Comment struct {
 	ID        int64     `json:"id"`
 	UserID    int64     `json:"user_id"`
 	Author    string    `json:"author"`
 	Body      string    `json:"body"`
+	ParentID  *int64    `json:"parent_id"`
+	LikeCount int64     `json:"like_count"`
+	Liked     bool      `json:"liked"`
 	CreatedAt time.Time `json:"created_at"`
 }
 
@@ -367,10 +373,13 @@ func (h *handler) listComments(c *gin.Context) {
 	if !ok {
 		return
 	}
+	me := authpkg.UserID(c)
 	rows, err := h.d.DB.Query(c,
-		`SELECT cm.id, cm.user_id, u.name, cm.body, cm.created_at
+		`SELECT cm.id, cm.user_id, u.name, cm.body, cm.parent_id, cm.created_at,
+		        (SELECT COUNT(*) FROM post_comment_likes cl WHERE cl.comment_id = cm.id),
+		        EXISTS(SELECT 1 FROM post_comment_likes cl WHERE cl.comment_id = cm.id AND cl.user_id = $2)
 		 FROM post_comments cm JOIN users u ON u.id = cm.user_id
-		 WHERE cm.post_id = $1 ORDER BY cm.created_at ASC LIMIT 200`, id)
+		 WHERE cm.post_id = $1 ORDER BY cm.created_at ASC LIMIT 500`, id, me)
 	if err != nil {
 		httpx.Internal(c, "could not load comments")
 		return
@@ -380,7 +389,7 @@ func (h *handler) listComments(c *gin.Context) {
 	comments := make([]Comment, 0)
 	for rows.Next() {
 		var cm Comment
-		if err := rows.Scan(&cm.ID, &cm.UserID, &cm.Author, &cm.Body, &cm.CreatedAt); err != nil {
+		if err := rows.Scan(&cm.ID, &cm.UserID, &cm.Author, &cm.Body, &cm.ParentID, &cm.CreatedAt, &cm.LikeCount, &cm.Liked); err != nil {
 			httpx.Internal(c, "could not read comments")
 			return
 		}
@@ -390,7 +399,8 @@ func (h *handler) listComments(c *gin.Context) {
 }
 
 type commentReq struct {
-	Body string `json:"body" binding:"required,max=2000"`
+	Body     string `json:"body" binding:"required,max=2000"`
+	ParentID *int64 `json:"parent_id"`
 }
 
 func (h *handler) addComment(c *gin.Context) {
@@ -403,21 +413,82 @@ func (h *handler) addComment(c *gin.Context) {
 		httpx.BadRequest(c, err.Error())
 		return
 	}
+	// A reply must target a comment on the same post.
+	if req.ParentID != nil {
+		var exists bool
+		if err := h.d.DB.QueryRow(c,
+			`SELECT EXISTS(SELECT 1 FROM post_comments WHERE id = $1 AND post_id = $2)`,
+			*req.ParentID, id).Scan(&exists); err != nil {
+			httpx.Internal(c, "could not validate reply")
+			return
+		}
+		if !exists {
+			httpx.BadRequest(c, "parent comment not found on this post")
+			return
+		}
+	}
 	var cm Comment
 	err := h.d.DB.QueryRow(c,
 		`WITH ins AS (
-		    INSERT INTO post_comments (post_id, user_id, body) VALUES ($1, $2, $3)
-		    RETURNING id, user_id, body, created_at
+		    INSERT INTO post_comments (post_id, user_id, body, parent_id) VALUES ($1, $2, $3, $4)
+		    RETURNING id, user_id, body, parent_id, created_at
 		 )
-		 SELECT ins.id, ins.user_id, u.name, ins.body, ins.created_at
+		 SELECT ins.id, ins.user_id, u.name, ins.body, ins.parent_id, ins.created_at
 		 FROM ins JOIN users u ON u.id = ins.user_id`,
-		id, authpkg.UserID(c), req.Body,
-	).Scan(&cm.ID, &cm.UserID, &cm.Author, &cm.Body, &cm.CreatedAt)
+		id, authpkg.UserID(c), req.Body, req.ParentID,
+	).Scan(&cm.ID, &cm.UserID, &cm.Author, &cm.Body, &cm.ParentID, &cm.CreatedAt)
 	if err != nil {
 		httpx.Internal(c, "could not add comment")
 		return
 	}
 	c.JSON(http.StatusCreated, cm)
+}
+
+// commentID parses the :cid route param.
+func commentID(c *gin.Context) (int64, bool) {
+	id, err := strconv.ParseInt(c.Param("cid"), 10, 64)
+	if err != nil {
+		httpx.BadRequest(c, "invalid comment id")
+		return 0, false
+	}
+	return id, true
+}
+
+func (h *handler) likeComment(c *gin.Context) {
+	cid, ok := commentID(c)
+	if !ok {
+		return
+	}
+	if _, err := h.d.DB.Exec(c,
+		`INSERT INTO post_comment_likes (comment_id, user_id) VALUES ($1, $2) ON CONFLICT DO NOTHING`,
+		cid, authpkg.UserID(c)); err != nil {
+		httpx.Internal(c, "could not like comment")
+		return
+	}
+	h.respondCommentLikeCount(c, cid, true)
+}
+
+func (h *handler) unlikeComment(c *gin.Context) {
+	cid, ok := commentID(c)
+	if !ok {
+		return
+	}
+	if _, err := h.d.DB.Exec(c,
+		`DELETE FROM post_comment_likes WHERE comment_id = $1 AND user_id = $2`,
+		cid, authpkg.UserID(c)); err != nil {
+		httpx.Internal(c, "could not unlike comment")
+		return
+	}
+	h.respondCommentLikeCount(c, cid, false)
+}
+
+func (h *handler) respondCommentLikeCount(c *gin.Context, cid int64, liked bool) {
+	var cnt int64
+	if err := h.d.DB.QueryRow(c, `SELECT COUNT(*) FROM post_comment_likes WHERE comment_id = $1`, cid).Scan(&cnt); err != nil {
+		httpx.Internal(c, "could not load like count")
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"liked": liked, "like_count": cnt})
 }
 
 func postID(c *gin.Context) (int64, bool) {
