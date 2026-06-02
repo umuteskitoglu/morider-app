@@ -1,6 +1,6 @@
 import React from 'react';
 import { ActivityIndicator, Pressable, Text, View, StyleSheet } from 'react-native';
-import { NavigationContainer, DefaultTheme, NavigatorScreenParams, getFocusedRouteNameFromRoute } from '@react-navigation/native';
+import { NavigationContainer, DefaultTheme, LinkingOptions, NavigatorScreenParams, getFocusedRouteNameFromRoute } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -22,20 +22,19 @@ import FeedScreen from '../screens/FeedScreen';
 import CreatePostScreen from '../screens/CreatePostScreen';
 import LocationPickerScreen from '../screens/LocationPickerScreen';
 import UserProfileScreen from '../screens/UserProfileScreen';
+import UserSearchScreen from '../screens/UserSearchScreen';
 import CommentsScreen from '../screens/CommentsScreen';
 import ProfileScreen from '../screens/ProfileScreen';
 import FollowsScreen from '../screens/FollowsScreen';
+import EventsScreen from '../screens/EventsScreen';
+import EventCreateScreen from '../screens/EventCreateScreen';
+import EventDetailScreen from '../screens/EventDetailScreen';
+import EventChatScreen from '../screens/EventChatScreen';
+import EventLocationPickerScreen from '../screens/EventLocationPickerScreen';
 
 export type AuthStackParams = {
   Login: undefined;
   Signup: undefined;
-};
-
-export type RoutesStackParams = {
-  RoutesList: undefined;
-  Explore: undefined;
-  RouteCreate: undefined;
-  RouteDetail: { id: number; name: string };
 };
 
 // Group riding lives under the Ride tab — it is a way to ride, not a route list.
@@ -50,27 +49,46 @@ export type FeedStackParams = {
   CreatePost: { pickedLat?: number; pickedLon?: number; pickedName?: string } | undefined;
   LocationPicker: undefined;
   UserProfile: { userId: number; name: string };
+  UserSearch: undefined;
   Comments: { postId: number };
 };
 
+// "You" hub: account plus everything that belongs to the rider — ride history,
+// saved routes and follows all live here so the tab bar stays short.
 export type ProfileStackParams = {
   ProfileMain: undefined;
   Follows: undefined;
+  UserProfile: { userId: number; name: string };
+  Rides: undefined;
+  RoutesList: undefined;
+  Explore: undefined;
+  RouteCreate: undefined;
+  RouteDetail: { id: number; name: string };
+};
+
+export type EventsStackParams = {
+  EventsList: undefined;
+  // With `code` the form edits that event; without it, it creates a new one.
+  EventCreate: { code?: string } | undefined;
+  EventDetail: { code: string };
+  EventChat: { code: string; title?: string };
+  // Picked location is delivered via the eventDraft store, not params, so both
+  // start and end survive the create screen remounting during the round-trip.
+  EventLocationPicker: { target: 'start' | 'end' };
 };
 
 export type AppTabParams = {
   Ride: NavigatorScreenParams<RideStackParams> | undefined;
   Feed: undefined;
-  Rides: undefined;
-  Routes: undefined;
-  Profile: undefined;
+  Events: NavigatorScreenParams<EventsStackParams> | undefined;
+  Profile: NavigatorScreenParams<ProfileStackParams> | undefined;
 };
 
 const AuthStack = createNativeStackNavigator<AuthStackParams>();
 const RideStack = createNativeStackNavigator<RideStackParams>();
-const RoutesStack = createNativeStackNavigator<RoutesStackParams>();
 const FeedStack = createNativeStackNavigator<FeedStackParams>();
 const ProfileStack = createNativeStackNavigator<ProfileStackParams>();
+const EventsStack = createNativeStackNavigator<EventsStackParams>();
 const Tabs = createBottomTabNavigator<AppTabParams>();
 
 type IconName = React.ComponentProps<typeof MaterialCommunityIcons>['name'];
@@ -125,20 +143,45 @@ function ProfileNavigator() {
         contentStyle: { backgroundColor: colors.bg },
       }}
     >
+      <ProfileStack.Screen name="ProfileMain" component={ProfileScreen} options={{ title: 'Profil' }} />
+      <ProfileStack.Screen name="Rides" component={RidesScreen} options={{ title: 'Sürüşlerim' }} />
       <ProfileStack.Screen
-        name="ProfileMain"
-        component={ProfileScreen}
+        name="RoutesList"
+        component={RoutesScreen}
         options={({ navigation }) => ({
-          title: 'Profil',
+          title: 'Rotalarım',
           headerRight: () => (
             <View style={styles.headerRow}>
-              <HeaderIconButton icon="account-multiple" onPress={() => navigation.navigate('Follows')} />
+              <HeaderIconButton icon="compass-outline" onPress={() => navigation.navigate('Explore')} />
             </View>
           ),
         })}
       />
+      <ProfileStack.Screen name="Explore" component={ExploreScreen} options={{ title: 'Keşfet' }} />
+      <ProfileStack.Screen name="RouteCreate" component={RouteCreateScreen} options={{ title: 'Yeni Rota' }} />
+      <ProfileStack.Screen name="RouteDetail" component={RouteDetailScreen} options={{ title: 'Rota' }} />
       <ProfileStack.Screen name="Follows" component={FollowsScreen} options={{ title: 'Takip' }} />
+      <ProfileStack.Screen name="UserProfile" component={UserProfileScreen} options={{ title: 'Profil' }} />
     </ProfileStack.Navigator>
+  );
+}
+
+function EventsNavigator() {
+  return (
+    <EventsStack.Navigator
+      screenOptions={{
+        headerStyle: { backgroundColor: colors.surface },
+        headerTitleStyle: { color: colors.text, fontWeight: '800' },
+        headerTintColor: colors.primary,
+        contentStyle: { backgroundColor: colors.bg },
+      }}
+    >
+      <EventsStack.Screen name="EventsList" component={EventsScreen} options={{ title: 'Etkinlikler' }} />
+      <EventsStack.Screen name="EventCreate" component={EventCreateScreen} options={{ title: 'Yeni Etkinlik' }} />
+      <EventsStack.Screen name="EventDetail" component={EventDetailScreen} options={{ title: 'Etkinlik' }} />
+      <EventsStack.Screen name="EventChat" component={EventChatScreen} options={{ title: 'Sohbet' }} />
+      <EventsStack.Screen name="EventLocationPicker" component={EventLocationPickerScreen} options={{ title: 'Konum Seç' }} />
+    </EventsStack.Navigator>
   );
 }
 
@@ -156,37 +199,9 @@ function FeedNavigator() {
       <FeedStack.Screen name="CreatePost" component={CreatePostScreen} options={{ title: 'Yeni Paylaşım' }} />
       <FeedStack.Screen name="LocationPicker" component={LocationPickerScreen} options={{ title: 'Konum Seç' }} />
       <FeedStack.Screen name="UserProfile" component={UserProfileScreen} options={{ title: 'Profil' }} />
+      <FeedStack.Screen name="UserSearch" component={UserSearchScreen} options={{ title: 'Kişi Bul' }} />
       <FeedStack.Screen name="Comments" component={CommentsScreen} options={{ title: 'Yorumlar' }} />
     </FeedStack.Navigator>
-  );
-}
-
-function RoutesNavigator() {
-  return (
-    <RoutesStack.Navigator
-      screenOptions={{
-        headerStyle: { backgroundColor: colors.surface },
-        headerTitleStyle: { color: colors.text },
-        headerTintColor: colors.primary,
-        contentStyle: { backgroundColor: colors.bg },
-      }}
-    >
-      <RoutesStack.Screen
-        name="RoutesList"
-        component={RoutesScreen}
-        options={({ navigation }) => ({
-          title: 'Rotalarım',
-          headerRight: () => (
-            <View style={styles.headerRow}>
-              <HeaderIconButton icon="compass-outline" onPress={() => navigation.navigate('Explore')} />
-            </View>
-          ),
-        })}
-      />
-      <RoutesStack.Screen name="Explore" component={ExploreScreen} options={{ title: 'Keşfet' }} />
-      <RoutesStack.Screen name="RouteCreate" component={RouteCreateScreen} options={{ title: 'Yeni Rota' }} />
-      <RoutesStack.Screen name="RouteDetail" component={RouteDetailScreen} options={{ title: 'Rota' }} />
-    </RoutesStack.Navigator>
   );
 }
 
@@ -199,6 +214,21 @@ const navTheme = {
     text: colors.text,
     border: colors.border,
     primary: colors.primary,
+  },
+};
+
+// Deep links: morider://event/<code> opens the event directly in the Events tab.
+// The Expo `scheme` ("morider") is declared in app.json.
+const linking: LinkingOptions<AppTabParams> = {
+  prefixes: ['morider://'],
+  config: {
+    screens: {
+      Events: {
+        screens: {
+          EventDetail: 'event/:code',
+        },
+      },
+    },
   },
 };
 
@@ -246,14 +276,9 @@ function AppTabs() {
         options={{ title: 'Akış', headerShown: false, tabBarIcon: tabIcon('image-multiple') }}
       />
       <Tabs.Screen
-        name="Rides"
-        component={RidesScreen}
-        options={{ title: 'Sürüşlerim', tabBarLabel: 'Geçmiş', tabBarIcon: tabIcon('history') }}
-      />
-      <Tabs.Screen
-        name="Routes"
-        component={RoutesNavigator}
-        options={{ title: 'Rotalar', headerShown: false, tabBarIcon: tabIcon('map-marker-path') }}
+        name="Events"
+        component={EventsNavigator}
+        options={{ title: 'Etkinlik', headerShown: false, tabBarIcon: tabIcon('calendar-clock') }}
       />
       <Tabs.Screen
         name="Profile"
@@ -285,7 +310,7 @@ export default function RootNavigator() {
   }
 
   return (
-    <NavigationContainer theme={navTheme}>
+    <NavigationContainer theme={navTheme} linking={linking}>
       {token ? <AppTabs /> : <AuthFlow />}
     </NavigationContainer>
   );

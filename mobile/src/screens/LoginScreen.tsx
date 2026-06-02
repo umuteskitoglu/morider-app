@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { Alert, KeyboardAvoidingView, Platform, StyleSheet, Text, View } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { LinearGradient } from 'expo-linear-gradient';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
@@ -13,6 +14,7 @@ import { colors, gradients, shadow, spacing } from '../theme';
 type Props = NativeStackScreenProps<AuthStackParams, 'Login'>;
 
 export default function LoginScreen({ navigation }: Props) {
+  const insets = useSafeAreaInsets();
   const { signIn } = useAuth();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -36,7 +38,7 @@ export default function LoginScreen({ navigation }: Props) {
   return (
     <LinearGradient colors={gradients.hero} style={styles.container}>
       <KeyboardAvoidingView
-        style={styles.flex}
+        style={[styles.flex, { paddingTop: insets.top, paddingBottom: insets.bottom }]}
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
       >
         <View style={styles.header}>

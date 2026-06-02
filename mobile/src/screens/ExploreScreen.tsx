@@ -4,7 +4,7 @@ import { useFocusEffect } from '@react-navigation/native';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 
-import { RoutesStackParams } from '../navigation/RootNavigator';
+import { ProfileStackParams } from '../navigation/RootNavigator';
 import { Card, Stars } from '../components/ui';
 import FollowButton from '../components/FollowButton';
 import { api, errorMessage } from '../api/client';
@@ -21,7 +21,7 @@ type PublicRoute = {
   rating_count: number;
   i_follow: boolean;
 };
-type Props = NativeStackScreenProps<RoutesStackParams, 'Explore'>;
+type Props = NativeStackScreenProps<ProfileStackParams, 'Explore'>;
 
 export default function ExploreScreen({ navigation }: Props) {
   const [routes, setRoutes] = useState<PublicRoute[]>([]);

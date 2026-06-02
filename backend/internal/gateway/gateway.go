@@ -32,6 +32,8 @@ func Run(cfg config.Config) error {
 		{"/api/sessions", cfg.TelemetryURL},
 		{"/api/feed", cfg.FeedURL},
 		{"/api/posts", cfg.FeedURL},
+		{"/api/comments", cfg.FeedURL},
+		{"/api/events", cfg.EventURL},
 	}
 
 	for _, r := range routes {

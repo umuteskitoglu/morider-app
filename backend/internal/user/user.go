@@ -5,16 +5,21 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"regexp"
 	"strconv"
 
 	"github.com/gin-gonic/gin"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 
 	"github.com/morider/backend/internal/server"
 	authpkg "github.com/morider/backend/pkg/auth"
 	"github.com/morider/backend/pkg/config"
 	"github.com/morider/backend/pkg/httpx"
 )
+
+// usernamePattern bounds a @username to a safe, predictable charset/length.
+var usernamePattern = regexp.MustCompile(`^[a-zA-Z0-9_]{3,20}$`)
 
 // Run boots the user service.
 func Run(cfg config.Config) error {
@@ -31,6 +36,7 @@ func registerRoutes(d *server.Deps) {
 	g := d.Engine.Group("/api/users")
 	g.GET("/:id", h.get)
 	protected := g.Use(d.JWT.Middleware())
+	protected.GET("/search", h.searchUsers)
 	protected.PUT("/:id", h.update)
 
 	f := d.Engine.Group("/api/follows", d.JWT.Middleware())
@@ -46,6 +52,7 @@ type handler struct{ d *server.Deps }
 type profile struct {
 	ID        int64  `json:"id"`
 	Name      string `json:"name"`
+	Username  string `json:"username"`
 	Email     string `json:"email"`
 	Country   string `json:"country"`
 	AvatarURL string `json:"avatar_url"`
@@ -59,8 +66,8 @@ func (h *handler) get(c *gin.Context) {
 	}
 	var p profile
 	err = h.d.DB.QueryRow(c,
-		`SELECT id, name, email, COALESCE(country, ''), COALESCE(avatar_url, '') FROM users WHERE id = $1`, id,
-	).Scan(&p.ID, &p.Name, &p.Email, &p.Country, &p.AvatarURL)
+		`SELECT id, name, COALESCE(username, ''), email, COALESCE(country, ''), COALESCE(avatar_url, '') FROM users WHERE id = $1`, id,
+	).Scan(&p.ID, &p.Name, &p.Username, &p.Email, &p.Country, &p.AvatarURL)
 	if errors.Is(err, pgx.ErrNoRows) {
 		httpx.Error(c, http.StatusNotFound, "user not found")
 		return
@@ -74,6 +81,7 @@ func (h *handler) get(c *gin.Context) {
 
 type updateReq struct {
 	Name      string `json:"name"`
+	Username  string `json:"username"`
 	Country   string `json:"country"`
 	AvatarURL string `json:"avatar_url"`
 }
@@ -93,19 +101,29 @@ func (h *handler) update(c *gin.Context) {
 		httpx.BadRequest(c, err.Error())
 		return
 	}
+	if req.Username != "" && !usernamePattern.MatchString(req.Username) {
+		httpx.BadRequest(c, "username must be 3-20 chars: letters, digits, underscore")
+		return
+	}
 	var p profile
 	err = h.d.DB.QueryRow(c,
 		`UPDATE users
 		 SET name = COALESCE(NULLIF($2, ''), name),
-		     country = COALESCE(NULLIF($3, ''), country),
-		     avatar_url = COALESCE(NULLIF($4, ''), avatar_url),
+		     username = COALESCE(NULLIF($3, ''), username),
+		     country = COALESCE(NULLIF($4, ''), country),
+		     avatar_url = COALESCE(NULLIF($5, ''), avatar_url),
 		     updated_at = now()
 		 WHERE id = $1
-		 RETURNING id, name, email, COALESCE(country, ''), COALESCE(avatar_url, '')`,
-		id, req.Name, req.Country, req.AvatarURL,
-	).Scan(&p.ID, &p.Name, &p.Email, &p.Country, &p.AvatarURL)
+		 RETURNING id, name, COALESCE(username, ''), email, COALESCE(country, ''), COALESCE(avatar_url, '')`,
+		id, req.Name, req.Username, req.Country, req.AvatarURL,
+	).Scan(&p.ID, &p.Name, &p.Username, &p.Email, &p.Country, &p.AvatarURL)
 	if errors.Is(err, pgx.ErrNoRows) {
 		httpx.Error(c, http.StatusNotFound, "user not found")
+		return
+	}
+	var pgErr *pgconn.PgError
+	if errors.As(err, &pgErr) && pgErr.Code == "23505" { // unique_violation on username
+		httpx.Error(c, http.StatusConflict, "username taken")
 		return
 	}
 	if err != nil {

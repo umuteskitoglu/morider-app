@@ -6,14 +6,14 @@ import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import type { BottomTabNavigationProp } from '@react-navigation/bottom-tabs';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 
-import { AppTabParams, RoutesStackParams } from '../navigation/RootNavigator';
+import { AppTabParams, ProfileStackParams } from '../navigation/RootNavigator';
 import { useAuth } from '../store/auth';
 import { Button, Card, Stars } from '../components/ui';
 import { api, errorMessage } from '../api/client';
 import { colors, spacing } from '../theme';
 
 type Coord = { latitude: number; longitude: number };
-type Props = NativeStackScreenProps<RoutesStackParams, 'RouteDetail'>;
+type Props = NativeStackScreenProps<ProfileStackParams, 'RouteDetail'>;
 
 const ISTANBUL = { latitude: 41.0082, longitude: 28.9784, latitudeDelta: 0.1, longitudeDelta: 0.1 };
 
