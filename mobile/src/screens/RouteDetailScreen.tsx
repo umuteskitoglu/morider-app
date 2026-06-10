@@ -5,6 +5,8 @@ import { useFocusEffect } from '@react-navigation/native';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import type { BottomTabNavigationProp } from '@react-navigation/bottom-tabs';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
+import * as FileSystem from 'expo-file-system/legacy';
+import * as Sharing from 'expo-sharing';
 
 import { AppTabParams, ProfileStackParams } from '../navigation/RootNavigator';
 import { useAuth } from '../store/auth';
@@ -36,6 +38,7 @@ export default function RouteDetailScreen({ route, navigation }: Props) {
   const [myRating, setMyRating] = useState(0);
   const [deleting, setDeleting] = useState(false);
   const [startingGroup, setStartingGroup] = useState(false);
+  const [exporting, setExporting] = useState(false);
   const mapRef = useRef<MapView | null>(null);
 
   const isOwner = user?.id === ownerId;
@@ -97,6 +100,28 @@ export default function RouteDetailScreen({ route, navigation }: Props) {
       Alert.alert('Başlatılamadı', errorMessage(err));
     } finally {
       setStartingGroup(false);
+    }
+  }
+
+  async function exportGPX() {
+    try {
+      setExporting(true);
+      const { data } = await api.get(`/api/routes/${id}/gpx`, {
+        responseType: 'text',
+        transformResponse: (d) => d,
+      });
+      const safeName = name.replace(/[^\w-]+/g, '-').replace(/^-+|-+$/g, '') || 'rota';
+      const uri = `${FileSystem.cacheDirectory}${safeName}.gpx`;
+      await FileSystem.writeAsStringAsync(uri, String(data));
+      if (await Sharing.isAvailableAsync()) {
+        await Sharing.shareAsync(uri, { mimeType: 'application/gpx+xml', dialogTitle: 'GPX dosyasını paylaş' });
+      } else {
+        Alert.alert('GPX hazır', `Dosya kaydedildi: ${uri}`);
+      }
+    } catch (err) {
+      Alert.alert('Dışa aktarılamadı', errorMessage(err));
+    } finally {
+      setExporting(false);
     }
   }
 
@@ -172,6 +197,8 @@ export default function RouteDetailScreen({ route, navigation }: Props) {
         <Button title="Bu Rotada Sür" icon="motorbike" onPress={rideThisRoute} />
         <View style={{ height: spacing.sm }} />
         <Button title="Grup Sürüşü Başlat" variant="ghost" icon="account-group" onPress={startGroupRide} loading={startingGroup} />
+        <View style={{ height: spacing.sm }} />
+        <Button title="GPX Dışa Aktar" variant="ghost" icon="download-outline" onPress={exportGPX} loading={exporting} />
         {isOwner ? (
           <>
             <View style={{ height: spacing.sm }} />

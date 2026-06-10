@@ -81,8 +81,15 @@ ROUTING_URL=http://osrm:5000
 
 Veri `infra/osrm/` altına yazılır (gitignore'lu). İşlem adımları: `osrm-extract` (profil) → `osrm-partition` → `osrm-customize` → `osrm-routed --algorithm mld`. Motosiklet profili için `car.lua` yerine özelleştirilmiş bir profille `osrm-data` çalıştırılır (Makefile'da `OSRM_IMAGE`/profil ayarı genişletilebilir).
 
+## GPX içe/dışa aktarma
+
+- **Dışa aktarma:** `GET /api/routes/:id/gpx` rota geometrisini GPX 1.1 track olarak döndürür (`application/gpx+xml`, `Content-Disposition: attachment`). Görünürlük kuralları `GET /api/routes/:id` ile aynıdır (sahip / public / karşılıklı takip).
+- **İçe aktarma:** `POST /api/routes/import/gpx` ham GPX gövdesi alır (maks 10 MB). `trkpt` > `rtept` > `wpt` öncelik sırasıyla noktalar çıkarılır, 5000 noktayı aşan izler eşit aralıklarla seyreltilir. Rota adı dosyadaki `metadata/name` veya `trk/name`'den gelir; rota **private** oluşturulur. Yanıt, `POST /api/routes` ile aynı `Route` JSON'udur.
+- **Mobil:** Rota detayında "GPX Dışa Aktar" (paylaşım menüsü), Rotalarım'da "GPX İçe Aktar" (dosya seçici).
+- Parser/builder saf fonksiyonlardır: [`gpx.go`](../backend/internal/route/gpx.go), testler `gpx_test.go`.
+
 ## Sonraki adımlar
 
 - Yükseklik profili (PostGIS/harici DEM ile).
-- GPX/KML içe-dışa aktarma.
+- KML içe-dışa aktarma (GPX tamamlandı).
 - Motosiklete özel OSRM profili (otoyol/viraj ağırlıkları).

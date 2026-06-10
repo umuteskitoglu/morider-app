@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"strconv"
 	"strings"
@@ -37,9 +38,11 @@ func registerRoutes(d *server.Deps, h *handler) {
 	g.GET("", h.list)
 	g.GET("/explore", h.explore)
 	g.GET("/:id", h.get)
+	g.GET("/:id/gpx", h.exportGPX)
 	g.PUT("/:id", h.update)
 	g.DELETE("/:id", h.remove)
 	g.POST("/:id/rate", h.rate)
+	g.POST("/import/gpx", h.importGPX)
 }
 
 type handler struct {
@@ -363,6 +366,104 @@ func (h *handler) remove(c *gin.Context) {
 		return
 	}
 	c.Status(http.StatusNoContent)
+}
+
+// exportGPX streams the route geometry as a GPX 1.1 file. Same visibility
+// rules as get: owner, public, or friends via mutual follow.
+func (h *handler) exportGPX(c *gin.Context) {
+	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil {
+		httpx.BadRequest(c, "invalid route id")
+		return
+	}
+	var (
+		name    string
+		geojson string
+	)
+	err = h.d.DB.QueryRow(c,
+		`SELECT r.name, COALESCE(ST_AsGeoJSON(r.path), '')
+		 FROM routes r
+		 WHERE r.id = $1 AND (
+		     r.user_id = $2
+		     OR r.visibility = 'public'
+		     OR (r.visibility = 'friends'
+		         AND EXISTS (SELECT 1 FROM follows a WHERE a.follower_id = $2 AND a.followee_id = r.user_id)
+		         AND EXISTS (SELECT 1 FROM follows b WHERE b.follower_id = r.user_id AND b.followee_id = $2))
+		 )`, id, authpkg.UserID(c),
+	).Scan(&name, &geojson)
+	if errors.Is(err, pgx.ErrNoRows) {
+		httpx.Error(c, http.StatusNotFound, "route not found")
+		return
+	}
+	if err != nil {
+		httpx.Internal(c, "could not load route")
+		return
+	}
+	points := parseGeoJSONLine(geojson)
+	if len(points) < 2 {
+		httpx.Error(c, http.StatusUnprocessableEntity, "route has no geometry")
+		return
+	}
+	c.Header("Content-Disposition", fmt.Sprintf("attachment; filename=%q", gpxFilename(name)))
+	c.Data(http.StatusOK, "application/gpx+xml", BuildGPX(name, points))
+}
+
+// importGPX creates a private route from a GPX document posted as the raw
+// request body. The route name comes from the file (metadata/track name).
+func (h *handler) importGPX(c *gin.Context) {
+	body, err := io.ReadAll(io.LimitReader(c.Request.Body, 10<<20))
+	if err != nil || len(body) == 0 {
+		httpx.BadRequest(c, "empty or unreadable GPX body")
+		return
+	}
+	name, points, err := ParseGPX(body)
+	if err != nil {
+		httpx.BadRequest(c, err.Error())
+		return
+	}
+	if name == "" {
+		name = "GPX Rotası"
+	}
+	wkt := LineStringWKT(points)
+
+	var id int64
+	var distance float64
+	err = h.d.DB.QueryRow(c,
+		`INSERT INTO routes (user_id, name, description, path, distance, visibility)
+		 VALUES ($1, $2, '', ST_GeomFromText($3, 4326),
+		         ST_Length(ST_GeomFromText($3, 4326)::geography) / 1000.0, 'private')
+		 RETURNING id, distance`,
+		authpkg.UserID(c), name, wkt,
+	).Scan(&id, &distance)
+	if err != nil {
+		httpx.Internal(c, "could not import route")
+		return
+	}
+	c.JSON(http.StatusCreated, Route{
+		ID:         id,
+		UserID:     authpkg.UserID(c),
+		Name:       name,
+		Distance:   distance,
+		Visibility: "private",
+		Points:     points,
+	})
+}
+
+// gpxFilename turns a route name into a safe ASCII attachment filename.
+func gpxFilename(name string) string {
+	var b strings.Builder
+	for _, r := range strings.TrimSpace(name) {
+		switch {
+		case (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') || r == '-' || r == '_':
+			b.WriteRune(r)
+		case r == ' ':
+			b.WriteByte('-')
+		}
+	}
+	if b.Len() == 0 {
+		return "route.gpx"
+	}
+	return b.String() + ".gpx"
 }
 
 // parseGeoJSONLine converts a PostGIS ST_AsGeoJSON LineString into points.

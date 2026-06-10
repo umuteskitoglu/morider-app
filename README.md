@@ -14,7 +14,7 @@ Bu repo bir **monorepo**'dur:
 ## Özellikler
 
 - **Sürüş takibi** — GPS ile canlı kayıt, mesafe/hız/rota; sürüş geçmişi.
-- **Rotalar** — rota oluştur (yol-takipli snap), görünürlük seç (gizli / herkese açık / arkadaşlar), kaydedilen bir rotada sür (haritada rehber çizgi), **kaydırarak silme**.
+- **Rotalar** — rota oluştur (yol-takipli snap), görünürlük seç (gizli / herkese açık / arkadaşlar), kaydedilen bir rotada sür (haritada rehber çizgi), **GPX içe/dışa aktarma**, **kaydırarak silme**.
 - **Keşfet & puanlama** — herkese açık rotaları keşfet, 5 yıldız üzerinden puanla.
 - **Foto akışı** — Instagram tarzı çoklu-foto paylaşımları, beğeni & yorum, konum etiketi.
 - **Takip sistemi** — tek yönlü takip (profilden veya Keşfet'ten tek dokunuşla); `arkadaşlar` görünürlüğü = **karşılıklı takip**.
