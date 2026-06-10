@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { Alert, Pressable, StyleSheet, Text, View } from 'react-native';
 import MapView, { MapPressEvent, Marker, Polyline } from 'react-native-maps';
+import Slider from '@react-native-community/slider';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 
@@ -10,8 +11,15 @@ import { api, errorMessage } from '../api/client';
 import { colors, radius, spacing } from '../theme';
 
 type Coord = { latitude: number; longitude: number };
-type PlanInfo = { distance: number; duration: number; steps: number };
+type PlanInfo = { distance: number; duration: number; steps: number; curviness: number };
 type Props = NativeStackScreenProps<ProfileStackParams, 'RouteCreate'>;
+
+// Human label for the backend's deg/km curviness score.
+function curvinessText(score: number): string {
+  if (score < 30) return 'düz';
+  if (score < 100) return 'kıvrımlı';
+  return 'çok virajlı';
+}
 
 export default function RouteCreateScreen({ navigation }: Props) {
   const [name, setName] = useState('');
@@ -21,6 +29,7 @@ export default function RouteCreateScreen({ navigation }: Props) {
   const [planning, setPlanning] = useState(false);
   const [saving, setSaving] = useState(false);
   const [visibility, setVisibility] = useState<'private' | 'friends' | 'public'>('private');
+  const [curviness, setCurviness] = useState(0.5);
 
   // Any change to the waypoints invalidates a previously computed preview.
   function setWaypoints(next: Coord[]) {
@@ -46,6 +55,7 @@ export default function RouteCreateScreen({ navigation }: Props) {
       setPlanning(true);
       const { data } = await api.post('/api/routes/plan', {
         waypoints: points.map((p) => ({ lat: p.latitude, lon: p.longitude })),
+        curviness,
       });
       setSnapped(
         (data.points ?? []).map((p: { lat: number; lon: number }) => ({
@@ -53,7 +63,12 @@ export default function RouteCreateScreen({ navigation }: Props) {
           longitude: p.lon,
         })),
       );
-      setPlan({ distance: data.distance, duration: data.duration, steps: (data.steps ?? []).length });
+      setPlan({
+        distance: data.distance,
+        duration: data.duration,
+        steps: (data.steps ?? []).length,
+        curviness: data.curviness ?? 0,
+      });
     } catch (err) {
       Alert.alert('Hesaplanamadı', errorMessage(err));
     } finally {
@@ -78,6 +93,7 @@ export default function RouteCreateScreen({ navigation }: Props) {
         points: points.map((p) => ({ lat: p.latitude, lon: p.longitude })),
         snap: true,
         visibility,
+        curviness,
       });
       Alert.alert('Rota kaydedildi', `${data.name} • ${data.distance.toFixed(2)} km`);
       setName('');
@@ -109,10 +125,28 @@ export default function RouteCreateScreen({ navigation }: Props) {
         <Text style={styles.hint}>Haritaya dokunarak yol noktaları ekle.</Text>
         {plan && (
           <Text style={styles.stats}>
-            ≈ {plan.distance.toFixed(2)} km • {plan.duration.toFixed(0)} dk • {plan.steps} dönüş
+            ≈ {plan.distance.toFixed(2)} km • {plan.duration.toFixed(0)} dk • {plan.steps} dönüş •{' '}
+            {curvinessText(plan.curviness)}
           </Text>
         )}
         <TextField label="Rota adı" value={name} onChangeText={setName} placeholder="Sahil turu" />
+        <View style={styles.curvyRow}>
+          <MaterialCommunityIcons name="arrow-expand-horizontal" size={16} color={colors.textMuted} />
+          <Slider
+            style={styles.slider}
+            minimumValue={0}
+            maximumValue={1}
+            value={curviness}
+            onSlidingComplete={setCurviness}
+            minimumTrackTintColor={colors.primary}
+            maximumTrackTintColor={colors.border}
+            thumbTintColor={colors.primary}
+          />
+          <MaterialCommunityIcons name="sine-wave" size={16} color={colors.primary} />
+        </View>
+        <Text style={styles.curvyHint}>
+          Virajlılık tercihi (2 nokta arasında alternatif rotalardan seçer)
+        </Text>
         <View style={styles.segment}>
           {([
             { v: 'private', icon: 'lock', label: 'Gizli' },
@@ -152,6 +186,9 @@ const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: colors.bg },
   panel: { position: 'absolute', left: spacing.md, right: spacing.md, bottom: spacing.lg },
   hint: { color: colors.textMuted, marginBottom: spacing.sm },
+  curvyRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.xs, marginTop: spacing.sm },
+  slider: { flex: 1, height: 32 },
+  curvyHint: { color: colors.textMuted, fontSize: 11, marginBottom: spacing.sm },
   stats: { color: colors.primary, fontWeight: '700', marginBottom: spacing.sm },
   row: { flexDirection: 'row' },
   flex: { flex: 1 },

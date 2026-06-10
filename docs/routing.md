@@ -81,6 +81,13 @@ ROUTING_URL=http://osrm:5000
 
 Veri `infra/osrm/` altına yazılır (gitignore'lu). İşlem adımları: `osrm-extract` (profil) → `osrm-partition` → `osrm-customize` → `osrm-routed --algorithm mld`. Motosiklet profili için `car.lua` yerine özelleştirilmiş bir profille `osrm-data` çalıştırılır (Makefile'da `OSRM_IMAGE`/profil ayarı genişletilebilir).
 
+## Virajlılık (curviness) tercihi
+
+- `POST /api/routes/plan` ve `POST /api/routes` (snap ile) opsiyonel `"curviness": 0..1` alır: OSRM'den **alternatif rotalar** istenir (`alternatives=3`) ve istenen virajlılığa en uygun olan seçilir (0 = en düz, 1 = en virajlı).
+- **Skor:** toplam mutlak yön değişimi (derece) / mesafe (km) — saf fonksiyon `curvinessScore` ([`curviness.go`](../backend/internal/route/curviness.go)). Yanıttaki her plan `curviness` alanını taşır (≈ <30 düz, 30–100 kıvrımlı, >100 çok virajlı).
+- **Kısıt:** OSRM alternatifleri yalnız **2 nokta** arasında üretir; ara nokta varsa tek rota döner ve tercih etkisizdir. Daha derin kontrol için motosiklete özel OSRM profili gerekir (bkz. sonraki adımlar).
+- **Mobil:** Yeni Rota ekranında sürgü (Düz ↔ Virajlı); önizleme istatistiklerinde virajlılık etiketi.
+
 ## GPX içe/dışa aktarma
 
 - **Dışa aktarma:** `GET /api/routes/:id/gpx` rota geometrisini GPX 1.1 track olarak döndürür (`application/gpx+xml`, `Content-Disposition: attachment`). Görünürlük kuralları `GET /api/routes/:id` ile aynıdır (sahip / public / karşılıklı takip).
