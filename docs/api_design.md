@@ -31,6 +31,8 @@ Yanıt `200`: signup ile aynı gövde.
 | GET | `/api/users/:id` | Profil getir |
 | PUT | `/api/users/:id` | Profil güncelle *(korumalı, sadece kendi profili)* |
 
+Profil alanları: `name`, `username`, `country`, `avatar_url`, **`license_type`** (`A1|A2|A|B`) ve **`bike_type`** (`naked|sport|touring|adventure|chopper|enduro|scooter|custom`). Boş gönderilen alan mevcut değeri korur.
+
 ## Rides *(korumalı)*
 
 | Method | Path | Açıklama |
