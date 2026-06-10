@@ -21,6 +21,7 @@ import * as ImagePicker from 'expo-image-picker';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 
 import { Button, Card, TextField } from '../components/ui';
+import { BIKE_LABELS, BIKE_TYPES, bikeLabel, LICENSE_LABELS, LICENSE_TYPES, licenseLabel } from '../lib/rider';
 import { PostDetail, DetailPost } from '../components/PostDetail';
 import { AvatarViewer } from '../components/AvatarViewer';
 import { useAuth } from '../store/auth';
@@ -49,6 +50,10 @@ export default function ProfileScreen() {
   const [usernameErr, setUsernameErr] = useState<string | null>(null);
   const [savingUsername, setSavingUsername] = useState(false);
   const [zoomUri, setZoomUri] = useState<string | null>(null);
+  const [editRider, setEditRider] = useState(false);
+  const [riderLicense, setRiderLicense] = useState('');
+  const [riderBike, setRiderBike] = useState('');
+  const [savingRider, setSavingRider] = useState(false);
 
   const thumb = (width - spacing.md * 2 - spacing.xs * 2) / 3;
   const showcased = rewards.filter((r) => r.showcased);
@@ -65,10 +70,14 @@ export default function ProfileScreen() {
       setRewards(r.data.rewards ?? []);
       setLeaders(l.data.leaderboard ?? []);
       setPosts(p.data.posts ?? []);
-      // Keep the cached user's username fresh (e.g. sessions from before the
-      // username feature shipped, or edits made on another device).
-      if (u?.data?.username && u.data.username !== user?.username) {
-        updateUser({ username: u.data.username });
+      // Keep the cached user fresh (e.g. sessions from before these fields
+      // shipped, or edits made on another device).
+      if (u?.data) {
+        const fresh: Record<string, string> = {};
+        if (u.data.username && u.data.username !== user?.username) fresh.username = u.data.username;
+        if ((u.data.license_type ?? '') !== (user?.license_type ?? '')) fresh.license_type = u.data.license_type ?? '';
+        if ((u.data.bike_type ?? '') !== (user?.bike_type ?? '')) fresh.bike_type = u.data.bike_type ?? '';
+        if (Object.keys(fresh).length > 0) updateUser(fresh);
       }
     } catch {
       // Silently ignore; screen still renders profile info.
@@ -166,6 +175,26 @@ export default function ProfileScreen() {
     }
   }
 
+  function openRiderEdit() {
+    setRiderLicense(user?.license_type ?? '');
+    setRiderBike(user?.bike_type ?? '');
+    setEditRider(true);
+  }
+
+  async function saveRider() {
+    if (!user) return;
+    try {
+      setSavingRider(true);
+      await api.put(`/api/users/${user.id}`, { license_type: riderLicense, bike_type: riderBike });
+      await updateUser({ license_type: riderLicense, bike_type: riderBike });
+      setEditRider(false);
+    } catch (err) {
+      Alert.alert('Kaydedilemedi', errorMessage(err));
+    } finally {
+      setSavingRider(false);
+    }
+  }
+
   function openManage() {
     setSelected(showcased.map((r) => r.type));
     setManage(true);
@@ -221,6 +250,27 @@ export default function ProfileScreen() {
             <MaterialCommunityIcons name="pencil" size={14} color={colors.textMuted} />
           </Pressable>
           <Text style={styles.email}>{user?.email}</Text>
+          <Pressable style={styles.riderRow} onPress={openRiderEdit} hitSlop={8}>
+            {licenseLabel(user?.license_type) || bikeLabel(user?.bike_type) ? (
+              <>
+                {licenseLabel(user?.license_type) ? (
+                  <View style={styles.riderChip}>
+                    <MaterialCommunityIcons name="card-account-details-outline" size={13} color={colors.primary} />
+                    <Text style={styles.riderChipText}>{licenseLabel(user?.license_type)}</Text>
+                  </View>
+                ) : null}
+                {bikeLabel(user?.bike_type) ? (
+                  <View style={styles.riderChip}>
+                    <MaterialCommunityIcons name="motorbike" size={13} color={colors.primary} />
+                    <Text style={styles.riderChipText}>{bikeLabel(user?.bike_type)}</Text>
+                  </View>
+                ) : null}
+                <MaterialCommunityIcons name="pencil" size={13} color={colors.textMuted} />
+              </>
+            ) : (
+              <Text style={styles.riderHint}>Ehliyet ve motor türünü ekle →</Text>
+            )}
+          </Pressable>
           {showcased.length > 0 && (
             <View style={styles.badges}>
               {showcased.map((r) => (
@@ -334,6 +384,45 @@ export default function ProfileScreen() {
         </KeyboardAvoidingView>
       </Modal>
 
+      {/* Edit rider profile (license + bike type) */}
+      <Modal visible={editRider} animationType="slide" transparent statusBarTranslucent onRequestClose={() => setEditRider(false)}>
+        <Pressable style={styles.backdrop} onPress={() => setEditRider(false)}>
+          <Pressable style={styles.usernameSheet} onPress={() => {}}>
+            <Text style={styles.sheetTitle}>Sürücü Profili</Text>
+            <Text style={styles.muted}>Sana uygun rota ve etkinlik önerileri için kullanılır.</Text>
+
+            <Text style={styles.pickLabel}>Ehliyet</Text>
+            <View style={styles.pillRow}>
+              {LICENSE_TYPES.map((t) => (
+                <Pressable
+                  key={t}
+                  style={[styles.pill, riderLicense === t && styles.pillOn]}
+                  onPress={() => setRiderLicense((cur) => (cur === t ? '' : t))}
+                >
+                  <Text style={[styles.pillText, riderLicense === t && styles.pillTextOn]}>{LICENSE_LABELS[t]}</Text>
+                </Pressable>
+              ))}
+            </View>
+
+            <Text style={styles.pickLabel}>Motor Türü</Text>
+            <View style={styles.pillRow}>
+              {BIKE_TYPES.map((t) => (
+                <Pressable
+                  key={t}
+                  style={[styles.pill, riderBike === t && styles.pillOn]}
+                  onPress={() => setRiderBike((cur) => (cur === t ? '' : t))}
+                >
+                  <Text style={[styles.pillText, riderBike === t && styles.pillTextOn]}>{BIKE_LABELS[t]}</Text>
+                </Pressable>
+              ))}
+            </View>
+
+            <View style={{ height: spacing.sm }} />
+            <Button title="Kaydet" icon="content-save" onPress={saveRider} loading={savingRider} />
+          </Pressable>
+        </Pressable>
+      </Modal>
+
       {/* Manage showcased badges */}
       <Modal visible={manage} animationType="slide" onRequestClose={() => setManage(false)}>
         <View style={styles.sheetHeader}>
@@ -430,6 +519,33 @@ const styles = StyleSheet.create({
   usernameRow: { flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 2 },
   username: { color: colors.primary, fontWeight: '700' },
   email: { color: colors.textMuted, marginTop: 2 },
+  riderRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.xs, marginTop: spacing.sm, flexWrap: 'wrap', justifyContent: 'center' },
+  riderChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    backgroundColor: 'rgba(255,90,31,0.12)',
+    borderWidth: 1,
+    borderColor: colors.primary,
+    paddingHorizontal: spacing.sm,
+    paddingVertical: 4,
+    borderRadius: 999,
+  },
+  riderChipText: { color: colors.text, fontWeight: '700', fontSize: 12 },
+  riderHint: { color: colors.primary, fontWeight: '700', fontSize: 13 },
+  pickLabel: { color: colors.text, fontWeight: '800', fontSize: 13, marginTop: spacing.md },
+  pillRow: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.xs, marginTop: spacing.xs },
+  pill: {
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: colors.border,
+    backgroundColor: colors.surfaceAlt,
+  },
+  pillOn: { borderColor: colors.primary, backgroundColor: 'rgba(255,90,31,0.15)' },
+  pillText: { color: colors.textMuted, fontWeight: '700', fontSize: 13 },
+  pillTextOn: { color: colors.primary },
   flex: { flex: 1 },
   backdrop: { flex: 1, backgroundColor: 'rgba(0,0,0,0.55)', justifyContent: 'flex-end' },
   usernameSheet: {
