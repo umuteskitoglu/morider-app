@@ -18,7 +18,7 @@ Bu repo bir **monorepo**'dur:
 - **Keşfet & puanlama** — herkese açık rotaları keşfet, 5 yıldız üzerinden puanla.
 - **Foto akışı** — Instagram tarzı çoklu-foto paylaşımları, beğeni & yorum, konum etiketi.
 - **Takip sistemi** — tek yönlü takip (profilden veya Keşfet'ten tek dokunuşla); `arkadaşlar` görünürlüğü = **karşılıklı takip**.
-- **Canlı grup sürüşü** — kod ile oturuma katıl, katılımcıların konumunu gerçek zamanlı ortak haritada gör (WebSocket + NATS fan-out). Host **moderasyonu** (at / banla / host devret), tek aktif oturum kuralı, otomatik yeniden bağlanma ve devam eden sürüşe geri dönme.
+- **Canlı grup sürüşü** — kod, **davet linki veya QR kod** ile oturuma katıl (deep link `morider://join/<kod>`, uygulama içi QR tarayıcı), katılımcıların konumunu gerçek zamanlı ortak haritada gör (WebSocket + NATS fan-out). Host **moderasyonu** (at / banla / host devret), tek aktif oturum kuralı, otomatik yeniden bağlanma ve devam eden sürüşe geri dönme.
 - **Ödüller** — sürüşlere göre rozetler ve liderlik tablosu.
 
 ## Mimari (özet)
