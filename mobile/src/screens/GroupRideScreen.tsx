@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
-import { Alert, Modal, Pressable, ScrollView, Share, StyleSheet, Text, View } from 'react-native';
+import { Alert, Modal, Pressable, ScrollView, Share, StyleSheet, Text, Vibration, View } from 'react-native';
 import MapView, { Marker, Polyline, Region } from 'react-native-maps';
 import * as Location from 'expo-location';
 import * as Linking from 'expo-linking';
@@ -10,6 +10,9 @@ import { MaterialCommunityIcons } from '@expo/vector-icons';
 
 import { RideStackParams } from '../navigation/RootNavigator';
 import { Button, Card } from '../components/ui';
+import { CrashCountdown } from '../components/CrashCountdown';
+import { useCrashDetection } from '../lib/crashDetection';
+import { composeEmergencySMS, getEmergencyContact } from '../lib/emergency';
 import { useAuth } from '../store/auth';
 import { api, apiBaseURL, errorMessage, TOKEN_KEY } from '../api/client';
 import { colors, radius, shadow, spacing } from '../theme';
@@ -40,6 +43,7 @@ export default function GroupRideScreen({ route, navigation }: Props) {
   const [connected, setConnected] = useState(false);
   const [showParticipants, setShowParticipants] = useState(false);
   const [showInvite, setShowInvite] = useState(false);
+  const [crashAlarm, setCrashAlarm] = useState(false);
 
   const ws = useRef<WebSocket | null>(null);
   const locSub = useRef<Location.LocationSubscription | null>(null);
@@ -156,6 +160,27 @@ export default function GroupRideScreen({ route, navigation }: Props) {
             return next;
           });
           setParticipants((prev) => prev.filter((p) => p.id !== raw.user_id));
+          return;
+        }
+        // Group alert: another rider's crash countdown expired. Vibrate hard,
+        // tell everyone who and where, and offer to jump to the location.
+        if (raw.type === 'sos') {
+          if (raw.user_id === user?.id) return; // our own echo
+          Vibration.vibrate([400, 300, 400, 300, 400]);
+          const goto = () =>
+            raw.lat && raw.lon &&
+            mapRef.current?.animateToRegion(
+              { latitude: raw.lat, longitude: raw.lon, latitudeDelta: 0.005, longitudeDelta: 0.005 },
+              600,
+            );
+          Alert.alert(
+            '🚨 ACİL DURUM',
+            `${raw.name ?? 'Bir sürücü'} kaza yapmış olabilir! Son konumuna gidip durumu kontrol et.`,
+            [
+              { text: 'Konuma Git', onPress: goto },
+              { text: 'Tamam', style: 'cancel' },
+            ],
+          );
           return;
         }
         if (raw.type === 'ended') {
@@ -317,6 +342,31 @@ export default function GroupRideScreen({ route, navigation }: Props) {
     locSub.current?.remove();
     locSub.current = null;
     detachSocket();
+  }
+
+  // Crash detection runs for the whole ride; a suspected impact opens the
+  // 30s countdown. Cancel = false alarm; expiry = SOS to the group + SMS.
+  useCrashDetection(connected, () => setCrashAlarm(true));
+
+  async function sendSOS() {
+    setCrashAlarm(false);
+    const c = lastCoord.current;
+    if (ws.current?.readyState === WebSocket.OPEN) {
+      ws.current.send(JSON.stringify({ type: 'sos', lat: c?.lat ?? 0, lon: c?.lon ?? 0 }));
+    }
+    const contact = await getEmergencyContact();
+    if (contact) {
+      try {
+        await composeEmergencySMS(contact, c?.lat, c?.lon);
+      } catch {
+        // SMS composer unavailable — the group SOS already went out
+      }
+    } else {
+      Alert.alert(
+        'Acil durum bildirildi',
+        'Gruptaki sürücüler uyarıldı. Profilden bir acil durum kişisi eklersen SMS taslağı da hazırlanır.',
+      );
+    }
   }
 
   // Deep link that lands on GroupJoin and auto-joins (morider://join/<code>;
@@ -505,6 +555,8 @@ export default function GroupRideScreen({ route, navigation }: Props) {
           <Button title="Ayrıl" variant="ghost" icon="exit-run" onPress={leave} />
         )}
       </Card>
+
+      <CrashCountdown visible={crashAlarm} onCancel={() => setCrashAlarm(false)} onExpire={sendSOS} />
 
       <Modal visible={showInvite} animationType="fade" transparent onRequestClose={() => setShowInvite(false)}>
         <Pressable style={styles.modalBackdrop} onPress={() => setShowInvite(false)}>

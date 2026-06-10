@@ -7,6 +7,9 @@ import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 
 import { RideStackParams } from '../navigation/RootNavigator';
 import { Button, Card } from '../components/ui';
+import { CrashCountdown } from '../components/CrashCountdown';
+import { useCrashDetection } from '../lib/crashDetection';
+import { call112, composeEmergencySMS, getEmergencyContact } from '../lib/emergency';
 import { api, errorMessage } from '../api/client';
 import { colors, radius, shadow, spacing } from '../theme';
 
@@ -40,6 +43,7 @@ export default function MapScreen({ route, navigation }: Props) {
   const [distance, setDistance] = useState(0);
   const [speed, setSpeed] = useState(0);
   const [saving, setSaving] = useState(false);
+  const [crashAlarm, setCrashAlarm] = useState(false);
 
   const subscription = useRef<Location.LocationSubscription | null>(null);
   const samples = useRef<Sample[]>([]);
@@ -107,6 +111,35 @@ export default function MapScreen({ route, navigation }: Props) {
     } catch {
       // ignore – keep default region
     }
+  }
+
+  // Crash detection runs while a solo ride is being recorded. Expiry opens a
+  // prefilled SMS to the emergency contact (auto-send isn't possible without
+  // OS-level SMS permissions) and offers a 112 call.
+  useCrashDetection(recording, () => setCrashAlarm(true));
+
+  async function emergencyProtocol() {
+    setCrashAlarm(false);
+    const c = lastCoord.current;
+    const contact = await getEmergencyContact();
+    if (contact) {
+      try {
+        await composeEmergencySMS(contact, c?.latitude, c?.longitude);
+        return;
+      } catch {
+        // fall through to the 112 prompt
+      }
+    }
+    Alert.alert(
+      '🚨 Acil durum',
+      contact
+        ? 'SMS hazırlanamadı. 112 aransın mı?'
+        : 'Kayıtlı acil durum kişisi yok (Profil > Acil Durum Kişisi). 112 aransın mı?',
+      [
+        { text: '112 Ara', style: 'destructive', onPress: () => call112() },
+        { text: 'Vazgeç', style: 'cancel' },
+      ],
+    );
   }
 
   async function startRecording() {
@@ -241,6 +274,8 @@ export default function MapScreen({ route, navigation }: Props) {
           </>
         )}
       </Card>
+
+      <CrashCountdown visible={crashAlarm} onCancel={() => setCrashAlarm(false)} onExpire={emergencyProtocol} />
     </View>
   );
 }
