@@ -10,6 +10,8 @@ export type User = {
   email: string;
   country: string;
   avatar_url?: string;
+  license_type?: string;
+  bike_type?: string;
 };
 
 type AuthState = {
