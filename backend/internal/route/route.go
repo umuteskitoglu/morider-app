@@ -81,6 +81,17 @@ type writeReq struct {
 	// Snap, when true, runs the waypoints through the routing engine and stores
 	// the road-following geometry instead of the raw straight-line waypoints.
 	Snap bool `json:"snap"`
+	// Curviness in [0,1] (only with snap): prefer straighter (0) or twistier
+	// (1) alternatives. Omitted = engine default route.
+	Curviness *float64 `json:"curviness" binding:"omitempty,min=0,max=1"`
+}
+
+// planOpts converts an optional request curviness into PlanOptions.
+func planOpts(curviness *float64) PlanOptions {
+	if curviness == nil {
+		return PlanOptions{Curviness: -1}
+	}
+	return PlanOptions{Curviness: *curviness}
 }
 
 // normalizeVisibility defaults an empty value to private.
@@ -100,7 +111,7 @@ func (h *handler) create(c *gin.Context) {
 
 	points := req.Points
 	if req.Snap {
-		plan, err := h.router.Plan(c, req.Points)
+		plan, err := h.router.Plan(c, req.Points, planOpts(req.Curviness))
 		if err != nil {
 			httpx.Error(c, http.StatusBadGateway, "could not snap route to roads")
 			return
@@ -135,7 +146,8 @@ func (h *handler) create(c *gin.Context) {
 }
 
 type planReq struct {
-	Waypoints []Point `json:"waypoints" binding:"required,min=2"`
+	Waypoints []Point  `json:"waypoints" binding:"required,min=2"`
+	Curviness *float64 `json:"curviness" binding:"omitempty,min=0,max=1"`
 }
 
 // plan returns a road-snapped route for the given waypoints without persisting
@@ -146,7 +158,7 @@ func (h *handler) plan(c *gin.Context) {
 		httpx.BadRequest(c, err.Error())
 		return
 	}
-	result, err := h.router.Plan(c, req.Waypoints)
+	result, err := h.router.Plan(c, req.Waypoints, planOpts(req.Curviness))
 	if err != nil {
 		httpx.Error(c, http.StatusBadGateway, "routing failed: "+err.Error())
 		return
