@@ -22,6 +22,7 @@ import { MaterialCommunityIcons } from '@expo/vector-icons';
 
 import { Button, Card, TextField } from '../components/ui';
 import { BIKE_LABELS, BIKE_TYPES, bikeLabel, LICENSE_LABELS, LICENSE_TYPES, licenseLabel } from '../lib/rider';
+import { getEmergencyContact, setEmergencyContact } from '../lib/emergency';
 import { PostDetail, DetailPost } from '../components/PostDetail';
 import { AvatarViewer } from '../components/AvatarViewer';
 import { useAuth } from '../store/auth';
@@ -54,11 +55,15 @@ export default function ProfileScreen() {
   const [riderLicense, setRiderLicense] = useState('');
   const [riderBike, setRiderBike] = useState('');
   const [savingRider, setSavingRider] = useState(false);
+  const [emergencyPhone, setEmergencyPhone] = useState('');
+  const [editEmergency, setEditEmergency] = useState(false);
+  const [emergencyInput, setEmergencyInput] = useState('');
 
   const thumb = (width - spacing.md * 2 - spacing.xs * 2) / 3;
   const showcased = rewards.filter((r) => r.showcased);
 
   const load = useCallback(async () => {
+    getEmergencyContact().then(setEmergencyPhone).catch(() => {});
     try {
       const reqs: Promise<any>[] = [
         api.get('/api/rewards'),
@@ -193,6 +198,17 @@ export default function ProfileScreen() {
     } finally {
       setSavingRider(false);
     }
+  }
+
+  function openEmergencyEdit() {
+    setEmergencyInput(emergencyPhone);
+    setEditEmergency(true);
+  }
+
+  async function saveEmergency() {
+    await setEmergencyContact(emergencyInput);
+    setEmergencyPhone(emergencyInput.trim());
+    setEditEmergency(false);
   }
 
   function openManage() {
@@ -351,6 +367,20 @@ export default function ProfileScreen() {
           )}
         </Card>
 
+        <SectionTitle icon="shield-alert-outline" title="Güvenlik" />
+        <Pressable onPress={openEmergencyEdit}>
+          <Card style={styles.emRow}>
+            <MaterialCommunityIcons name="phone-alert" size={22} color={colors.primary} />
+            <View style={styles.flex}>
+              <Text style={styles.emTitle}>Acil Durum Kişisi</Text>
+              <Text style={styles.muted}>
+                {emergencyPhone || 'Kayıtlı değil — kaza algılandığında SMS taslağı için ekle'}
+              </Text>
+            </View>
+            <MaterialCommunityIcons name="chevron-right" size={22} color={colors.textMuted} />
+          </Card>
+        </Pressable>
+
         <View style={{ height: spacing.lg }} />
         <Button title="Çıkış Yap" variant="ghost" icon="logout" onPress={signOut} />
       </ScrollView>
@@ -379,6 +409,30 @@ export default function ProfileScreen() {
               {usernameErr ? <Text style={styles.errText}>{usernameErr}</Text> : null}
               <View style={{ height: spacing.sm }} />
               <Button title="Kaydet" icon="content-save" onPress={saveUsername} loading={savingUsername} />
+            </Pressable>
+          </Pressable>
+        </KeyboardAvoidingView>
+      </Modal>
+
+      {/* Edit emergency contact (device-only; never sent to the backend) */}
+      <Modal visible={editEmergency} animationType="slide" transparent statusBarTranslucent onRequestClose={() => setEditEmergency(false)}>
+        <KeyboardAvoidingView style={styles.flex} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+          <Pressable style={styles.backdrop} onPress={() => setEditEmergency(false)}>
+            <Pressable style={styles.usernameSheet} onPress={() => {}}>
+              <Text style={styles.sheetTitle}>Acil Durum Kişisi</Text>
+              <Text style={styles.muted}>
+                Kaza algılandığında bu numaraya konumunu içeren SMS taslağı hazırlanır. Numara yalnız bu cihazda saklanır.
+              </Text>
+              <TextField
+                icon="phone"
+                placeholder="+90 5xx xxx xx xx"
+                value={emergencyInput}
+                onChangeText={setEmergencyInput}
+                keyboardType="phone-pad"
+                autoFocus
+              />
+              <View style={{ height: spacing.sm }} />
+              <Button title="Kaydet" icon="content-save" onPress={saveEmergency} />
             </Pressable>
           </Pressable>
         </KeyboardAvoidingView>
@@ -547,6 +601,8 @@ const styles = StyleSheet.create({
   pillText: { color: colors.textMuted, fontWeight: '700', fontSize: 13 },
   pillTextOn: { color: colors.primary },
   flex: { flex: 1 },
+  emRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.md },
+  emTitle: { color: colors.text, fontWeight: '800' },
   backdrop: { flex: 1, backgroundColor: 'rgba(0,0,0,0.55)', justifyContent: 'flex-end' },
   usernameSheet: {
     backgroundColor: colors.surface,
