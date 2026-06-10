@@ -518,6 +518,9 @@ func (h *handler) transferHost(c *gin.Context) {
 }
 
 type wsPositionIn struct {
+	// Type distinguishes special frames; empty means a regular position.
+	// "sos" broadcasts a crash/emergency alert to the whole session.
+	Type  string  `json:"type"`
 	Lat   float64 `json:"lat"`
 	Lon   float64 `json:"lon"`
 	Speed float64 `json:"speed"`
@@ -602,6 +605,21 @@ func (h *handler) sessionWS(c *gin.Context) {
 		var in wsPositionIn
 		if err := conn.ReadJSON(&in); err != nil {
 			return
+		}
+		// SOS frame: rider's crash countdown expired (or manual emergency).
+		// Fan it out as a control frame so every participant gets alerted.
+		// Deliberately no speed: only the location needed to find the rider.
+		if in.Type == "sos" {
+			h.publishControl(sessionID, gin.H{
+				"type":       "sos",
+				"session_id": sessionID,
+				"user_id":    me,
+				"name":       name,
+				"lat":        in.Lat,
+				"lon":        in.Lon,
+				"ts":         time.Now().UnixMilli(),
+			})
+			continue
 		}
 		pos := events.LivePosition{
 			SessionID: sessionID,
