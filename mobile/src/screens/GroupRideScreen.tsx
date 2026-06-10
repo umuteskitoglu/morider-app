@@ -2,6 +2,8 @@ import React, { useCallback, useEffect, useLayoutEffect, useRef, useState } from
 import { Alert, Modal, Pressable, ScrollView, Share, StyleSheet, Text, View } from 'react-native';
 import MapView, { Marker, Polyline, Region } from 'react-native-maps';
 import * as Location from 'expo-location';
+import * as Linking from 'expo-linking';
+import QRCode from 'react-native-qrcode-svg';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
@@ -37,6 +39,7 @@ export default function GroupRideScreen({ route, navigation }: Props) {
   const [positions, setPositions] = useState<Record<number, LiveMarker>>({});
   const [connected, setConnected] = useState(false);
   const [showParticipants, setShowParticipants] = useState(false);
+  const [showInvite, setShowInvite] = useState(false);
 
   const ws = useRef<WebSocket | null>(null);
   const locSub = useRef<Location.LocationSubscription | null>(null);
@@ -316,9 +319,15 @@ export default function GroupRideScreen({ route, navigation }: Props) {
     detachSocket();
   }
 
-  async function shareCode() {
+  // Deep link that lands on GroupJoin and auto-joins (morider://join/<code>;
+  // in Expo Go dev builds createURL produces the matching exp:// URL).
+  const inviteUrl = Linking.createURL(`join/${code}`);
+
+  async function shareInvite() {
     try {
-      await Share.share({ message: `Morider grup sürüşüme katıl! Kod: ${code}` });
+      await Share.share({
+        message: `Morider grup sürüşüme katıl!\n\nLink: ${inviteUrl}\nKod: ${code}`,
+      });
     } catch {
       // ignore
     }
@@ -486,8 +495,8 @@ export default function GroupRideScreen({ route, navigation }: Props) {
             <Text style={styles.count}>{liveCount}/{roster.length}</Text>
             <MaterialCommunityIcons name="chevron-up" size={16} color={colors.textMuted} />
           </Pressable>
-          <Pressable style={styles.shareBtn} onPress={shareCode} hitSlop={8}>
-            <MaterialCommunityIcons name="share-variant" size={20} color={colors.text} />
+          <Pressable style={styles.shareBtn} onPress={() => setShowInvite(true)} hitSlop={8}>
+            <MaterialCommunityIcons name="qrcode" size={20} color={colors.text} />
           </Pressable>
         </View>
         {isHost ? (
@@ -496,6 +505,21 @@ export default function GroupRideScreen({ route, navigation }: Props) {
           <Button title="Ayrıl" variant="ghost" icon="exit-run" onPress={leave} />
         )}
       </Card>
+
+      <Modal visible={showInvite} animationType="fade" transparent onRequestClose={() => setShowInvite(false)}>
+        <Pressable style={styles.modalBackdrop} onPress={() => setShowInvite(false)}>
+          <Pressable style={styles.inviteCard} onPress={() => {}}>
+            <Text style={styles.inviteTitle}>Arkadaşlarını Davet Et</Text>
+            <Text style={styles.inviteSub}>QR kodu okutsunlar ya da daveti link olarak gönder.</Text>
+            <View style={styles.qrWrap}>
+              <QRCode value={inviteUrl} size={200} backgroundColor="#fff" color="#000" />
+            </View>
+            <Text style={styles.inviteCode}>{code}</Text>
+            <Button title="Davet Linkini Paylaş" icon="share-variant" onPress={shareInvite} />
+            <Button title="Kapat" variant="ghost" onPress={() => setShowInvite(false)} />
+          </Pressable>
+        </Pressable>
+      </Modal>
 
       <Modal visible={showParticipants} animationType="slide" transparent onRequestClose={() => setShowParticipants(false)}>
         <Pressable style={styles.modalBackdrop} onPress={() => setShowParticipants(false)}>
@@ -602,6 +626,23 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   modalBackdrop: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'flex-end' },
+  inviteCard: {
+    alignSelf: 'center',
+    marginBottom: 'auto',
+    marginTop: 'auto',
+    width: '86%',
+    backgroundColor: colors.surface,
+    borderRadius: radius.lg,
+    borderWidth: 1,
+    borderColor: colors.border,
+    padding: spacing.lg,
+    alignItems: 'center',
+    gap: spacing.sm,
+  },
+  inviteTitle: { color: colors.text, fontSize: 18, fontWeight: '900' },
+  inviteSub: { color: colors.textMuted, fontSize: 13, textAlign: 'center' },
+  qrWrap: { backgroundColor: '#fff', padding: spacing.md, borderRadius: radius.md, marginVertical: spacing.sm },
+  inviteCode: { color: colors.text, fontSize: 24, fontWeight: '900', letterSpacing: 4 },
   sheet: {
     backgroundColor: colors.surface,
     borderTopLeftRadius: radius.lg,

@@ -40,7 +40,8 @@ export type AuthStackParams = {
 // Group riding lives under the Ride tab — it is a way to ride, not a route list.
 export type RideStackParams = {
   RideMain: { followRouteId?: number } | undefined;
-  GroupJoin: undefined;
+  // `code` arrives via deep link (morider://join/<code>) and auto-joins.
+  GroupJoin: { code?: string } | undefined;
   GroupRide: { code: string };
 };
 
@@ -217,7 +218,8 @@ const navTheme = {
   },
 };
 
-// Deep links: morider://event/<code> opens the event directly in the Events tab.
+// Deep links: morider://event/<code> opens the event directly in the Events tab,
+// morider://join/<code> lands on the group-join screen and auto-joins.
 // The Expo `scheme` ("morider") is declared in app.json.
 const linking: LinkingOptions<AppTabParams> = {
   prefixes: ['morider://'],
@@ -226,6 +228,11 @@ const linking: LinkingOptions<AppTabParams> = {
       Events: {
         screens: {
           EventDetail: 'event/:code',
+        },
+      },
+      Ride: {
+        screens: {
+          GroupJoin: 'join/:code',
         },
       },
     },
