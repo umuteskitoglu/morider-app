@@ -25,6 +25,7 @@ func Run(cfg config.Config) error {
 		{"/api/users", cfg.UserURL},
 		{"/api/follows", cfg.UserURL},
 		{"/api/rides", cfg.RideURL},
+		{"/api/garage", cfg.RideURL},
 		{"/api/routes", cfg.RouteURL},
 		{"/api/pois", cfg.RouteURL},
 		{"/api/rewards", cfg.RewardURL},

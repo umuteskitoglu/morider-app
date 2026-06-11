@@ -23,6 +23,7 @@ Bu repo bir **monorepo**'dur:
 - **Canlı grup sürüşü** — kod, **davet linki veya QR kod** ile oturuma katıl (deep link `morider://join/<kod>`, uygulama içi QR tarayıcı), katılımcıların konumunu gerçek zamanlı ortak haritada gör (WebSocket + NATS fan-out). Host **moderasyonu** (at / banla / host devret), tek aktif oturum kuralı, otomatik yeniden bağlanma ve devam eden sürüşe geri dönme.
 - **Ödüller** — sürüşlere göre rozetler ve liderlik tablosu.
 - **Kaza algılama (MVP)** — sürüşte ivmeölçerle darbe tespiti, 30 sn iptal edilebilir geri sayım; süre dolunca grup sürüşünde tüm katılımcılara **SOS uyarısı**, acil durum kişisine konumlu SMS taslağı, 112 arama kısayolu. Ayrıntı: [`docs/safety.md`](docs/safety.md).
+- **Garaj** — motosikletlerini ekle; **trafik sigortası / muayene / kasko** bitiş tarihlerine 7 gün ve 1 gün kala cihaz bildirimi (development build'de), renkli aciliyet rozetleri ve motor başına **servis defteri** (işlem, km, tutar, not).
 
 ## Mimari (özet)
 
