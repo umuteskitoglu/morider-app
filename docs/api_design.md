@@ -96,6 +96,19 @@ Yanıt `200` (`distance` km, `duration` dk, `steps[].distance` m):
 }
 ```
 
+## POI / Mola Noktaları *(korumalı)*
+
+Topluluk katkılı noktalar: motorcu dostu kafe, yakıt, tamirci, manzara, mola. Route servisi sunar (PostGIS point + GIST index).
+
+| Method | Path | Açıklama |
+|--------|------|----------|
+| POST | `/api/pois` | Nokta ekle (`name`, `category`, `lat`, `lon`, ops. `description`) |
+| GET | `/api/pois?min_lat&min_lon&max_lat&max_lon` | Sınır kutusundaki noktalar (maks 300) |
+| GET | `/api/pois/route/:id` | Rotanın 1 km çevresindeki noktalar (rota görünürlük kuralları geçerli) |
+| DELETE | `/api/pois/:id` | Sil (yalnız ekleyen) |
+
+`category`: `cafe | fuel | repair | viewpoint | rest`. Noktalar herkese görünür; silme yalnız sahibine açıktır.
+
 ## Rewards & Leaderboard *(korumalı)*
 
 | Method | Path | Açıklama |
