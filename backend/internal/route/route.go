@@ -28,6 +28,7 @@ func Run(cfg config.Config) error {
 	}
 	h := &handler{d: deps, router: NewOSRMRouter(cfg.RoutingURL, cfg.RoutingProfile)}
 	registerRoutes(deps, h)
+	registerPOIRoutes(deps, h)
 	return deps.Run(config.ResolvePort("ROUTE_PORT", "8084"))
 }
 

@@ -1,6 +1,6 @@
 import React, { useCallback, useLayoutEffect, useRef, useState } from 'react';
 import { Alert, StyleSheet, Text, View } from 'react-native';
-import MapView, { Polyline } from 'react-native-maps';
+import MapView, { Marker, Polyline } from 'react-native-maps';
 import { useFocusEffect } from '@react-navigation/native';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import type { BottomTabNavigationProp } from '@react-navigation/bottom-tabs';
@@ -11,8 +11,9 @@ import * as Sharing from 'expo-sharing';
 import { AppTabParams, ProfileStackParams } from '../navigation/RootNavigator';
 import { useAuth } from '../store/auth';
 import { Button, Card, Stars } from '../components/ui';
+import { POI, poiColor, poiIcon, poiLabel } from '../lib/poi';
 import { api, errorMessage } from '../api/client';
-import { colors, spacing } from '../theme';
+import { colors, shadow, spacing } from '../theme';
 
 type Coord = { latitude: number; longitude: number };
 type Props = NativeStackScreenProps<ProfileStackParams, 'RouteDetail'>;
@@ -39,6 +40,7 @@ export default function RouteDetailScreen({ route, navigation }: Props) {
   const [deleting, setDeleting] = useState(false);
   const [startingGroup, setStartingGroup] = useState(false);
   const [exporting, setExporting] = useState(false);
+  const [pois, setPois] = useState<POI[]>([]);
   const mapRef = useRef<MapView | null>(null);
 
   const isOwner = user?.id === ownerId;
@@ -74,6 +76,13 @@ export default function RouteDetailScreen({ route, navigation }: Props) {
       }
     } catch (err) {
       Alert.alert('Yüklenemedi', errorMessage(err));
+    }
+    // POIs within 1 km of the route (best effort — markers just stay absent).
+    try {
+      const { data } = await api.get(`/api/pois/route/${id}`);
+      setPois(data.pois ?? []);
+    } catch {
+      // ignore
     }
   }, [id]);
 
@@ -165,6 +174,19 @@ export default function RouteDetailScreen({ route, navigation }: Props) {
     <View style={styles.container}>
       <MapView ref={mapRef} style={StyleSheet.absoluteFill} initialRegion={initialRegion}>
         {coords.length > 1 && <Polyline coordinates={coords} strokeColor={colors.primary} strokeWidth={5} />}
+        {pois.map((p) => (
+          <Marker
+            key={`poi-${p.id}`}
+            coordinate={{ latitude: p.lat, longitude: p.lon }}
+            title={p.name}
+            description={`${poiLabel(p.category)} • ${p.owner_name}`}
+            tracksViewChanges={false}
+          >
+            <View style={[styles.poiPin, { borderColor: poiColor(p.category) }]}>
+              <MaterialCommunityIcons name={poiIcon(p.category) as any} size={15} color={poiColor(p.category)} />
+            </View>
+          </Marker>
+        ))}
       </MapView>
 
       <Card style={styles.panel}>
@@ -180,6 +202,13 @@ export default function RouteDetailScreen({ route, navigation }: Props) {
           <Text style={styles.muted}>{isOwner ? 'Senin rotan' : ownerName}</Text>
           <Text style={styles.dot}>•</Text>
           <Text style={styles.muted}>{coords.length} nokta</Text>
+          {pois.length > 0 && (
+            <>
+              <Text style={styles.dot}>•</Text>
+              <MaterialCommunityIcons name="map-marker-star-outline" size={15} color={colors.textMuted} />
+              <Text style={styles.muted}>{pois.length} mola noktası</Text>
+            </>
+          )}
         </View>
 
         <View style={styles.ratingRow}>
@@ -231,4 +260,14 @@ const styles = StyleSheet.create({
   ratingRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, marginTop: spacing.sm },
   avgText: { color: colors.text, fontWeight: '800' },
   myRateRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, marginTop: spacing.sm },
+  poiPin: {
+    width: 30,
+    height: 30,
+    borderRadius: 15,
+    borderWidth: 2,
+    backgroundColor: colors.surface,
+    alignItems: 'center',
+    justifyContent: 'center',
+    ...shadow.card,
+  },
 });

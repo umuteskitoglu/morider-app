@@ -16,6 +16,7 @@ Bu repo bir **monorepo**'dur:
 - **Sürüş takibi** — GPS ile canlı kayıt, mesafe/hız/rota; sürüş geçmişi.
 - **Rotalar** — rota oluştur (yol-takipli snap), görünürlük seç (gizli / herkese açık / arkadaşlar), kaydedilen bir rotada sür (haritada rehber çizgi), **GPX içe/dışa aktarma**, **kaydırarak silme**.
 - **Keşfet & puanlama** — herkese açık rotaları keşfet, 5 yıldız üzerinden puanla.
+- **Mola noktaları (POI)** — haritaya uzun basarak motorcu dostu kafe / yakıt / tamirci / manzara / mola noktası ekle; rota detayında rotanın 1 km çevresindeki noktalar otomatik görünür (PostGIS `ST_DWithin`).
 - **Foto akışı** — Instagram tarzı çoklu-foto paylaşımları, beğeni & yorum, konum etiketi.
 - **Takip sistemi** — tek yönlü takip (profilden veya Keşfet'ten tek dokunuşla); `arkadaşlar` görünürlüğü = **karşılıklı takip**.
 - **Canlı grup sürüşü** — kod, **davet linki veya QR kod** ile oturuma katıl (deep link `morider://join/<kod>`, uygulama içi QR tarayıcı), katılımcıların konumunu gerçek zamanlı ortak haritada gör (WebSocket + NATS fan-out). Host **moderasyonu** (at / banla / host devret), tek aktif oturum kuralı, otomatik yeniden bağlanma ve devam eden sürüşe geri dönme.

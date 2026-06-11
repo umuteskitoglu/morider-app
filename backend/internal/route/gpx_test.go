@@ -94,10 +94,10 @@ func TestDownsampleKeepsEndpoints(t *testing.T) {
 
 func TestGPXFilename(t *testing.T) {
 	cases := map[string]string{
-		"Şile Yolu":  "ile-Yolu.gpx",
-		"":           "route.gpx",
-		"abc_123":    "abc_123.gpx",
-		"././../x":   "x.gpx",
+		"Şile Yolu": "ile-Yolu.gpx",
+		"":          "route.gpx",
+		"abc_123":   "abc_123.gpx",
+		"././../x":  "x.gpx",
 	}
 	for in, want := range cases {
 		if got := gpxFilename(in); got != want {
