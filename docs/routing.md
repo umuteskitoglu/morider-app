@@ -95,8 +95,16 @@ Veri `infra/osrm/` altına yazılır (gitignore'lu). İşlem adımları: `osrm-e
 - **Mobil:** Rota detayında "GPX Dışa Aktar" (paylaşım menüsü), Rotalarım'da "GPX İçe Aktar" (dosya seçici).
 - Parser/builder saf fonksiyonlardır: [`gpx.go`](../backend/internal/route/gpx.go), testler `gpx_test.go`.
 
+## Adım adım navigasyon
+
+- Plan yanıtındaki her `step` artık **manevra noktasını** (`lat`/`lon`) ve OSRM `type`/`modifier` alanlarını taşır; istemci ok ikonunu ve "şuraya dön" mantığını bunlarla kurar.
+- **Adım kaynağı:** kayıtlı/yüklenen rota geometrisi en fazla 25 noktaya seyreltilip `POST /api/routes/plan`'a verilir ([`navigation.ts`](../mobile/src/lib/navigation.ts) `fetchRouteSteps`). Bu yüzden GPX'ten gelen veya eski rotalarda da çalışır; yeni uç/migration gerekmez.
+- **İlerleme:** sıradaki manevra noktasına ~30 m kala adım tamamlanır; GPS atlaması olduysa bir sonraki adıma açıkça daha yakın olmak da adımı geçirir (`advanceStep`).
+- **Mobil UX:** rota takipli solo sürüşte eğimli takip kamerası (pitch 55, zoom 17.5, GPS yönüne dönen kamera) + üstte talimat banner'ı; grup sürüşünde yalnız banner (harita grubu izlemek için serbest kalır). Sesli yönlendirme `expo-speech` (tr-TR) ile 250 m ve 50 m kala; banner'daki hoparlör ikonuyla kapatılır.
+
 ## Sonraki adımlar
 
 - Yükseklik profili (PostGIS/harici DEM ile).
 - KML içe-dışa aktarma (GPX tamamlandı).
 - Motosiklete özel OSRM profili (otoyol/viraj ağırlıkları).
+- Rotadan sapınca otomatik yeniden rota hesaplama (re-route).

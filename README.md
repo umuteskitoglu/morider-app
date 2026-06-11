@@ -17,6 +17,7 @@ Bu repo bir **monorepo**'dur:
 - **Rotalar** — rota oluştur (yol-takipli snap), görünürlük seç (gizli / herkese açık / arkadaşlar), kaydedilen bir rotada sür (haritada rehber çizgi), **virajlılık tercihi** (düz ↔ virajlı sürgüsü, 2 nokta arasında alternatif rotalardan seçer), **GPX içe/dışa aktarma**, **kaydırarak silme**.
 - **Keşfet & puanlama** — herkese açık rotaları keşfet, 5 yıldız üzerinden puanla.
 - **Mola noktaları (POI)** — haritaya uzun basarak motorcu dostu kafe / yakıt / tamirci / manzara / mola noktası ekle; rota detayında rotanın 1 km çevresindeki noktalar otomatik görünür (PostGIS `ST_DWithin`).
+- **Adım adım navigasyon** — rota takipli sürüşte Google Maps tarzı eğimli takip kamerası, üstte ok ikonlu Türkçe talimat banner'ı ("350 m • Sağa dön - Rıhtım Caddesi") ve **sesli yönlendirme** (250 m ve 50 m kala, kapatılabilir); grup sürüşünde rota varsa aynı banner.
 - **Foto akışı** — Instagram tarzı çoklu-foto paylaşımları, beğeni & yorum, konum etiketi.
 - **Takip sistemi** — tek yönlü takip (profilden veya Keşfet'ten tek dokunuşla); `arkadaşlar` görünürlüğü = **karşılıklı takip**.
 - **Sürücü profili** — ehliyet sınıfı (A1 / A2 / A / B) ve motor türü (naked, sport, touring, adventure, chopper, enduro, scooter, custom); profil ve kullanıcı kartlarında rozet olarak görünür.
