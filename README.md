@@ -14,11 +14,12 @@ Bu repo bir **monorepo**'dur:
 ## Özellikler
 
 - **Sürüş takibi** — GPS ile canlı kayıt, mesafe/hız/rota; sürüş geçmişi.
-- **Rotalar** — rota oluştur (yol-takipli snap), görünürlük seç (gizli / herkese açık / arkadaşlar), kaydedilen bir rotada sür (haritada rehber çizgi), **GPX içe/dışa aktarma**, **kaydırarak silme**.
+- **Rotalar** — rota oluştur (yol-takipli snap), görünürlük seç (gizli / herkese açık / arkadaşlar), kaydedilen bir rotada sür (haritada rehber çizgi), **virajlılık tercihi** (düz ↔ virajlı sürgüsü, 2 nokta arasında alternatif rotalardan seçer), **GPX içe/dışa aktarma**, **kaydırarak silme**.
 - **Keşfet & puanlama** — herkese açık rotaları keşfet, 5 yıldız üzerinden puanla.
 - **Mola noktaları (POI)** — haritaya uzun basarak motorcu dostu kafe / yakıt / tamirci / manzara / mola noktası ekle; rota detayında rotanın 1 km çevresindeki noktalar otomatik görünür (PostGIS `ST_DWithin`).
 - **Foto akışı** — Instagram tarzı çoklu-foto paylaşımları, beğeni & yorum, konum etiketi.
 - **Takip sistemi** — tek yönlü takip (profilden veya Keşfet'ten tek dokunuşla); `arkadaşlar` görünürlüğü = **karşılıklı takip**.
+- **Sürücü profili** — ehliyet sınıfı (A1 / A2 / A / B) ve motor türü (naked, sport, touring, adventure, chopper, enduro, scooter, custom); profil ve kullanıcı kartlarında rozet olarak görünür.
 - **Canlı grup sürüşü** — kod, **davet linki veya QR kod** ile oturuma katıl (deep link `morider://join/<kod>`, uygulama içi QR tarayıcı), katılımcıların konumunu gerçek zamanlı ortak haritada gör (WebSocket + NATS fan-out). Host **moderasyonu** (at / banla / host devret), tek aktif oturum kuralı, otomatik yeniden bağlanma ve devam eden sürüşe geri dönme.
 - **Ödüller** — sürüşlere göre rozetler ve liderlik tablosu.
 - **Kaza algılama (MVP)** — sürüşte ivmeölçerle darbe tespiti, 30 sn iptal edilebilir geri sayım; süre dolunca grup sürüşünde tüm katılımcılara **SOS uyarısı**, acil durum kişisine konumlu SMS taslağı, 112 arama kısayolu. Ayrıntı: [`docs/safety.md`](docs/safety.md).
