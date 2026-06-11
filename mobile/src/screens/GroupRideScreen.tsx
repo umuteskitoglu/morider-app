@@ -167,19 +167,24 @@ export default function GroupRideScreen({ route, navigation }: Props) {
         if (raw.type === 'sos') {
           if (raw.user_id === user?.id) return; // our own echo
           Vibration.vibrate([400, 300, 400, 300, 400]);
+          const hasLoc = raw.has_loc && raw.lat != null && raw.lon != null;
           const goto = () =>
-            raw.lat && raw.lon &&
+            hasLoc &&
             mapRef.current?.animateToRegion(
               { latitude: raw.lat, longitude: raw.lon, latitudeDelta: 0.005, longitudeDelta: 0.005 },
               600,
             );
           Alert.alert(
             '🚨 ACİL DURUM',
-            `${raw.name ?? 'Bir sürücü'} kaza yapmış olabilir! Son konumuna gidip durumu kontrol et.`,
-            [
-              { text: 'Konuma Git', onPress: goto },
-              { text: 'Tamam', style: 'cancel' },
-            ],
+            hasLoc
+              ? `${raw.name ?? 'Bir sürücü'} kaza yapmış olabilir! Son konumuna gidip durumu kontrol et.`
+              : `${raw.name ?? 'Bir sürücü'} kaza yapmış olabilir! (Konum alınamadı.)`,
+            hasLoc
+              ? [
+                  { text: 'Konuma Git', onPress: goto },
+                  { text: 'Tamam', style: 'cancel' },
+                ]
+              : [{ text: 'Tamam', style: 'cancel' }],
           );
           return;
         }
@@ -351,13 +356,19 @@ export default function GroupRideScreen({ route, navigation }: Props) {
   async function sendSOS() {
     setCrashAlarm(false);
     const c = lastCoord.current;
+    // No GPS fix yet (e.g. crash seconds after connecting, or permission
+    // denied): flag the SOS as location-less rather than reporting 0,0, which
+    // would point rescuers at the Gulf of Guinea.
+    const hasLoc = c?.lat != null && c?.lon != null;
     if (ws.current?.readyState === WebSocket.OPEN) {
-      ws.current.send(JSON.stringify({ type: 'sos', lat: c?.lat ?? 0, lon: c?.lon ?? 0 }));
+      ws.current.send(
+        JSON.stringify({ type: 'sos', has_loc: hasLoc, lat: c?.lat ?? 0, lon: c?.lon ?? 0 }),
+      );
     }
     const contact = await getEmergencyContact();
     if (contact) {
       try {
-        await composeEmergencySMS(contact, c?.lat, c?.lon);
+        await composeEmergencySMS(contact, hasLoc ? c?.lat : undefined, hasLoc ? c?.lon : undefined);
       } catch {
         // SMS composer unavailable — the group SOS already went out
       }

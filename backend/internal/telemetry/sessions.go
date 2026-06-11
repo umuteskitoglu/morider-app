@@ -520,11 +520,18 @@ func (h *handler) transferHost(c *gin.Context) {
 type wsPositionIn struct {
 	// Type distinguishes special frames; empty means a regular position.
 	// "sos" broadcasts a crash/emergency alert to the whole session.
-	Type  string  `json:"type"`
-	Lat   float64 `json:"lat"`
-	Lon   float64 `json:"lon"`
-	Speed float64 `json:"speed"`
+	Type string `json:"type"`
+	// HasLoc reports whether Lat/Lon are a real fix (false = no GPS yet, so
+	// recipients must not navigate to 0,0).
+	HasLoc bool    `json:"has_loc"`
+	Lat    float64 `json:"lat"`
+	Lon    float64 `json:"lon"`
+	Speed  float64 `json:"speed"`
 }
+
+// sosCooldown throttles SOS frames from a single connection so a buggy or
+// hostile client can't flood every participant with crash alerts.
+const sosCooldown = 10 * time.Second
 
 // sessionWS streams live positions for a session. The caller must be a
 // participant; their inbound positions are fanned out to the other participants
@@ -601,6 +608,7 @@ func (h *handler) sessionWS(c *gin.Context) {
 	}()
 
 	// Read loop: every inbound position is stamped and published to the session.
+	var lastSOS time.Time
 	for {
 		var in wsPositionIn
 		if err := conn.ReadJSON(&in); err != nil {
@@ -610,15 +618,37 @@ func (h *handler) sessionWS(c *gin.Context) {
 		// Fan it out as a control frame so every participant gets alerted.
 		// Deliberately no speed: only the location needed to find the rider.
 		if in.Type == "sos" {
+			now := time.Now()
+			if now.Sub(lastSOS) < sosCooldown {
+				continue // drop floods from this connection
+			}
+			lastSOS = now
 			h.publishControl(sessionID, gin.H{
 				"type":       "sos",
 				"session_id": sessionID,
 				"user_id":    me,
 				"name":       name,
+				"has_loc":    in.HasLoc,
 				"lat":        in.Lat,
 				"lon":        in.Lon,
-				"ts":         time.Now().UnixMilli(),
+				"ts":         now.UnixMilli(),
 			})
+			// Also push the crash location through the normal position channel so
+			// participants' maps move the rider's marker to the crash site (and
+			// anyone reconnecting sees it), but only when it's a real fix.
+			if in.HasLoc {
+				pos := events.LivePosition{
+					SessionID: sessionID,
+					UserID:    me,
+					Name:      name,
+					Lat:       in.Lat,
+					Lon:       in.Lon,
+					Ts:        now.UnixMilli(),
+				}
+				if data, err := json.Marshal(pos); err == nil {
+					h.hub.publish(sessionID, data)
+				}
+			}
 			continue
 		}
 		pos := events.LivePosition{

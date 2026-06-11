@@ -28,6 +28,7 @@ func Run(cfg config.Config) error {
 	}
 	h := &handler{d: deps, router: NewOSRMRouter(cfg.RoutingURL, cfg.RoutingProfile)}
 	registerRoutes(deps, h)
+	registerPOIRoutes(deps, h)
 	return deps.Run(config.ResolvePort("ROUTE_PORT", "8084"))
 }
 
@@ -89,9 +90,9 @@ type writeReq struct {
 // planOpts converts an optional request curviness into PlanOptions.
 func planOpts(curviness *float64) PlanOptions {
 	if curviness == nil {
-		return PlanOptions{Curviness: -1}
+		return PlanOptions{}
 	}
-	return PlanOptions{Curviness: *curviness}
+	return PlanOptions{UseCurviness: true, Curviness: *curviness}
 }
 
 // normalizeVisibility defaults an empty value to private.

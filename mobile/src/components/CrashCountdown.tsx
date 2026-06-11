@@ -29,15 +29,16 @@ export function CrashCountdown({
     if (!visible) return;
     setLeft(COUNTDOWN_SECONDS);
     Vibration.vibrate([500, 500], true);
+    let remaining = COUNTDOWN_SECONDS;
     const iv = setInterval(() => {
-      setLeft((s) => {
-        if (s <= 1) {
-          clearInterval(iv);
-          expire.current();
-          return 0;
-        }
-        return s - 1;
-      });
+      remaining -= 1;
+      setLeft(remaining);
+      // Fire the side effect from the interval body — not from a setState
+      // updater, which React can call twice (Strict Mode) and would double-send.
+      if (remaining <= 0) {
+        clearInterval(iv);
+        expire.current();
+      }
     }, 1000);
     return () => {
       clearInterval(iv);
