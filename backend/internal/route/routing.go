@@ -31,10 +31,14 @@ type Step struct {
 
 // PlanOptions tunes route planning.
 type PlanOptions struct {
+	// UseCurviness enables alternative-route selection by twistiness. The zero
+	// value (false) means "no preference" — the engine's default route is
+	// returned and Curviness is ignored.
+	UseCurviness bool
 	// Curviness in [0,1] picks among alternative routes by how twisty they are
-	// (0 = straightest alternative, 1 = curviest). Negative disables the
-	// preference. OSRM only produces alternatives between exactly 2 waypoints;
-	// with via-points the single route is returned as-is.
+	// (0 = straightest alternative, 1 = curviest). Only consulted when
+	// UseCurviness is true. OSRM only produces alternatives between exactly 2
+	// waypoints; with via-points the single route is returned as-is.
 	Curviness float64
 }
 
@@ -73,7 +77,7 @@ func (r *OSRMRouter) Plan(ctx context.Context, waypoints []Point, opts PlanOptio
 	}
 	url := fmt.Sprintf("%s/route/v1/%s/%s?overview=full&geometries=geojson&steps=true",
 		r.baseURL, r.profile, strings.Join(coords, ";"))
-	wantCurvy := opts.Curviness >= 0 && len(waypoints) == 2
+	wantCurvy := opts.UseCurviness && len(waypoints) == 2
 	if wantCurvy {
 		url += "&alternatives=3"
 	}
@@ -116,7 +120,7 @@ type osrmResponse struct {
 		} `json:"geometry"`
 		Legs []struct {
 			Steps []struct {
-				Name     string `json:"name"`
+				Name     string  `json:"name"`
 				Distance float64 `json:"distance"` // meters
 				Maneuver struct {
 					Type     string `json:"type"`

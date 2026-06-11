@@ -89,9 +89,9 @@ type writeReq struct {
 // planOpts converts an optional request curviness into PlanOptions.
 func planOpts(curviness *float64) PlanOptions {
 	if curviness == nil {
-		return PlanOptions{Curviness: -1}
+		return PlanOptions{}
 	}
-	return PlanOptions{Curviness: *curviness}
+	return PlanOptions{UseCurviness: true, Curviness: *curviness}
 }
 
 // normalizeVisibility defaults an empty value to private.

@@ -15,8 +15,10 @@ type Props = NativeStackScreenProps<RideStackParams, 'GroupJoin'>;
 
 // Pull a session code out of whatever the QR contained: a deep link
 // (morider://join/ABC123, exp://.../--/join/ABC123) or the bare code itself.
+// The `join` token must start the string or follow a path separator so an
+// unrelated URL like .../conjoin/AB1234 can't be mistaken for an invite.
 export function codeFromQR(raw: string): string | null {
-  const link = raw.match(/join[/=]([A-Za-z0-9]{4,8})/i);
+  const link = raw.match(/(?:^|[/])join[/=]([A-Za-z0-9]{4,8})/i);
   if (link) return link[1].toUpperCase();
   const bare = raw.trim().toUpperCase();
   return /^[A-Z0-9]{4,8}$/.test(bare) ? bare : null;
@@ -30,7 +32,9 @@ export default function GroupJoinScreen({ route, navigation }: Props) {
   const [showScanner, setShowScanner] = useState(false);
   const [cameraPermission, requestCameraPermission] = useCameraPermissions();
   const scanned = useRef(false);
-  const autoJoined = useRef(false);
+  // Remembers which code we already auto-joined so a *new* invite link that
+  // arrives while the screen is mounted still triggers a join.
+  const autoJoinedCode = useRef<string | null>(null);
 
   const loadActive = useCallback(async () => {
     try {
@@ -77,10 +81,11 @@ export default function GroupJoinScreen({ route, navigation }: Props) {
   );
 
   // Arriving via an invite link (morider://join/<code>) joins right away.
+  // Keyed on the code itself so a second, different link still auto-joins.
   useEffect(() => {
     const c = route.params?.code;
-    if (c && !autoJoined.current) {
-      autoJoined.current = true;
+    if (c && autoJoinedCode.current !== c) {
+      autoJoinedCode.current = c;
       join(c);
     }
   }, [route.params?.code, join]);
