@@ -1,15 +1,16 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { Alert, Pressable, StyleSheet, Text, View } from 'react-native';
-import MapView, { Polyline, Region } from 'react-native-maps';
+import { Alert, Modal, Pressable, StyleSheet, Text, View } from 'react-native';
+import MapView, { LongPressEvent, Marker, Polyline, Region } from 'react-native-maps';
 import * as Location from 'expo-location';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 
 import { RideStackParams } from '../navigation/RootNavigator';
-import { Button, Card } from '../components/ui';
+import { Button, Card, TextField } from '../components/ui';
 import { CrashCountdown } from '../components/CrashCountdown';
 import { useCrashDetection } from '../lib/crashDetection';
 import { call112, composeEmergencySMS, getEmergencyContact } from '../lib/emergency';
+import { POI, POI_CATEGORIES, POI_LABELS, poiColor, poiIcon } from '../lib/poi';
 import { api, errorMessage } from '../api/client';
 import { colors, radius, shadow, spacing } from '../theme';
 
@@ -44,6 +45,11 @@ export default function MapScreen({ route, navigation }: Props) {
   const [speed, setSpeed] = useState(0);
   const [saving, setSaving] = useState(false);
   const [crashAlarm, setCrashAlarm] = useState(false);
+  const [pois, setPois] = useState<POI[]>([]);
+  const [poiPoint, setPoiPoint] = useState<Coord | null>(null);
+  const [poiName, setPoiName] = useState('');
+  const [poiCategory, setPoiCategory] = useState<string>('cafe');
+  const [savingPoi, setSavingPoi] = useState(false);
 
   const subscription = useRef<Location.LocationSubscription | null>(null);
   const samples = useRef<Sample[]>([]);
@@ -110,6 +116,58 @@ export default function MapScreen({ route, navigation }: Props) {
       );
     } catch {
       // ignore – keep default region
+    }
+  }
+
+  // POIs (mola noktaları) for the visible map area. Refreshed as the viewport
+  // settles; skipped when zoomed out too far for individual stops to matter.
+  async function loadPois(region: Region) {
+    if (region.latitudeDelta > 2 || region.longitudeDelta > 2) {
+      setPois([]);
+      return;
+    }
+    try {
+      const { data } = await api.get('/api/pois', {
+        params: {
+          min_lat: region.latitude - region.latitudeDelta / 2,
+          max_lat: region.latitude + region.latitudeDelta / 2,
+          min_lon: region.longitude - region.longitudeDelta / 2,
+          max_lon: region.longitude + region.longitudeDelta / 2,
+        },
+      });
+      setPois(data.pois ?? []);
+    } catch {
+      // ignore — markers just won't refresh
+    }
+  }
+
+  function onMapLongPress(e: LongPressEvent) {
+    if (recording) return; // don't interrupt an active ride
+    setPoiName('');
+    setPoiCategory('cafe');
+    setPoiPoint(e.nativeEvent.coordinate);
+  }
+
+  async function savePoi() {
+    if (!poiPoint) return;
+    if (!poiName.trim()) {
+      Alert.alert('İsim gerekli', 'Mola noktasına bir isim ver.');
+      return;
+    }
+    try {
+      setSavingPoi(true);
+      const { data } = await api.post('/api/pois', {
+        name: poiName.trim(),
+        category: poiCategory,
+        lat: poiPoint.latitude,
+        lon: poiPoint.longitude,
+      });
+      setPois((prev) => [data, ...prev]);
+      setPoiPoint(null);
+    } catch (err) {
+      Alert.alert('Eklenemedi', errorMessage(err));
+    } finally {
+      setSavingPoi(false);
     }
   }
 
@@ -230,11 +288,26 @@ export default function MapScreen({ route, navigation }: Props) {
         showsUserLocation
         showsMyLocationButton={false}
         followsUserLocation={recording}
+        onLongPress={onMapLongPress}
+        onRegionChangeComplete={loadPois}
       >
         {followPath.length > 1 && (
           <Polyline coordinates={followPath} strokeColor={colors.accent} strokeWidth={5} lineDashPattern={[2, 8]} />
         )}
         {path.length > 1 && <Polyline coordinates={path} strokeColor={colors.primary} strokeWidth={6} />}
+        {pois.map((p) => (
+          <Marker
+            key={`poi-${p.id}`}
+            coordinate={{ latitude: p.lat, longitude: p.lon }}
+            title={p.name}
+            description={`${POI_LABELS[p.category as keyof typeof POI_LABELS] ?? p.category} • ${p.owner_name}`}
+            tracksViewChanges={false}
+          >
+            <View style={[styles.poiPin, { borderColor: poiColor(p.category) }]}>
+              <MaterialCommunityIcons name={poiIcon(p.category) as any} size={15} color={poiColor(p.category)} />
+            </View>
+          </Marker>
+        ))}
       </MapView>
 
       {followPath.length > 1 && (
@@ -276,6 +349,46 @@ export default function MapScreen({ route, navigation }: Props) {
       </Card>
 
       <CrashCountdown visible={crashAlarm} onCancel={() => setCrashAlarm(false)} onExpire={emergencyProtocol} />
+
+      {/* Add a POI (mola noktası) at the long-pressed coordinate */}
+      <Modal
+        visible={poiPoint != null}
+        animationType="slide"
+        transparent
+        statusBarTranslucent
+        onRequestClose={() => setPoiPoint(null)}
+      >
+        <Pressable style={styles.poiBackdrop} onPress={() => setPoiPoint(null)}>
+          <Pressable style={styles.poiSheet} onPress={() => {}}>
+            <Text style={styles.poiTitle}>Mola Noktası Ekle</Text>
+            <Text style={styles.poiSub}>
+              Motorcu dostu bir yer mi buldun? Herkesin haritasında görünecek.
+            </Text>
+            <TextField label="İsim" value={poiName} onChangeText={setPoiName} placeholder="Şelale Kafe" />
+            <View style={styles.poiPillRow}>
+              {POI_CATEGORIES.map((cat) => {
+                const active = poiCategory === cat;
+                return (
+                  <Pressable
+                    key={cat}
+                    style={[styles.poiPill, active && { borderColor: poiColor(cat), backgroundColor: 'rgba(255,255,255,0.06)' }]}
+                    onPress={() => setPoiCategory(cat)}
+                  >
+                    <MaterialCommunityIcons
+                      name={poiIcon(cat) as any}
+                      size={15}
+                      color={active ? poiColor(cat) : colors.textMuted}
+                    />
+                    <Text style={[styles.poiPillText, active && { color: colors.text }]}>{POI_LABELS[cat]}</Text>
+                  </Pressable>
+                );
+              })}
+            </View>
+            <View style={{ height: spacing.sm }} />
+            <Button title="Kaydet" icon="map-marker-plus" onPress={savePoi} loading={savingPoi} />
+          </Pressable>
+        </Pressable>
+      </Modal>
     </View>
   );
 }
@@ -339,6 +452,39 @@ const styles = StyleSheet.create({
     ...shadow.card,
   },
   panel: { position: 'absolute', left: spacing.md, right: spacing.md, bottom: spacing.lg },
+  poiPin: {
+    width: 30,
+    height: 30,
+    borderRadius: 15,
+    borderWidth: 2,
+    backgroundColor: colors.surface,
+    alignItems: 'center',
+    justifyContent: 'center',
+    ...shadow.card,
+  },
+  poiBackdrop: { flex: 1, backgroundColor: 'rgba(0,0,0,0.55)', justifyContent: 'flex-end' },
+  poiSheet: {
+    backgroundColor: colors.surface,
+    borderTopLeftRadius: radius.lg,
+    borderTopRightRadius: radius.lg,
+    padding: spacing.lg,
+    gap: spacing.sm,
+  },
+  poiTitle: { color: colors.text, fontSize: 18, fontWeight: '900' },
+  poiSub: { color: colors.textMuted, fontSize: 13 },
+  poiPillRow: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.xs, marginTop: spacing.xs },
+  poiPill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: colors.border,
+    backgroundColor: colors.surfaceAlt,
+  },
+  poiPillText: { color: colors.textMuted, fontWeight: '700', fontSize: 13 },
   stats: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: spacing.md },
   stat: { alignItems: 'center', flex: 1 },
   statValue: { color: colors.text, fontSize: 22, fontWeight: '900' },
