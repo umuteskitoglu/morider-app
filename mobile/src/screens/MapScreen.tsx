@@ -15,8 +15,13 @@ import {
   advanceStep,
   fetchRouteSteps,
   distanceM,
+  LatLon,
   maybeSpeak,
   NavStep,
+  newRerouteState,
+  offRouteTick,
+  rerouteFromPosition,
+  speakRerouted,
   SpokenState,
   stopSpeaking,
 } from '../lib/navigation';
@@ -76,6 +81,14 @@ export default function MapScreen({ route, navigation }: Props) {
   const spoken = useRef<SpokenState>({ idx: -1, far: false, near: false });
   const voiceRef = useRef(true);
   voiceRef.current = voiceOn;
+  // The watch callback closes over render-time state, so the guide geometry it
+  // checks for deviation lives in a ref kept in sync with followPath.
+  const routePointsRef = useRef<LatLon[]>([]);
+  const reroute = useRef(newRerouteState());
+
+  useEffect(() => {
+    routePointsRef.current = followPath.map((p) => ({ lat: p.latitude, lon: p.longitude }));
+  }, [followPath]);
 
   // Load a saved route to follow when navigated here with followRouteId.
   useEffect(() => {
@@ -220,6 +233,30 @@ export default function MapScreen({ route, navigation }: Props) {
     );
   }
 
+  // Sustained deviation from the guide line → plan a fresh path from here that
+  // rejoins the route ahead, swap in its steps and redraw the dashed guide.
+  function maybeReroute(pos: LatLon): void {
+    if (!navSteps.current) return;
+    if (!offRouteTick(reroute.current, routePointsRef.current, pos)) return;
+    reroute.current.inFlight = true;
+    rerouteFromPosition(routePointsRef.current, pos)
+      .then(({ steps, points }) => {
+        if (steps.length === 0) return;
+        navSteps.current = steps;
+        navIdx.current = 0;
+        spoken.current = { idx: -1, far: false, near: false };
+        if (points.length > 1) {
+          setFollowPath(points.map((p) => ({ latitude: p.lat, longitude: p.lon })));
+        }
+        speakRerouted(voiceRef.current);
+      })
+      .catch(() => {}) // keep guiding with the old steps; next deviation retries
+      .finally(() => {
+        reroute.current.lastAt = Date.now();
+        reroute.current.inFlight = false;
+      });
+  }
+
   // Update the turn-by-turn banner (and voice) for the new position; returns
   // whether navigation is active so the camera can switch to chase mode.
   function updateNavigation(pos: { lat: number; lon: number }): boolean {
@@ -259,6 +296,7 @@ export default function MapScreen({ route, navigation }: Props) {
     navSteps.current = null;
     navIdx.current = 0;
     spoken.current = { idx: -1, far: false, near: false };
+    reroute.current = newRerouteState();
     setNavStep(null);
     if (followPath.length > 1) {
       fetchRouteSteps(followPath.map((p) => ({ lat: p.latitude, lon: p.longitude })))
@@ -289,6 +327,7 @@ export default function MapScreen({ route, navigation }: Props) {
         });
         const navigating = updateNavigation({ lat: coord.latitude, lon: coord.longitude });
         if (navigating) {
+          maybeReroute({ lat: coord.latitude, lon: coord.longitude });
           // Google-Maps-style chase cam: tilted, zoomed-in, rotated to heading.
           const heading = loc.coords.heading ?? -1;
           mapRef.current?.animateCamera(

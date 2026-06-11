@@ -18,8 +18,13 @@ import {
   advanceStep,
   fetchRouteSteps,
   distanceM,
+  LatLon,
   maybeSpeak,
   NavStep,
+  newRerouteState,
+  offRouteTick,
+  rerouteFromPosition,
+  speakRerouted,
   SpokenState,
   stopSpeaking,
 } from '../lib/navigation';
@@ -65,6 +70,10 @@ export default function GroupRideScreen({ route, navigation }: Props) {
   const spoken = useRef<SpokenState>({ idx: -1, far: false, near: false });
   const voiceRef = useRef(true);
   voiceRef.current = voiceOn;
+  // Session route geometry for off-route detection (refs because the location
+  // callback outlives the render that created it).
+  const routePointsRef = useRef<LatLon[]>([]);
+  const reroute = useRef(newRerouteState());
 
   const ws = useRef<WebSocket | null>(null);
   const locSub = useRef<Location.LocationSubscription | null>(null);
@@ -119,8 +128,9 @@ export default function GroupRideScreen({ route, navigation }: Props) {
         );
       }
       // Turn-by-turn steps for the session route (best effort, once).
+      routePointsRef.current = pts.map((p) => ({ lat: p.latitude, lon: p.longitude }));
       if (pts.length > 1 && !navSteps.current) {
-        fetchRouteSteps(pts.map((p) => ({ lat: p.latitude, lon: p.longitude })))
+        fetchRouteSteps(routePointsRef.current)
           .then((steps) => {
             if (steps.length > 0) navSteps.current = steps;
           })
@@ -287,6 +297,29 @@ export default function GroupRideScreen({ route, navigation }: Props) {
     setNavStep(step);
     setNavDist(d);
     maybeSpeak(spoken.current, idx, step, d, voiceRef.current);
+    maybeReroute(pos);
+  }
+
+  // Strayed from the group's route → refresh own guidance with a path that
+  // rejoins it ahead. The shared route polyline stays untouched; only this
+  // rider's banner instructions change.
+  function maybeReroute(pos: LatLon): void {
+    if (!navSteps.current) return;
+    if (!offRouteTick(reroute.current, routePointsRef.current, pos)) return;
+    reroute.current.inFlight = true;
+    rerouteFromPosition(routePointsRef.current, pos)
+      .then(({ steps }) => {
+        if (steps.length === 0) return;
+        navSteps.current = steps;
+        navIdx.current = 0;
+        spoken.current = { idx: -1, far: false, near: false };
+        speakRerouted(voiceRef.current);
+      })
+      .catch(() => {})
+      .finally(() => {
+        reroute.current.lastAt = Date.now();
+        reroute.current.inFlight = false;
+      });
   }
 
   // GPS update AND on a steady heartbeat, so a stationary rider still appears to

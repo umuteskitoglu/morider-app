@@ -147,3 +147,85 @@ export function maybeSpeak(state: SpokenState, idx: number, step: NavStep, distM
 export function stopSpeaking(): void {
   Speech.stop();
 }
+
+// ---------------------------------------------------------------------------
+// Re-route: when the rider strays from the route, plan a fresh path from the
+// current position that rejoins the original route a little further ahead.
+// ---------------------------------------------------------------------------
+
+// Farther than this from every route vertex counts as "off route".
+const OFF_ROUTE_M = 100;
+// Don't re-route again within this window (GPS settles, OSRM load stays sane).
+const REROUTE_COOLDOWN_MS = 20_000;
+// Rejoin the route this far ahead of where it was left, so the plan doesn't
+// send the rider back to the exact point they (maybe deliberately) skipped.
+const REJOIN_SKIP_M = 150;
+// Consecutive off-route ticks required (filters one-off GPS jumps).
+const OFF_TICKS = 2;
+
+export type RerouteState = { offCount: number; lastAt: number; inFlight: boolean };
+
+export function newRerouteState(): RerouteState {
+  return { offCount: 0, lastAt: 0, inFlight: false };
+}
+
+// Min distance from pos to the route's vertices. OSRM geometries are dense
+// (vertices every few tens of meters), so vertex distance ≈ polyline distance.
+export function distanceToRouteM(routePoints: LatLon[], pos: LatLon): number {
+  let min = Infinity;
+  for (const p of routePoints) {
+    const d = distanceM(pos, p);
+    if (d < min) min = d;
+  }
+  return min;
+}
+
+/**
+ * Feed every GPS tick; returns true when a re-route should fire (sustained
+ * deviation, no request in flight, cooldown elapsed). Mutates `state`.
+ */
+export function offRouteTick(state: RerouteState, routePoints: LatLon[], pos: LatLon): boolean {
+  if (state.inFlight || routePoints.length < 2) return false;
+  if (distanceToRouteM(routePoints, pos) > OFF_ROUTE_M) {
+    state.offCount += 1;
+  } else {
+    state.offCount = 0;
+  }
+  return state.offCount >= OFF_TICKS && Date.now() - state.lastAt > REROUTE_COOLDOWN_MS;
+}
+
+/**
+ * Plans a fresh route from the current position that rejoins the original
+ * route ~150 m ahead of the nearest point and follows it to the end. Returns
+ * the new steps plus the new geometry (for redrawing the guide line).
+ */
+export async function rerouteFromPosition(
+  routePoints: LatLon[],
+  pos: LatLon,
+): Promise<{ steps: NavStep[]; points: LatLon[] }> {
+  let nearest = 0;
+  let best = Infinity;
+  for (let i = 0; i < routePoints.length; i++) {
+    const d = distanceM(pos, routePoints[i]);
+    if (d < best) {
+      best = d;
+      nearest = i;
+    }
+  }
+  let skip = nearest;
+  let acc = 0;
+  while (skip < routePoints.length - 1 && acc < REJOIN_SKIP_M) {
+    acc += distanceM(routePoints[skip], routePoints[skip + 1]);
+    skip += 1;
+  }
+  const rest = routePoints.slice(Math.min(skip, routePoints.length - 1));
+  const waypoints = [pos, ...sampleWaypoints(rest, 24)];
+  const { data } = await api.post('/api/routes/plan', { waypoints });
+  const steps: NavStep[] = (data.steps ?? []).filter((s: NavStep) => s.lat !== 0 || s.lon !== 0);
+  const points: LatLon[] = data.points ?? [];
+  return { steps, points };
+}
+
+export function speakRerouted(enabled: boolean): void {
+  if (enabled) Speech.speak('Rota yeniden hesaplandı', { language: 'tr-TR' });
+}
