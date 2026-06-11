@@ -25,7 +25,8 @@ import { BIKE_LABELS, BIKE_TYPES, bikeLabel, LICENSE_LABELS, LICENSE_TYPES, lice
 import { getEmergencyContact, setEmergencyContact } from '../lib/emergency';
 import { PostDetail, DetailPost } from '../components/PostDetail';
 import { AvatarViewer } from '../components/AvatarViewer';
-import { useAuth } from '../store/auth';
+import { RiderChips } from '../components/RiderChips';
+import { useAuth, User } from '../store/auth';
 import { ProfileStackParams } from '../navigation/RootNavigator';
 import { api, apiBaseURL, errorMessage } from '../api/client';
 import { colors, gradients, radius, shadow, spacing } from '../theme';
@@ -78,10 +79,12 @@ export default function ProfileScreen() {
       // Keep the cached user fresh (e.g. sessions from before these fields
       // shipped, or edits made on another device).
       if (u?.data) {
-        const fresh: Record<string, string> = {};
+        // Store undefined (not '') for absent fields so the cache matches the
+        // User type and server truth — '' would falsely look like a real value.
+        const fresh: Partial<User> = {};
         if (u.data.username && u.data.username !== user?.username) fresh.username = u.data.username;
-        if ((u.data.license_type ?? '') !== (user?.license_type ?? '')) fresh.license_type = u.data.license_type ?? '';
-        if ((u.data.bike_type ?? '') !== (user?.bike_type ?? '')) fresh.bike_type = u.data.bike_type ?? '';
+        if ((u.data.license_type ?? '') !== (user?.license_type ?? '')) fresh.license_type = u.data.license_type || undefined;
+        if ((u.data.bike_type ?? '') !== (user?.bike_type ?? '')) fresh.bike_type = u.data.bike_type || undefined;
         if (Object.keys(fresh).length > 0) updateUser(fresh);
       }
     } catch {
@@ -269,18 +272,7 @@ export default function ProfileScreen() {
           <Pressable style={styles.riderRow} onPress={openRiderEdit} hitSlop={8}>
             {licenseLabel(user?.license_type) || bikeLabel(user?.bike_type) ? (
               <>
-                {licenseLabel(user?.license_type) ? (
-                  <View style={styles.riderChip}>
-                    <MaterialCommunityIcons name="card-account-details-outline" size={13} color={colors.primary} />
-                    <Text style={styles.riderChipText}>{licenseLabel(user?.license_type)}</Text>
-                  </View>
-                ) : null}
-                {bikeLabel(user?.bike_type) ? (
-                  <View style={styles.riderChip}>
-                    <MaterialCommunityIcons name="motorbike" size={13} color={colors.primary} />
-                    <Text style={styles.riderChipText}>{bikeLabel(user?.bike_type)}</Text>
-                  </View>
-                ) : null}
+                <RiderChips licenseType={user?.license_type} bikeType={user?.bike_type} style={styles.riderChipsInline} />
                 <MaterialCommunityIcons name="pencil" size={13} color={colors.textMuted} />
               </>
             ) : (
@@ -574,18 +566,9 @@ const styles = StyleSheet.create({
   username: { color: colors.primary, fontWeight: '700' },
   email: { color: colors.textMuted, marginTop: 2 },
   riderRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.xs, marginTop: spacing.sm, flexWrap: 'wrap', justifyContent: 'center' },
-  riderChip: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
-    backgroundColor: 'rgba(255,90,31,0.12)',
-    borderWidth: 1,
-    borderColor: colors.primary,
-    paddingHorizontal: spacing.sm,
-    paddingVertical: 4,
-    borderRadius: 999,
-  },
-  riderChipText: { color: colors.text, fontWeight: '700', fontSize: 12 },
+  // The shared RiderChips row carries its own top margin; cancel it here since
+  // the surrounding Pressable already provides the spacing.
+  riderChipsInline: { marginTop: 0 },
   riderHint: { color: colors.primary, fontWeight: '700', fontSize: 13 },
   pickLabel: { color: colors.text, fontWeight: '800', fontSize: 13, marginTop: spacing.md },
   pillRow: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.xs, marginTop: spacing.xs },

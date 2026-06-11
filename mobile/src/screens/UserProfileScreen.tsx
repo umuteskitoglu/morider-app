@@ -8,7 +8,7 @@ import { PostDetail, DetailPost } from '../components/PostDetail';
 import { AvatarViewer } from '../components/AvatarViewer';
 import FollowButton from '../components/FollowButton';
 import { useAuth } from '../store/auth';
-import { bikeLabel, licenseLabel } from '../lib/rider';
+import { RiderChips } from '../components/RiderChips';
 import { api, apiBaseURL } from '../api/client';
 import { colors, gradients, radius, shadow, spacing } from '../theme';
 
@@ -98,22 +98,7 @@ export default function UserProfileScreen({ route, navigation }: Props) {
           <Text style={styles.name}>{name}</Text>
           {username ? <Text style={styles.handle}>@{username}</Text> : null}
           <Text style={styles.muted}>{posts.length} paylaşım</Text>
-          {(licenseLabel(licenseType) || bikeLabel(bikeType)) && (
-            <View style={styles.riderRow}>
-              {licenseLabel(licenseType) ? (
-                <View style={styles.riderChip}>
-                  <MaterialCommunityIcons name="card-account-details-outline" size={13} color={colors.primary} />
-                  <Text style={styles.riderChipText}>{licenseLabel(licenseType)}</Text>
-                </View>
-              ) : null}
-              {bikeLabel(bikeType) ? (
-                <View style={styles.riderChip}>
-                  <MaterialCommunityIcons name="motorbike" size={13} color={colors.primary} />
-                  <Text style={styles.riderChipText}>{bikeLabel(bikeType)}</Text>
-                </View>
-              ) : null}
-            </View>
-          )}
+          <RiderChips licenseType={licenseType} bikeType={bikeType} />
           {badges.length > 0 && (
             <View style={styles.badges}>
               {badges.map((b) => (
@@ -169,19 +154,6 @@ const styles = StyleSheet.create({
   name: { color: colors.text, fontSize: 22, fontWeight: '900' },
   handle: { color: colors.primary, fontWeight: '700', marginTop: 2 },
   muted: { color: colors.textMuted, marginTop: 2 },
-  riderRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.xs, marginTop: spacing.sm, flexWrap: 'wrap', justifyContent: 'center' },
-  riderChip: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
-    backgroundColor: 'rgba(255,90,31,0.12)',
-    borderWidth: 1,
-    borderColor: colors.primary,
-    paddingHorizontal: spacing.sm,
-    paddingVertical: 4,
-    borderRadius: 999,
-  },
-  riderChipText: { color: colors.text, fontWeight: '700', fontSize: 12 },
   badges: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.xs, justifyContent: 'center', marginTop: spacing.md, paddingHorizontal: spacing.md },
   chip: {
     flexDirection: 'row',
