@@ -8,8 +8,23 @@ import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { RideStackParams } from '../navigation/RootNavigator';
 import { Button, Card, TextField } from '../components/ui';
 import { CrashCountdown } from '../components/CrashCountdown';
+import { NavBanner } from '../components/NavBanner';
 import { useCrashDetection } from '../lib/crashDetection';
 import { call112, composeEmergencySMS, getEmergencyContact } from '../lib/emergency';
+import {
+  advanceStep,
+  fetchRouteSteps,
+  distanceM,
+  LatLon,
+  maybeSpeak,
+  NavStep,
+  newRerouteState,
+  offRouteTick,
+  rerouteFromPosition,
+  speakRerouted,
+  SpokenState,
+  stopSpeaking,
+} from '../lib/navigation';
 import { POI, POI_CATEGORIES, POI_LABELS, poiColor, poiIcon } from '../lib/poi';
 import { api, errorMessage } from '../api/client';
 import { colors, radius, shadow, spacing } from '../theme';
@@ -51,11 +66,29 @@ export default function MapScreen({ route, navigation }: Props) {
   const [poiCategory, setPoiCategory] = useState<string>('cafe');
   const [savingPoi, setSavingPoi] = useState(false);
 
+  // Turn-by-turn state (active while recording on a followed route).
+  const [navStep, setNavStep] = useState<NavStep | null>(null);
+  const [navDist, setNavDist] = useState(0);
+  const [voiceOn, setVoiceOn] = useState(true);
+
   const subscription = useRef<Location.LocationSubscription | null>(null);
   const samples = useRef<Sample[]>([]);
   const lastCoord = useRef<Coord | null>(null);
   const startedAt = useRef<Date | null>(null);
   const mapRef = useRef<MapView | null>(null);
+  const navSteps = useRef<NavStep[] | null>(null);
+  const navIdx = useRef(0);
+  const spoken = useRef<SpokenState>({ idx: -1, far: false, near: false });
+  const voiceRef = useRef(true);
+  voiceRef.current = voiceOn;
+  // The watch callback closes over render-time state, so the guide geometry it
+  // checks for deviation lives in a ref kept in sync with followPath.
+  const routePointsRef = useRef<LatLon[]>([]);
+  const reroute = useRef(newRerouteState());
+
+  useEffect(() => {
+    routePointsRef.current = followPath.map((p) => ({ lat: p.latitude, lon: p.longitude }));
+  }, [followPath]);
 
   // Load a saved route to follow when navigated here with followRouteId.
   useEffect(() => {
@@ -200,6 +233,54 @@ export default function MapScreen({ route, navigation }: Props) {
     );
   }
 
+  // Sustained deviation from the guide line → plan a fresh path from here that
+  // rejoins the route ahead, swap in its steps and redraw the dashed guide.
+  function maybeReroute(pos: LatLon): void {
+    if (!navSteps.current) return;
+    if (!offRouteTick(reroute.current, routePointsRef.current, pos)) return;
+    reroute.current.inFlight = true;
+    rerouteFromPosition(routePointsRef.current, pos)
+      .then(({ steps, points }) => {
+        if (steps.length === 0) return;
+        navSteps.current = steps;
+        navIdx.current = 0;
+        // Restart deviation counting against the fresh plan; otherwise the
+        // stale count re-fires the moment the cooldown expires.
+        reroute.current.offCount = 0;
+        spoken.current = { idx: -1, far: false, near: false };
+        if (points.length > 1) {
+          setFollowPath(points.map((p) => ({ latitude: p.lat, longitude: p.lon })));
+        }
+        speakRerouted(voiceRef.current);
+      })
+      .catch(() => {}) // keep guiding with the old steps; next deviation retries
+      .finally(() => {
+        reroute.current.lastAt = Date.now();
+        reroute.current.inFlight = false;
+      });
+  }
+
+  // Update the turn-by-turn banner (and voice) for the new position; returns
+  // whether navigation is active so the camera can switch to chase mode.
+  function updateNavigation(pos: { lat: number; lon: number }): boolean {
+    const steps = navSteps.current;
+    if (!steps) return false;
+    const idx = advanceStep(steps, pos, navIdx.current);
+    navIdx.current = idx;
+    if (idx >= steps.length) {
+      // Route finished — drop the banner but keep recording.
+      navSteps.current = null;
+      setNavStep(null);
+      return false;
+    }
+    const step = steps[idx];
+    const d = distanceM(pos, step);
+    setNavStep(step);
+    setNavDist(d);
+    maybeSpeak(spoken.current, idx, step, d, voiceRef.current);
+    return true;
+  }
+
   async function startRecording() {
     if (!hasPermission) {
       Alert.alert('İzin gerekli', 'Sürüş kaydı için konum izni vermelisiniz.');
@@ -212,6 +293,21 @@ export default function MapScreen({ route, navigation }: Props) {
     lastCoord.current = null;
     startedAt.current = new Date();
     setRecording(true);
+
+    // Following a saved route → fetch turn-by-turn steps for it (best effort;
+    // without them the dashed guide line still shows).
+    navSteps.current = null;
+    navIdx.current = 0;
+    spoken.current = { idx: -1, far: false, near: false };
+    reroute.current = newRerouteState();
+    setNavStep(null);
+    if (followPath.length > 1) {
+      fetchRouteSteps(followPath.map((p) => ({ lat: p.latitude, lon: p.longitude })))
+        .then((steps) => {
+          if (steps.length > 0) navSteps.current = steps;
+        })
+        .catch(() => {});
+    }
 
     subscription.current = await Location.watchPositionAsync(
       { accuracy: Location.Accuracy.High, distanceInterval: 10, timeInterval: 3000 },
@@ -232,7 +328,23 @@ export default function MapScreen({ route, navigation }: Props) {
           speed: loc.coords.speed ?? 0,
           ts: new Date(loc.timestamp).toISOString(),
         });
-        mapRef.current?.animateCamera({ center: coord });
+        const navigating = updateNavigation({ lat: coord.latitude, lon: coord.longitude });
+        if (navigating) {
+          maybeReroute({ lat: coord.latitude, lon: coord.longitude });
+          // Google-Maps-style chase cam: tilted, zoomed-in, rotated to heading.
+          const heading = loc.coords.heading ?? -1;
+          mapRef.current?.animateCamera(
+            {
+              center: coord,
+              pitch: 55,
+              zoom: 17.5,
+              ...(heading >= 0 ? { heading } : {}),
+            },
+            { duration: 700 },
+          );
+        } else {
+          mapRef.current?.animateCamera({ center: coord });
+        }
       },
     );
   }
@@ -242,6 +354,11 @@ export default function MapScreen({ route, navigation }: Props) {
     subscription.current = null;
     setRecording(false);
     setSpeed(0);
+    navSteps.current = null;
+    setNavStep(null);
+    stopSpeaking();
+    // Reset the chase cam tilt back to a flat overview.
+    mapRef.current?.animateCamera({ pitch: 0, heading: 0 });
 
     const start = startedAt.current ?? new Date();
     const end = new Date();
@@ -310,21 +427,28 @@ export default function MapScreen({ route, navigation }: Props) {
         ))}
       </MapView>
 
-      {followPath.length > 1 && (
-        <Pressable style={styles.followChip} onPress={clearFollow}>
-          <MaterialCommunityIcons name="map-marker-path" size={16} color={colors.accent} />
-          <Text style={styles.followChipText}>Rota takipte</Text>
-          <MaterialCommunityIcons name="close" size={16} color={colors.textMuted} />
-        </Pressable>
-      )}
+      {/* Turn-by-turn banner replaces the status chrome while navigating */}
+      {recording && navStep ? (
+        <NavBanner step={navStep} distM={navDist} voiceOn={voiceOn} onToggleVoice={() => setVoiceOn((v) => !v)} />
+      ) : (
+        <>
+          {followPath.length > 1 && (
+            <Pressable style={styles.followChip} onPress={clearFollow}>
+              <MaterialCommunityIcons name="map-marker-path" size={16} color={colors.accent} />
+              <Text style={styles.followChipText}>Rota takipte</Text>
+              <MaterialCommunityIcons name="close" size={16} color={colors.textMuted} />
+            </Pressable>
+          )}
 
-      {/* Recording status badge */}
-      <View style={styles.badgeWrap} pointerEvents="none">
-        <View style={[styles.badge, recording ? styles.badgeLive : styles.badgeIdle]}>
-          <View style={[styles.dot, { backgroundColor: recording ? colors.danger : colors.success }]} />
-          <Text style={styles.badgeText}>{recording ? 'KAYITTA' : 'HAZIR'}</Text>
-        </View>
-      </View>
+          {/* Recording status badge */}
+          <View style={styles.badgeWrap} pointerEvents="none">
+            <View style={[styles.badge, recording ? styles.badgeLive : styles.badgeIdle]}>
+              <View style={[styles.dot, { backgroundColor: recording ? colors.danger : colors.success }]} />
+              <Text style={styles.badgeText}>{recording ? 'KAYITTA' : 'HAZIR'}</Text>
+            </View>
+          </View>
+        </>
+      )}
 
       {/* Recenter button */}
       <Pressable style={styles.locateBtn} onPress={() => centerOnUser(false)}>

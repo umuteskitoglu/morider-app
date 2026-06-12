@@ -96,6 +96,22 @@ Yanıt `200` (`distance` km, `duration` dk, `steps[].distance` m):
 }
 ```
 
+## Garaj *(korumalı)*
+
+Sürücünün motosikletleri, belge bitiş tarihleri ve servis defteri. Ride servisi sunar; hatırlatmalar cihaz üzerinde planlanır (backend yalnız tarihleri saklar).
+
+| Method | Path | Açıklama |
+|--------|------|----------|
+| POST | `/api/garage` | Motor ekle (`name` zorunlu; `plate`, `year`, 3 tarih opsiyonel) |
+| GET | `/api/garage` | Motorlarımı listele |
+| PUT | `/api/garage/:id` | Güncelle (tam değiştirme; boş tarih = temizle) |
+| DELETE | `/api/garage/:id` | Sil (servis kayıtları cascade) |
+| POST | `/api/garage/:id/services` | Servis kaydı ekle (`title` zorunlu; `note`, `odometer_km`, `cost`, `service_date`) |
+| GET | `/api/garage/:id/services` | Servis kayıtlarını listele (tarihe göre azalan) |
+| DELETE | `/api/garage/:id/services/:sid` | Servis kaydını sil |
+
+Tarih alanları `YYYY-MM-DD` string'tir: `insurance_expiry` (trafik sigortası), `inspection_expiry` (muayene), `kasko_expiry`. `service_date` boş gönderilirse bugünün tarihi kullanılır.
+
 ## POI / Mola Noktaları *(korumalı)*
 
 Topluluk katkılı noktalar: motorcu dostu kafe, yakıt, tamirci, manzara, mola. Route servisi sunar (PostGIS point + GIST index).
