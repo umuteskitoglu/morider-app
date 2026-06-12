@@ -11,6 +11,7 @@ import * as Sharing from 'expo-sharing';
 import { AppTabParams, ProfileStackParams } from '../navigation/RootNavigator';
 import { useAuth } from '../store/auth';
 import { Button, Card, Stars } from '../components/ui';
+import { ElevationChart, ElevationProfile } from '../components/ElevationChart';
 import { POI, poiColor, poiIcon, poiLabel } from '../lib/poi';
 import { api, errorMessage } from '../api/client';
 import { colors, shadow, spacing } from '../theme';
@@ -41,6 +42,7 @@ export default function RouteDetailScreen({ route, navigation }: Props) {
   const [startingGroup, setStartingGroup] = useState(false);
   const [exporting, setExporting] = useState(false);
   const [pois, setPois] = useState<POI[]>([]);
+  const [elevation, setElevation] = useState<ElevationProfile | null>(null);
   const mapRef = useRef<MapView | null>(null);
 
   const isOwner = user?.id === ownerId;
@@ -81,6 +83,13 @@ export default function RouteDetailScreen({ route, navigation }: Props) {
     try {
       const { data } = await api.get(`/api/pois/route/${id}`);
       setPois(data.pois ?? []);
+    } catch {
+      // ignore
+    }
+    // Elevation profile (best effort — the chart section just stays hidden).
+    try {
+      const { data } = await api.get(`/api/routes/${id}/elevation`);
+      if ((data.points ?? []).length > 1) setElevation(data);
     } catch {
       // ignore
     }
@@ -210,6 +219,8 @@ export default function RouteDetailScreen({ route, navigation }: Props) {
             </>
           )}
         </View>
+
+        {elevation && <ElevationChart profile={elevation} />}
 
         <View style={styles.ratingRow}>
           <Stars value={avgRating} count={ratingCount} />

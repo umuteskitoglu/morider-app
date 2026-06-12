@@ -31,6 +31,10 @@ type Config struct {
 	RoutingURL     string
 	RoutingProfile string
 
+	// Elevation (DEM) endpoint, OpenTopoData-compatible, dataset included in
+	// the URL. The public instance is rate limited; self-host for production.
+	ElevationURL string
+
 	// Directory where the feed service stores uploaded photos.
 	UploadDir string
 
@@ -63,6 +67,8 @@ func Load() Config {
 
 		RoutingURL:     getEnv("ROUTING_URL", "https://router.project-osrm.org"),
 		RoutingProfile: getEnv("ROUTING_PROFILE", "driving"),
+
+		ElevationURL: getEnv("ELEVATION_URL", "https://api.opentopodata.org/v1/srtm90m"),
 
 		UploadDir: getEnv("UPLOAD_DIR", "./uploads"),
 

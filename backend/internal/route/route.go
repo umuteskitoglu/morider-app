@@ -26,7 +26,11 @@ func Run(cfg config.Config) error {
 	if err != nil {
 		return err
 	}
-	h := &handler{d: deps, router: NewOSRMRouter(cfg.RoutingURL, cfg.RoutingProfile)}
+	h := &handler{
+		d:      deps,
+		router: NewOSRMRouter(cfg.RoutingURL, cfg.RoutingProfile),
+		elev:   NewOpenTopoData(cfg.ElevationURL),
+	}
 	registerRoutes(deps, h)
 	registerPOIRoutes(deps, h)
 	return deps.Run(config.ResolvePort("ROUTE_PORT", "8084"))
@@ -40,6 +44,7 @@ func registerRoutes(d *server.Deps, h *handler) {
 	g.GET("/explore", h.explore)
 	g.GET("/:id", h.get)
 	g.GET("/:id/gpx", h.exportGPX)
+	g.GET("/:id/elevation", h.elevation)
 	g.PUT("/:id", h.update)
 	g.DELETE("/:id", h.remove)
 	g.POST("/:id/rate", h.rate)
@@ -49,6 +54,7 @@ func registerRoutes(d *server.Deps, h *handler) {
 type handler struct {
 	d      *server.Deps
 	router Router
+	elev   ElevationProvider
 }
 
 // Point is a single coordinate (WGS84).
