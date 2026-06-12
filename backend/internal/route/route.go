@@ -44,11 +44,13 @@ func registerRoutes(d *server.Deps, h *handler) {
 	g.GET("/explore", h.explore)
 	g.GET("/:id", h.get)
 	g.GET("/:id/gpx", h.exportGPX)
+	g.GET("/:id/kml", h.exportKML)
 	g.GET("/:id/elevation", h.elevation)
 	g.PUT("/:id", h.update)
 	g.DELETE("/:id", h.remove)
 	g.POST("/:id/rate", h.rate)
 	g.POST("/import/gpx", h.importGPX)
+	g.POST("/import/kml", h.importKML)
 }
 
 type handler struct {
@@ -468,8 +470,88 @@ func (h *handler) importGPX(c *gin.Context) {
 	})
 }
 
-// gpxFilename turns a route name into a safe ASCII attachment filename.
-func gpxFilename(name string) string {
+// exportKML streams the route geometry as a KML 2.2 file. Same visibility
+// rules as exportGPX (owner / public / friends via mutual follow).
+func (h *handler) exportKML(c *gin.Context) {
+	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil {
+		httpx.BadRequest(c, "invalid route id")
+		return
+	}
+	var (
+		name    string
+		geojson string
+	)
+	err = h.d.DB.QueryRow(c,
+		`SELECT r.name, COALESCE(ST_AsGeoJSON(r.path), '')
+		 FROM routes r
+		 WHERE r.id = $1 AND (
+		     r.user_id = $2
+		     OR r.visibility = 'public'
+		     OR (r.visibility = 'friends'
+		         AND EXISTS (SELECT 1 FROM follows a WHERE a.follower_id = $2 AND a.followee_id = r.user_id)
+		         AND EXISTS (SELECT 1 FROM follows b WHERE b.follower_id = r.user_id AND b.followee_id = $2))
+		 )`, id, authpkg.UserID(c),
+	).Scan(&name, &geojson)
+	if errors.Is(err, pgx.ErrNoRows) {
+		httpx.Error(c, http.StatusNotFound, "route not found")
+		return
+	}
+	if err != nil {
+		httpx.Internal(c, "could not load route")
+		return
+	}
+	points := parseGeoJSONLine(geojson)
+	if len(points) < 2 {
+		httpx.Error(c, http.StatusUnprocessableEntity, "route has no geometry")
+		return
+	}
+	c.Header("Content-Disposition", fmt.Sprintf("attachment; filename=%q", kmlFilename(name)))
+	c.Data(http.StatusOK, "application/vnd.google-earth.kml+xml", BuildKML(name, points))
+}
+
+// importKML creates a private route from a KML 2.2 document posted as the
+// raw request body. Name comes from the Document or first Placemark.
+func (h *handler) importKML(c *gin.Context) {
+	body, err := io.ReadAll(io.LimitReader(c.Request.Body, 10<<20))
+	if err != nil || len(body) == 0 {
+		httpx.BadRequest(c, "empty or unreadable KML body")
+		return
+	}
+	name, points, err := ParseKML(body)
+	if err != nil {
+		httpx.BadRequest(c, err.Error())
+		return
+	}
+	if name == "" {
+		name = "KML Rotası"
+	}
+	wkt := LineStringWKT(points)
+	var id int64
+	var distance float64
+	err = h.d.DB.QueryRow(c,
+		`INSERT INTO routes (user_id, name, description, path, distance, visibility)
+		 VALUES ($1, $2, '', ST_GeomFromText($3, 4326),
+		         ST_Length(ST_GeomFromText($3, 4326)::geography) / 1000.0, 'private')
+		 RETURNING id, distance`,
+		authpkg.UserID(c), name, wkt,
+	).Scan(&id, &distance)
+	if err != nil {
+		httpx.Internal(c, "could not import route")
+		return
+	}
+	c.JSON(http.StatusCreated, Route{
+		ID:         id,
+		UserID:     authpkg.UserID(c),
+		Name:       name,
+		Distance:   distance,
+		Visibility: "private",
+		Points:     points,
+	})
+}
+
+// gpxFilenameBase sanitises a route name to safe ASCII (no extension).
+func gpxFilenameBase(name string) string {
 	var b strings.Builder
 	for _, r := range strings.TrimSpace(name) {
 		switch {
@@ -480,10 +562,13 @@ func gpxFilename(name string) string {
 		}
 	}
 	if b.Len() == 0 {
-		return "route.gpx"
+		return "route"
 	}
-	return b.String() + ".gpx"
+	return b.String()
 }
+
+// gpxFilename turns a route name into a safe ASCII .gpx attachment filename.
+func gpxFilename(name string) string { return gpxFilenameBase(name) + ".gpx" }
 
 // parseGeoJSONLine converts a PostGIS ST_AsGeoJSON LineString into points.
 func parseGeoJSONLine(raw string) []Point {

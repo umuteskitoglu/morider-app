@@ -110,7 +110,13 @@ Veri `infra/osrm/` altına yazılır (gitignore'lu). İşlem adımları: `osrm-e
 - **Tırmanış/iniş:** SRTM sınıfı DEM'lerde birkaç metrelik gürültü olduğundan toplam tırmanış/iniş **5 m histerezis** ile hesaplanır (`ascentDescent`): referans rakım yalnız eşiği aşan değişimlerde kayar, böylece kademeli okunan uzun bir tırmanış tam yüksekliğiyle sayılır ama gürültü salınımları sayılmaz.
 - **Mobil:** Rota detayında istatistik satırı (↗ toplam tırmanış, ↘ iniş, min–max rakım) + `react-native-svg` ile kompakt alan grafiği; uç erişilemezse bölüm gizli kalır.
 
+## KML içe/dışa aktarma
+
+- **Dışa aktarma:** `GET /api/routes/:id/kml` rota geometrisini KML 2.2 dosyası olarak döndürür (`application/vnd.google-earth.kml+xml`, `Content-Disposition: attachment`). Görünürlük kuralları GPX ile aynı.
+- **İçe aktarma:** `POST /api/routes/import/kml` ham KML gövdesi alır (maks 10 MB). `Document > Folder > Placemark` önceliğiyle LineString veya MultiGeometry aranır; çoklu LineString segmentleri birleştirilir (Google Maps çok duraklı rota dışa aktarımı). Rota adı `Document/Folder/Placemark` `<name>`'den alınır; **private** oluşturulur.
+- Parser saf fonksiyondur: [`kml.go`](../backend/internal/route/kml.go), testler `kml_test.go`.
+- **Mobil:** Rota detayında "KML Dışa Aktar" butonu, Rotalarım'da "KML İçe Aktar" (GPX ile aynı dosya seçici akışı).
+
 ## Sonraki adımlar
 
-- KML içe-dışa aktarma (GPX tamamlandı).
 - Motosiklete özel OSRM profili (otoyol/viraj ağırlıkları).

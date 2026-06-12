@@ -19,6 +19,7 @@ export default function RoutesScreen({ navigation }: Props) {
   const [routes, setRoutes] = useState<RouteItem[]>([]);
   const [loading, setLoading] = useState(false);
   const [importing, setImporting] = useState(false);
+  const [importingKML, setImportingKML] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const load = useCallback(async () => {
@@ -40,23 +41,28 @@ export default function RoutesScreen({ navigation }: Props) {
     }, [load]),
   );
 
-  async function importGPX() {
+  async function importFile(format: 'gpx' | 'kml') {
+    const setLoading = format === 'gpx' ? setImporting : setImportingKML;
+    const mime = format === 'gpx' ? 'application/gpx+xml' : 'application/vnd.google-earth.kml+xml';
     try {
       const picked = await DocumentPicker.getDocumentAsync({ type: '*/*', copyToCacheDirectory: true });
       if (picked.canceled || !picked.assets?.[0]) return;
-      setImporting(true);
-      const gpx = await FileSystem.readAsStringAsync(picked.assets[0].uri);
-      const { data } = await api.post('/api/routes/import/gpx', gpx, {
-        headers: { 'Content-Type': 'application/gpx+xml' },
+      setLoading(true);
+      const content = await FileSystem.readAsStringAsync(picked.assets[0].uri);
+      const { data } = await api.post(`/api/routes/import/${format}`, content, {
+        headers: { 'Content-Type': mime },
       });
       Alert.alert('İçe aktarıldı', `"${data.name}" (${(data.distance ?? 0).toFixed(2)} km) rotalarına eklendi.`);
       load();
     } catch (err) {
       Alert.alert('İçe aktarılamadı', errorMessage(err));
     } finally {
-      setImporting(false);
+      setLoading(false);
     }
   }
+
+  const importGPX = () => importFile('gpx');
+  const importKML = () => importFile('kml');
 
   const remove = useCallback((item: RouteItem, close: () => void) => {
     Alert.alert('Rotayı sil', `"${item.name}" silinsin mi?`, [
@@ -91,6 +97,9 @@ export default function RoutesScreen({ navigation }: Props) {
             </View>
             <View style={styles.headerBtn}>
               <Button title="GPX İçe Aktar" variant="ghost" icon="upload-outline" onPress={importGPX} loading={importing} />
+            </View>
+            <View style={styles.headerBtn}>
+              <Button title="KML İçe Aktar" variant="ghost" icon="earth" onPress={importKML} loading={importingKML} />
             </View>
           </View>
         }

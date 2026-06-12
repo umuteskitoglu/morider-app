@@ -41,6 +41,7 @@ export default function RouteDetailScreen({ route, navigation }: Props) {
   const [deleting, setDeleting] = useState(false);
   const [startingGroup, setStartingGroup] = useState(false);
   const [exporting, setExporting] = useState(false);
+  const [exportingKML, setExportingKML] = useState(false);
   const [pois, setPois] = useState<POI[]>([]);
   const [elevation, setElevation] = useState<ElevationProfile | null>(null);
   const mapRef = useRef<MapView | null>(null);
@@ -121,27 +122,32 @@ export default function RouteDetailScreen({ route, navigation }: Props) {
     }
   }
 
-  async function exportGPX() {
+  async function exportFile(format: 'gpx' | 'kml') {
+    const setLoading = format === 'gpx' ? setExporting : setExportingKML;
+    const mime = format === 'gpx' ? 'application/gpx+xml' : 'application/vnd.google-earth.kml+xml';
     try {
-      setExporting(true);
-      const { data } = await api.get(`/api/routes/${id}/gpx`, {
+      setLoading(true);
+      const { data } = await api.get(`/api/routes/${id}/${format}`, {
         responseType: 'text',
         transformResponse: (d) => d,
       });
       const safeName = name.replace(/[^\w-]+/g, '-').replace(/^-+|-+$/g, '') || 'rota';
-      const uri = `${FileSystem.cacheDirectory}${safeName}.gpx`;
+      const uri = `${FileSystem.cacheDirectory}${safeName}.${format}`;
       await FileSystem.writeAsStringAsync(uri, String(data));
       if (await Sharing.isAvailableAsync()) {
-        await Sharing.shareAsync(uri, { mimeType: 'application/gpx+xml', dialogTitle: 'GPX dosyasını paylaş' });
+        await Sharing.shareAsync(uri, { mimeType: mime, dialogTitle: `${format.toUpperCase()} dosyasını paylaş` });
       } else {
-        Alert.alert('GPX hazır', `Dosya kaydedildi: ${uri}`);
+        Alert.alert(`${format.toUpperCase()} hazır`, `Dosya kaydedildi: ${uri}`);
       }
     } catch (err) {
       Alert.alert('Dışa aktarılamadı', errorMessage(err));
     } finally {
-      setExporting(false);
+      setLoading(false);
     }
   }
+
+  const exportGPX = () => exportFile('gpx');
+  const exportKML = () => exportFile('kml');
 
   async function rate(score: number) {
     setMyRating(score); // optimistic
@@ -239,6 +245,8 @@ export default function RouteDetailScreen({ route, navigation }: Props) {
         <Button title="Grup Sürüşü Başlat" variant="ghost" icon="account-group" onPress={startGroupRide} loading={startingGroup} />
         <View style={{ height: spacing.sm }} />
         <Button title="GPX Dışa Aktar" variant="ghost" icon="download-outline" onPress={exportGPX} loading={exporting} />
+        <View style={{ height: spacing.sm }} />
+        <Button title="KML Dışa Aktar" variant="ghost" icon="earth" onPress={exportKML} loading={exportingKML} />
         {isOwner ? (
           <>
             <View style={{ height: spacing.sm }} />
