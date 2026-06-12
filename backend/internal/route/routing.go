@@ -22,11 +22,17 @@ type RoutePlan struct {
 	Steps     []Step  `json:"steps"`
 }
 
-// Step is a single turn-by-turn instruction.
+// Step is a single turn-by-turn instruction. Lat/Lon is the maneuver point
+// (where the turn happens); Type/Modifier mirror OSRM's maneuver fields so the
+// client can pick a matching arrow icon.
 type Step struct {
 	Instruction string  `json:"instruction"`
 	Name        string  `json:"name"`
 	Distance    float64 `json:"distance"` // meters
+	Lat         float64 `json:"lat"`
+	Lon         float64 `json:"lon"`
+	Type        string  `json:"type"`
+	Modifier    string  `json:"modifier"`
 }
 
 // PlanOptions tunes route planning.
@@ -123,8 +129,9 @@ type osrmResponse struct {
 				Name     string  `json:"name"`
 				Distance float64 `json:"distance"` // meters
 				Maneuver struct {
-					Type     string `json:"type"`
-					Modifier string `json:"modifier"`
+					Type     string    `json:"type"`
+					Modifier string    `json:"modifier"`
+					Location []float64 `json:"location"` // [lon, lat]
 				} `json:"maneuver"`
 			} `json:"steps"`
 		} `json:"legs"`
@@ -168,11 +175,17 @@ func parseOSRMRoutes(body []byte) ([]RoutePlan, error) {
 		}
 		for _, leg := range route.Legs {
 			for _, s := range leg.Steps {
-				plan.Steps = append(plan.Steps, Step{
+				step := Step{
 					Instruction: maneuverText(s.Maneuver.Type, s.Maneuver.Modifier, s.Name),
 					Name:        s.Name,
 					Distance:    s.Distance,
-				})
+					Type:        s.Maneuver.Type,
+					Modifier:    s.Maneuver.Modifier,
+				}
+				if len(s.Maneuver.Location) >= 2 {
+					step.Lon, step.Lat = s.Maneuver.Location[0], s.Maneuver.Location[1]
+				}
+				plan.Steps = append(plan.Steps, step)
 			}
 		}
 		plan.Curviness = curvinessScore(plan.Points)

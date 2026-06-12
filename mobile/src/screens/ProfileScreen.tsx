@@ -294,6 +294,7 @@ export default function ProfileScreen() {
         <View style={styles.quickRow}>
           <QuickTile icon="history" label="Sürüşlerim" onPress={() => navigation.navigate('Rides')} />
           <QuickTile icon="map-marker-path" label="Rotalarım" onPress={() => navigation.navigate('RoutesList')} />
+          <QuickTile icon="garage-variant" label="Garaj" onPress={() => navigation.navigate('Garage')} />
           <QuickTile icon="account-multiple" label="Takip" onPress={() => navigation.navigate('Follows')} />
         </View>
 

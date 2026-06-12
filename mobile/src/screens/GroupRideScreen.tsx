@@ -11,8 +11,23 @@ import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { RideStackParams } from '../navigation/RootNavigator';
 import { Button, Card } from '../components/ui';
 import { CrashCountdown } from '../components/CrashCountdown';
+import { NavBanner } from '../components/NavBanner';
 import { useCrashDetection } from '../lib/crashDetection';
 import { composeEmergencySMS, getEmergencyContact } from '../lib/emergency';
+import {
+  advanceStep,
+  fetchRouteSteps,
+  distanceM,
+  LatLon,
+  maybeSpeak,
+  NavStep,
+  newRerouteState,
+  offRouteTick,
+  rerouteFromPosition,
+  speakRerouted,
+  SpokenState,
+  stopSpeaking,
+} from '../lib/navigation';
 import { useAuth } from '../store/auth';
 import { api, apiBaseURL, errorMessage, TOKEN_KEY } from '../api/client';
 import { colors, radius, shadow, spacing } from '../theme';
@@ -44,6 +59,21 @@ export default function GroupRideScreen({ route, navigation }: Props) {
   const [showParticipants, setShowParticipants] = useState(false);
   const [showInvite, setShowInvite] = useState(false);
   const [crashAlarm, setCrashAlarm] = useState(false);
+
+  // Turn-by-turn for the session's route (banner only; the map stays free so
+  // the rider can keep an eye on the whole group).
+  const [navStep, setNavStep] = useState<NavStep | null>(null);
+  const [navDist, setNavDist] = useState(0);
+  const [voiceOn, setVoiceOn] = useState(true);
+  const navSteps = useRef<NavStep[] | null>(null);
+  const navIdx = useRef(0);
+  const spoken = useRef<SpokenState>({ idx: -1, far: false, near: false });
+  const voiceRef = useRef(true);
+  voiceRef.current = voiceOn;
+  // Session route geometry for off-route detection (refs because the location
+  // callback outlives the render that created it).
+  const routePointsRef = useRef<LatLon[]>([]);
+  const reroute = useRef(newRerouteState());
 
   const ws = useRef<WebSocket | null>(null);
   const locSub = useRef<Location.LocationSubscription | null>(null);
@@ -96,6 +126,15 @@ export default function GroupRideScreen({ route, navigation }: Props) {
           () => mapRef.current?.fitToCoordinates(pts, { edgePadding: { top: 100, right: 60, bottom: 240, left: 60 }, animated: true }),
           400,
         );
+      }
+      // Turn-by-turn steps for the session route (best effort, once).
+      routePointsRef.current = pts.map((p) => ({ lat: p.latitude, lon: p.longitude }));
+      if (pts.length > 1 && !navSteps.current) {
+        fetchRouteSteps(routePointsRef.current)
+          .then((steps) => {
+            if (steps.length > 0) navSteps.current = steps;
+          })
+          .catch(() => {});
       }
     } catch (err) {
       Alert.alert('Oturum yüklenemedi', errorMessage(err));
@@ -241,6 +280,51 @@ export default function GroupRideScreen({ route, navigation }: Props) {
     }
   }
 
+  // Advance the turn-by-turn banner for the rider's own position.
+  function updateNavigation(pos: { lat: number; lon: number }): void {
+    const steps = navSteps.current;
+    if (!steps) return;
+    const idx = advanceStep(steps, pos, navIdx.current);
+    navIdx.current = idx;
+    if (idx >= steps.length) {
+      navSteps.current = null;
+      setNavStep(null);
+      return;
+    }
+    const step = steps[idx];
+    const d = distanceM(pos, step);
+    setNavStep(step);
+    setNavDist(d);
+    maybeSpeak(spoken.current, idx, step, d, voiceRef.current);
+    maybeReroute(pos);
+  }
+
+  // Strayed from the group's route → refresh own guidance with a path that
+  // rejoins it ahead. The shared route polyline stays untouched; only this
+  // rider's banner instructions change.
+  function maybeReroute(pos: LatLon): void {
+    if (!navSteps.current) return;
+    if (!offRouteTick(reroute.current, routePointsRef.current, pos)) return;
+    reroute.current.inFlight = true;
+    rerouteFromPosition(routePointsRef.current, pos)
+      .then(({ steps }) => {
+        if (steps.length === 0) return;
+        navSteps.current = steps;
+        navIdx.current = 0;
+        // The shared group route stays as the deviation reference, so the
+        // counter must restart from zero or the cooldown alone would let
+        // re-routes fire back to back while riding the detour.
+        reroute.current.offCount = 0;
+        spoken.current = { idx: -1, far: false, near: false };
+        speakRerouted(voiceRef.current);
+      })
+      .catch(() => {})
+      .finally(() => {
+        reroute.current.lastAt = Date.now();
+        reroute.current.inFlight = false;
+      });
+  }
+
   // Ask for location permission once and stream our own GPS. We send on every
   // GPS update AND on a steady heartbeat, so a stationary rider still appears to
   // the rest of the group (watchPositionAsync alone fires only when you move).
@@ -290,6 +374,7 @@ export default function GroupRideScreen({ route, navigation }: Props) {
             600,
           );
         }
+        updateNavigation({ lat: loc.coords.latitude, lon: loc.coords.longitude });
         sendPosition();
       },
     );
@@ -346,6 +431,8 @@ export default function GroupRideScreen({ route, navigation }: Props) {
     if (heartbeat.current) clearInterval(heartbeat.current);
     locSub.current?.remove();
     locSub.current = null;
+    navSteps.current = null;
+    stopSpeaking();
     detachSocket();
   }
 
@@ -530,13 +617,17 @@ export default function GroupRideScreen({ route, navigation }: Props) {
         ))}
       </MapView>
 
-      {/* Status badge */}
-      <View style={styles.badgeWrap} pointerEvents="none">
-        <View style={[styles.badge, connected ? styles.badgeLive : styles.badgeIdle]}>
-          <View style={[styles.dot, { backgroundColor: connected ? colors.success : colors.textMuted }]} />
-          <Text style={styles.badgeText}>{connected ? 'CANLI' : 'BAĞLANIYOR…'}</Text>
+      {/* Turn-by-turn banner (when the session has a route) or the status badge */}
+      {navStep ? (
+        <NavBanner step={navStep} distM={navDist} voiceOn={voiceOn} onToggleVoice={() => setVoiceOn((v) => !v)} />
+      ) : (
+        <View style={styles.badgeWrap} pointerEvents="none">
+          <View style={[styles.badge, connected ? styles.badgeLive : styles.badgeIdle]}>
+            <View style={[styles.dot, { backgroundColor: connected ? colors.success : colors.textMuted }]} />
+            <Text style={styles.badgeText}>{connected ? 'CANLI' : 'BAĞLANIYOR…'}</Text>
+          </View>
         </View>
-      </View>
+      )}
 
       <Card style={styles.panel}>
         <View style={styles.panelHeader}>

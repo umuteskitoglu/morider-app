@@ -17,12 +17,14 @@ Bu repo bir **monorepo**'dur:
 - **Rotalar** — rota oluştur (yol-takipli snap), görünürlük seç (gizli / herkese açık / arkadaşlar), kaydedilen bir rotada sür (haritada rehber çizgi), **virajlılık tercihi** (düz ↔ virajlı sürgüsü, 2 nokta arasında alternatif rotalardan seçer), **GPX içe/dışa aktarma**, **kaydırarak silme**.
 - **Keşfet & puanlama** — herkese açık rotaları keşfet, 5 yıldız üzerinden puanla.
 - **Mola noktaları (POI)** — haritaya uzun basarak motorcu dostu kafe / yakıt / tamirci / manzara / mola noktası ekle; rota detayında rotanın 1 km çevresindeki noktalar otomatik görünür (PostGIS `ST_DWithin`).
+- **Adım adım navigasyon** — rota takipli sürüşte Google Maps tarzı eğimli takip kamerası, üstte ok ikonlu Türkçe talimat banner'ı ("350 m • Sağa dön - Rıhtım Caddesi") ve **sesli yönlendirme** (250 m ve 50 m kala, kapatılabilir); grup sürüşünde rota varsa aynı banner. Rotadan 100 m+ sapınca **otomatik re-route** (rotaya ileriden katılan yeni plan).
 - **Foto akışı** — Instagram tarzı çoklu-foto paylaşımları, beğeni & yorum, konum etiketi.
 - **Takip sistemi** — tek yönlü takip (profilden veya Keşfet'ten tek dokunuşla); `arkadaşlar` görünürlüğü = **karşılıklı takip**.
 - **Sürücü profili** — ehliyet sınıfı (A1 / A2 / A / B) ve motor türü (naked, sport, touring, adventure, chopper, enduro, scooter, custom); profil ve kullanıcı kartlarında rozet olarak görünür.
 - **Canlı grup sürüşü** — kod, **davet linki veya QR kod** ile oturuma katıl (deep link `morider://join/<kod>`, uygulama içi QR tarayıcı), katılımcıların konumunu gerçek zamanlı ortak haritada gör (WebSocket + NATS fan-out). Host **moderasyonu** (at / banla / host devret), tek aktif oturum kuralı, otomatik yeniden bağlanma ve devam eden sürüşe geri dönme.
 - **Ödüller** — sürüşlere göre rozetler ve liderlik tablosu.
 - **Kaza algılama (MVP)** — sürüşte ivmeölçerle darbe tespiti, 30 sn iptal edilebilir geri sayım; süre dolunca grup sürüşünde tüm katılımcılara **SOS uyarısı**, acil durum kişisine konumlu SMS taslağı, 112 arama kısayolu. Ayrıntı: [`docs/safety.md`](docs/safety.md).
+- **Garaj** — motosikletlerini ekle; **trafik sigortası / muayene / kasko** bitiş tarihlerine 7 gün ve 1 gün kala cihaz bildirimi (development build'de), renkli aciliyet rozetleri ve motor başına **servis defteri** (işlem, km, tutar, not).
 
 ## Mimari (özet)
 

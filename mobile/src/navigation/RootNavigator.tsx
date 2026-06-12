@@ -26,6 +26,8 @@ import UserSearchScreen from '../screens/UserSearchScreen';
 import CommentsScreen from '../screens/CommentsScreen';
 import ProfileScreen from '../screens/ProfileScreen';
 import FollowsScreen from '../screens/FollowsScreen';
+import GarageScreen from '../screens/GarageScreen';
+import BikeDetailScreen from '../screens/BikeDetailScreen';
 import EventsScreen from '../screens/EventsScreen';
 import EventCreateScreen from '../screens/EventCreateScreen';
 import EventDetailScreen from '../screens/EventDetailScreen';
@@ -65,6 +67,8 @@ export type ProfileStackParams = {
   Explore: undefined;
   RouteCreate: undefined;
   RouteDetail: { id: number; name: string };
+  Garage: undefined;
+  BikeDetail: { id: number; name: string };
 };
 
 export type EventsStackParams = {
@@ -163,6 +167,8 @@ function ProfileNavigator() {
       <ProfileStack.Screen name="RouteDetail" component={RouteDetailScreen} options={{ title: 'Rota' }} />
       <ProfileStack.Screen name="Follows" component={FollowsScreen} options={{ title: 'Takip' }} />
       <ProfileStack.Screen name="UserProfile" component={UserProfileScreen} options={{ title: 'Profil' }} />
+      <ProfileStack.Screen name="Garage" component={GarageScreen} options={{ title: 'Garajım' }} />
+      <ProfileStack.Screen name="BikeDetail" component={BikeDetailScreen} options={{ title: 'Motor' }} />
     </ProfileStack.Navigator>
   );
 }
