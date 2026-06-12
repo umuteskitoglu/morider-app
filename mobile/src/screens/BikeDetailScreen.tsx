@@ -27,6 +27,7 @@ import {
   ServiceRecord,
 } from '../lib/garage';
 import { syncGarageReminders } from '../lib/garageReminders';
+import { useAuth } from '../store/auth';
 import { api, errorMessage } from '../api/client';
 import { colors, radius, spacing } from '../theme';
 
@@ -34,6 +35,7 @@ type Props = NativeStackScreenProps<ProfileStackParams, 'BikeDetail'>;
 
 export default function BikeDetailScreen({ route, navigation }: Props) {
   const { id, name } = route.params;
+  const { user } = useAuth();
   const [moto, setMoto] = useState<Motorcycle | null>(null);
   const [records, setRecords] = useState<ServiceRecord[]>([]);
   const [editing, setEditing] = useState(false);
@@ -81,8 +83,10 @@ export default function BikeDetailScreen({ route, navigation }: Props) {
       setMoto(data);
       setEditing(false);
       // Dates may have changed → refresh the on-device reminders.
-      const { data: g } = await api.get('/api/garage');
-      syncGarageReminders(g.motorcycles ?? []).catch(() => {});
+      if (user?.id) {
+        const { data: g } = await api.get('/api/garage');
+        syncGarageReminders(g.motorcycles ?? [], user.id).catch(() => {});
+      }
     } catch (err) {
       Alert.alert('Kaydedilemedi', errorMessage(err));
     } finally {

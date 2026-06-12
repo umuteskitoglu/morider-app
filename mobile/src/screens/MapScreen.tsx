@@ -244,6 +244,9 @@ export default function MapScreen({ route, navigation }: Props) {
         if (steps.length === 0) return;
         navSteps.current = steps;
         navIdx.current = 0;
+        // Restart deviation counting against the fresh plan; otherwise the
+        // stale count re-fires the moment the cooldown expires.
+        reroute.current.offCount = 0;
         spoken.current = { idx: -1, far: false, near: false };
         if (points.length > 1) {
           setFollowPath(points.map((p) => ({ latitude: p.lat, longitude: p.lon })));

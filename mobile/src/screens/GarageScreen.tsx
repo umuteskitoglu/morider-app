@@ -9,17 +9,20 @@ import { Button, Card } from '../components/ui';
 import { BikeFormModal, BikeFormValues } from '../components/BikeFormModal';
 import { DOC_KEYS, DOC_LABELS, expiryStatus, Motorcycle } from '../lib/garage';
 import { syncGarageReminders } from '../lib/garageReminders';
+import { useAuth } from '../store/auth';
 import { api, errorMessage } from '../api/client';
 import { colors, radius, spacing } from '../theme';
 
 type Props = NativeStackScreenProps<ProfileStackParams, 'Garage'>;
 
 export default function GarageScreen({ navigation }: Props) {
+  const { user } = useAuth();
   const [motos, setMotos] = useState<Motorcycle[]>([]);
   const [loading, setLoading] = useState(false);
   const [adding, setAdding] = useState(false);
   const [saving, setSaving] = useState(false);
 
+  const userId = user?.id;
   const load = useCallback(async () => {
     try {
       setLoading(true);
@@ -27,13 +30,13 @@ export default function GarageScreen({ navigation }: Props) {
       const list: Motorcycle[] = data.motorcycles ?? [];
       setMotos(list);
       // Re-sync the on-device expiry reminders with the fresh list.
-      syncGarageReminders(list).catch(() => {});
+      if (userId) syncGarageReminders(list, userId).catch(() => {});
     } catch {
       // pull-to-refresh shows the empty state; errors stay quiet
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [userId]);
 
   useFocusEffect(
     useCallback(() => {

@@ -1,11 +1,13 @@
 package ride
 
 import (
+	"errors"
 	"net/http"
 	"strconv"
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/jackc/pgx/v5"
 
 	"github.com/morider/backend/internal/server"
 	authpkg "github.com/morider/backend/pkg/auth"
@@ -240,21 +242,20 @@ func (h *handler) addServiceRecord(c *gin.Context) {
 		now := time.Now()
 		when = &now
 	}
-	owns, err := h.ownsMoto(c, motoID)
-	if err != nil {
-		httpx.Internal(c, "could not verify motorcycle")
-		return
-	}
-	if !owns {
-		httpx.Error(c, http.StatusNotFound, "motorcycle not found")
-		return
-	}
+	// Ownership check and insert in one statement, so a concurrently deleted
+	// motorcycle yields a clean 404 instead of an FK violation.
 	var id int64
 	err = h.d.DB.QueryRow(c,
 		`INSERT INTO service_records (motorcycle_id, title, note, odometer_km, cost, service_date)
-		 VALUES ($1, $2, $3, $4, $5, $6) RETURNING id`,
-		motoID, req.Title, req.Note, req.OdometerKm, req.Cost, when,
+		 SELECT m.id, $3, $4, $5, $6, $7 FROM motorcycles m
+		 WHERE m.id = $1 AND m.user_id = $2
+		 RETURNING id`,
+		motoID, authpkg.UserID(c), req.Title, req.Note, req.OdometerKm, req.Cost, when,
 	).Scan(&id)
+	if errors.Is(err, pgx.ErrNoRows) {
+		httpx.Error(c, http.StatusNotFound, "motorcycle not found")
+		return
+	}
 	if err != nil {
 		httpx.Internal(c, "could not add service record")
 		return

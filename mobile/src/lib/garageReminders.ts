@@ -22,7 +22,34 @@ function getNotifications(): typeof NotificationsModule | null {
 
 // Days before an expiry to fire a reminder (at 09:00 local).
 const OFFSETS_DAYS = [7, 1];
-const STORE_KEY = 'morider.garage.reminders';
+
+// Scheduled-id store is per account, so switching users on one device can't
+// cancel or leak another account's reminders.
+function storeKey(userId: number): string {
+  return `morider.garage.reminders.${userId}`;
+}
+
+type PendingReminder = { body: string; fireAt: Date; motoId: number; doc: string };
+
+// Pure planning pass: which reminders should exist for this garage right now.
+function collectPending(motos: Motorcycle[]): PendingReminder[] {
+  const out: PendingReminder[] = [];
+  for (const moto of motos) {
+    for (const key of DOC_KEYS) {
+      const dateISO = moto[key];
+      const left = daysLeft(dateISO);
+      if (left == null) continue;
+      for (const off of OFFSETS_DAYS) {
+        if (left < off) continue; // that reminder moment already passed
+        const fireAt = new Date(`${dateISO}T09:00:00`);
+        fireAt.setDate(fireAt.getDate() - off);
+        if (fireAt.getTime() <= Date.now() + 5_000) continue;
+        out.push({ body: reminderBody(moto.name, DOC_LABELS[key], off), fireAt, motoId: moto.id, doc: key });
+      }
+    }
+  }
+  return out;
+}
 
 async function ensureAndroidChannel(N: typeof NotificationsModule): Promise<void> {
   if (Platform.OS === 'android') {
@@ -43,13 +70,14 @@ function reminderBody(motoName: string, docLabel: string, days: number): string 
  * scheduled ones, then schedules 7-gün ve 1-gün kala bildirimleri for each
  * future expiry date. Call after the garage list loads or changes.
  */
-export async function syncGarageReminders(motos: Motorcycle[]): Promise<void> {
+export async function syncGarageReminders(motos: Motorcycle[], userId: number): Promise<void> {
   const N = getNotifications();
   if (!N) return;
+  const key = storeKey(userId);
 
   // Cancel the previous batch (best effort).
   try {
-    const raw = await AsyncStorage.getItem(STORE_KEY);
+    const raw = await AsyncStorage.getItem(key);
     if (raw) {
       const ids: string[] = JSON.parse(raw);
       await Promise.all(ids.map((id) => N.cancelScheduledNotificationAsync(id).catch(() => {})));
@@ -58,46 +86,43 @@ export async function syncGarageReminders(motos: Motorcycle[]): Promise<void> {
     // ignore
   }
 
+  // Nothing to schedule (empty garage / no future dates) → don't bother the
+  // user with a permission prompt.
+  const pending = collectPending(motos);
+  if (pending.length === 0) {
+    await AsyncStorage.removeItem(key);
+    return;
+  }
+
   const perm = await N.getPermissionsAsync();
   if (!perm.granted) {
     const req = await N.requestPermissionsAsync();
     if (!req.granted) {
-      await AsyncStorage.removeItem(STORE_KEY);
+      await AsyncStorage.removeItem(key);
       return;
     }
   }
   await ensureAndroidChannel(N);
 
   const ids: string[] = [];
-  for (const moto of motos) {
-    for (const key of DOC_KEYS) {
-      const dateISO = moto[key];
-      const left = daysLeft(dateISO);
-      if (left == null) continue;
-      for (const off of OFFSETS_DAYS) {
-        if (left < off) continue; // that reminder moment already passed
-        const fireAt = new Date(`${dateISO}T09:00:00`);
-        fireAt.setDate(fireAt.getDate() - off);
-        if (fireAt.getTime() <= Date.now() + 5_000) continue;
-        try {
-          const id = await N.scheduleNotificationAsync({
-            content: {
-              title: 'Morider Garaj',
-              body: reminderBody(moto.name, DOC_LABELS[key], off),
-              data: { motoId: moto.id, doc: key },
-            },
-            trigger: {
-              type: N.SchedulableTriggerInputTypes.DATE,
-              date: fireAt,
-              channelId: 'garage',
-            },
-          });
-          ids.push(id);
-        } catch {
-          // best effort — skip this reminder
-        }
-      }
+  for (const r of pending) {
+    try {
+      const id = await N.scheduleNotificationAsync({
+        content: {
+          title: 'Morider Garaj',
+          body: r.body,
+          data: { motoId: r.motoId, doc: r.doc },
+        },
+        trigger: {
+          type: N.SchedulableTriggerInputTypes.DATE,
+          date: r.fireAt,
+          channelId: 'garage',
+        },
+      });
+      ids.push(id);
+    } catch {
+      // best effort — skip this reminder
     }
   }
-  await AsyncStorage.setItem(STORE_KEY, JSON.stringify(ids));
+  await AsyncStorage.setItem(key, JSON.stringify(ids));
 }

@@ -280,7 +280,6 @@ export default function GroupRideScreen({ route, navigation }: Props) {
     }
   }
 
-  // Ask for location permission once and stream our own GPS. We send on every
   // Advance the turn-by-turn banner for the rider's own position.
   function updateNavigation(pos: { lat: number; lon: number }): void {
     const steps = navSteps.current;
@@ -312,6 +311,10 @@ export default function GroupRideScreen({ route, navigation }: Props) {
         if (steps.length === 0) return;
         navSteps.current = steps;
         navIdx.current = 0;
+        // The shared group route stays as the deviation reference, so the
+        // counter must restart from zero or the cooldown alone would let
+        // re-routes fire back to back while riding the detour.
+        reroute.current.offCount = 0;
         spoken.current = { idx: -1, far: false, near: false };
         speakRerouted(voiceRef.current);
       })
@@ -322,6 +325,7 @@ export default function GroupRideScreen({ route, navigation }: Props) {
       });
   }
 
+  // Ask for location permission once and stream our own GPS. We send on every
   // GPS update AND on a steady heartbeat, so a stationary rider still appears to
   // the rest of the group (watchPositionAsync alone fires only when you move).
   const startLocationWatch = useCallback(async () => {
