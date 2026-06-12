@@ -103,8 +103,14 @@ Veri `infra/osrm/` altına yazılır (gitignore'lu). İşlem adımları: `osrm-e
 - **Mobil UX:** rota takipli solo sürüşte eğimli takip kamerası (pitch 55, zoom 17.5, GPS yönüne dönen kamera) + üstte talimat banner'ı; grup sürüşünde yalnız banner (harita grubu izlemek için serbest kalır). Sesli yönlendirme `expo-speech` (tr-TR) ile 250 m ve 50 m kala; banner'daki hoparlör ikonuyla kapatılır.
 - **Re-route:** rotaya uzaklık art arda 2 GPS örneğinde 100 m'yi aşarsa, mevcut konumdan rotaya ~150 m **ileride** katılan yeni bir plan istenir (20 sn soğuma ile). Solo sürüşte kesikli rehber çizgi de yeni geometriyle çizilir; grup sürüşünde ortak rota çizgisi korunur, yalnız sürücünün kendi talimatları yenilenir. Başarıda "Rota yeniden hesaplandı" sesli bildirimi.
 
+## Yükseklik profili
+
+- `GET /api/routes/:id/elevation` rota geometrisini en fazla 100 noktaya seyreltir, **DEM sağlayıcısından** rakımları çeker ve `{points: [{dist, ele}], gain, loss, min, max}` döner (`dist` km, diğerleri metre). Görünürlük kuralları `GET /api/routes/:id` ile aynıdır; sağlayıcı erişilemezse `502`.
+- **Sağlayıcı:** OpenTopoData uyumlu HTTP API, `ELEVATION_URL` ile ayarlanır (varsayılan `https://api.opentopodata.org/v1/srtm90m` — hız limitli genel örnek; üretimde self-host önerilir, tek Docker imajı). Yanıt parser'ı ve istatistik fonksiyonları saftır, ağ olmadan test edilir ([`elevation.go`](../backend/internal/route/elevation.go)).
+- **Tırmanış/iniş:** SRTM sınıfı DEM'lerde birkaç metrelik gürültü olduğundan toplam tırmanış/iniş **5 m histerezis** ile hesaplanır (`ascentDescent`): referans rakım yalnız eşiği aşan değişimlerde kayar, böylece kademeli okunan uzun bir tırmanış tam yüksekliğiyle sayılır ama gürültü salınımları sayılmaz.
+- **Mobil:** Rota detayında istatistik satırı (↗ toplam tırmanış, ↘ iniş, min–max rakım) + `react-native-svg` ile kompakt alan grafiği; uç erişilemezse bölüm gizli kalır.
+
 ## Sonraki adımlar
 
-- Yükseklik profili (PostGIS/harici DEM ile).
 - KML içe-dışa aktarma (GPX tamamlandı).
 - Motosiklete özel OSRM profili (otoyol/viraj ağırlıkları).
