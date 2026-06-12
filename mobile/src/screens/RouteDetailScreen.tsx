@@ -41,7 +41,6 @@ export default function RouteDetailScreen({ route, navigation }: Props) {
   const [deleting, setDeleting] = useState(false);
   const [startingGroup, setStartingGroup] = useState(false);
   const [exporting, setExporting] = useState(false);
-  const [exportingKML, setExportingKML] = useState(false);
   const [pois, setPois] = useState<POI[]>([]);
   const [elevation, setElevation] = useState<ElevationProfile | null>(null);
   const mapRef = useRef<MapView | null>(null);
@@ -123,10 +122,9 @@ export default function RouteDetailScreen({ route, navigation }: Props) {
   }
 
   async function exportFile(format: 'gpx' | 'kml') {
-    const setLoading = format === 'gpx' ? setExporting : setExportingKML;
     const mime = format === 'gpx' ? 'application/gpx+xml' : 'application/vnd.google-earth.kml+xml';
     try {
-      setLoading(true);
+      setExporting(true);
       const { data } = await api.get(`/api/routes/${id}/${format}`, {
         responseType: 'text',
         transformResponse: (d) => d,
@@ -142,12 +140,19 @@ export default function RouteDetailScreen({ route, navigation }: Props) {
     } catch (err) {
       Alert.alert('Dışa aktarılamadı', errorMessage(err));
     } finally {
-      setLoading(false);
+      setExporting(false);
     }
   }
 
-  const exportGPX = () => exportFile('gpx');
-  const exportKML = () => exportFile('kml');
+  // Single export button; the format choice explains where each one is used,
+  // so the rider doesn't need to know the acronyms up front.
+  function chooseExport() {
+    Alert.alert('Dosya Olarak Dışa Aktar', 'Rotayı hangi uygulamada kullanacaksın?', [
+      { text: 'GPX — Strava, Garmin, REVER…', onPress: () => exportFile('gpx') },
+      { text: 'KML — Google Earth, My Maps…', onPress: () => exportFile('kml') },
+      { text: 'Vazgeç', style: 'cancel' },
+    ]);
+  }
 
   async function rate(score: number) {
     setMyRating(score); // optimistic
@@ -244,9 +249,7 @@ export default function RouteDetailScreen({ route, navigation }: Props) {
         <View style={{ height: spacing.sm }} />
         <Button title="Grup Sürüşü Başlat" variant="ghost" icon="account-group" onPress={startGroupRide} loading={startingGroup} />
         <View style={{ height: spacing.sm }} />
-        <Button title="GPX Dışa Aktar" variant="ghost" icon="download-outline" onPress={exportGPX} loading={exporting} />
-        <View style={{ height: spacing.sm }} />
-        <Button title="KML Dışa Aktar" variant="ghost" icon="earth" onPress={exportKML} loading={exportingKML} />
+        <Button title="Dosya Olarak Dışa Aktar" variant="ghost" icon="download-outline" onPress={chooseExport} loading={exporting} />
         {isOwner ? (
           <>
             <View style={{ height: spacing.sm }} />

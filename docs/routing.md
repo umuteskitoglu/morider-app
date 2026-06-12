@@ -88,12 +88,13 @@ Veri `infra/osrm/` altına yazılır (gitignore'lu). İşlem adımları: `osrm-e
 - **Kısıt:** OSRM alternatifleri yalnız **2 nokta** arasında üretir; ara nokta varsa tek rota döner ve tercih etkisizdir. Daha derin kontrol için motosiklete özel OSRM profili gerekir (bkz. sonraki adımlar).
 - **Mobil:** Yeni Rota ekranında sürgü (Düz ↔ Virajlı); önizleme istatistiklerinde virajlılık etiketi.
 
-## GPX içe/dışa aktarma
+## Dosya içe/dışa aktarma (GPX + KML)
 
-- **Dışa aktarma:** `GET /api/routes/:id/gpx` rota geometrisini GPX 1.1 track olarak döndürür (`application/gpx+xml`, `Content-Disposition: attachment`). Görünürlük kuralları `GET /api/routes/:id` ile aynıdır (sahip / public / karşılıklı takip).
-- **İçe aktarma:** `POST /api/routes/import/gpx` ham GPX gövdesi alır (maks 10 MB). `trkpt` > `rtept` > `wpt` öncelik sırasıyla noktalar çıkarılır, 5000 noktayı aşan izler eşit aralıklarla seyreltilir. Rota adı dosyadaki `metadata/name` veya `trk/name`'den gelir; rota **private** oluşturulur. Yanıt, `POST /api/routes` ile aynı `Route` JSON'udur.
-- **Mobil:** Rota detayında "GPX Dışa Aktar" (paylaşım menüsü), Rotalarım'da "GPX İçe Aktar" (dosya seçici).
-- Parser/builder saf fonksiyonlardır: [`gpx.go`](../backend/internal/route/gpx.go), testler `gpx_test.go`.
+- **İçe aktarma (birleşik):** `POST /api/routes/import` ham GPX **veya** KML gövdesi alır (maks 10 MB); format **içerikten algılanır** (`ParseRouteFile`, kök elemana bakar — uzantı/Content-Type'a güvenilmez). Kullanıcı format bilmek zorunda değildir: mobilde tek "Dosyadan İçe Aktar" butonu vardır. `/import/gpx` ve `/import/kml` eski istemciler için aynı handler'a takma addır.
+- **GPX:** `trkpt` > `rtept` > `wpt` öncelik sırası, 5000 nokta üstü eşit seyreltme, ad `metadata/name` veya `trk/name`'den. Dışa aktarma: `GET /api/routes/:id/gpx` (GPX 1.1 track, `application/gpx+xml`, attachment). Parser/builder: [`gpx.go`](../backend/internal/route/gpx.go).
+- **KML:** `Document > Folder > Placemark` önceliğiyle LineString/MultiGeometry aranır; çoklu segmentler birleştirilir (Google Maps çok duraklı rota dışa aktarımı). Dışa aktarma: `GET /api/routes/:id/kml` (KML 2.2, `application/vnd.google-earth.kml+xml`). Parser/builder: [`kml.go`](../backend/internal/route/kml.go).
+- İçe aktarılan rota **private** oluşturulur; dışa aktarma görünürlük kuralları `GET /api/routes/:id` ile aynıdır (sahip / public / karşılıklı takip).
+- **Mobil UX:** Rotalarım'da tek **"Dosyadan İçe Aktar"**; rota detayında tek **"Dosya Olarak Dışa Aktar"** — dokununca format seçimi çıkar ve her formatın yanında nerede kullanılacağı yazar ("GPX — Strava, Garmin, REVER…", "KML — Google Earth, My Maps…").
 
 ## Adım adım navigasyon
 
@@ -109,13 +110,6 @@ Veri `infra/osrm/` altına yazılır (gitignore'lu). İşlem adımları: `osrm-e
 - **Sağlayıcı:** OpenTopoData uyumlu HTTP API, `ELEVATION_URL` ile ayarlanır (varsayılan `https://api.opentopodata.org/v1/srtm90m` — hız limitli genel örnek; üretimde self-host önerilir, tek Docker imajı). Yanıt parser'ı ve istatistik fonksiyonları saftır, ağ olmadan test edilir ([`elevation.go`](../backend/internal/route/elevation.go)).
 - **Tırmanış/iniş:** SRTM sınıfı DEM'lerde birkaç metrelik gürültü olduğundan toplam tırmanış/iniş **5 m histerezis** ile hesaplanır (`ascentDescent`): referans rakım yalnız eşiği aşan değişimlerde kayar, böylece kademeli okunan uzun bir tırmanış tam yüksekliğiyle sayılır ama gürültü salınımları sayılmaz.
 - **Mobil:** Rota detayında istatistik satırı (↗ toplam tırmanış, ↘ iniş, min–max rakım) + `react-native-svg` ile kompakt alan grafiği; uç erişilemezse bölüm gizli kalır.
-
-## KML içe/dışa aktarma
-
-- **Dışa aktarma:** `GET /api/routes/:id/kml` rota geometrisini KML 2.2 dosyası olarak döndürür (`application/vnd.google-earth.kml+xml`, `Content-Disposition: attachment`). Görünürlük kuralları GPX ile aynı.
-- **İçe aktarma:** `POST /api/routes/import/kml` ham KML gövdesi alır (maks 10 MB). `Document > Folder > Placemark` önceliğiyle LineString veya MultiGeometry aranır; çoklu LineString segmentleri birleştirilir (Google Maps çok duraklı rota dışa aktarımı). Rota adı `Document/Folder/Placemark` `<name>`'den alınır; **private** oluşturulur.
-- Parser saf fonksiyondur: [`kml.go`](../backend/internal/route/kml.go), testler `kml_test.go`.
-- **Mobil:** Rota detayında "KML Dışa Aktar" butonu, Rotalarım'da "KML İçe Aktar" (GPX ile aynı dosya seçici akışı).
 
 ## Sonraki adımlar
 

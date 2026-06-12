@@ -49,8 +49,11 @@ func registerRoutes(d *server.Deps, h *handler) {
 	g.PUT("/:id", h.update)
 	g.DELETE("/:id", h.remove)
 	g.POST("/:id/rate", h.rate)
-	g.POST("/import/gpx", h.importGPX)
-	g.POST("/import/kml", h.importKML)
+	// Unified file import sniffs GPX/KML from the content; the format-suffixed
+	// paths are aliases kept for older clients.
+	g.POST("/import", h.importRoute)
+	g.POST("/import/gpx", h.importRoute)
+	g.POST("/import/kml", h.importRoute)
 }
 
 type handler struct {
@@ -429,21 +432,22 @@ func (h *handler) exportGPX(c *gin.Context) {
 	c.Data(http.StatusOK, "application/gpx+xml", BuildGPX(name, points))
 }
 
-// importGPX creates a private route from a GPX document posted as the raw
-// request body. The route name comes from the file (metadata/track name).
-func (h *handler) importGPX(c *gin.Context) {
+// importRoute creates a private route from a GPX or KML document posted as
+// the raw request body; the format is sniffed from the content. The route
+// name comes from the file's own metadata.
+func (h *handler) importRoute(c *gin.Context) {
 	body, err := io.ReadAll(io.LimitReader(c.Request.Body, 10<<20))
 	if err != nil || len(body) == 0 {
-		httpx.BadRequest(c, "empty or unreadable GPX body")
+		httpx.BadRequest(c, "empty or unreadable file body")
 		return
 	}
-	name, points, err := ParseGPX(body)
+	name, points, err := ParseRouteFile(body)
 	if err != nil {
 		httpx.BadRequest(c, err.Error())
 		return
 	}
 	if name == "" {
-		name = "GPX Rotası"
+		name = "İçe Aktarılan Rota"
 	}
 	wkt := LineStringWKT(points)
 
@@ -508,46 +512,6 @@ func (h *handler) exportKML(c *gin.Context) {
 	}
 	c.Header("Content-Disposition", fmt.Sprintf("attachment; filename=%q", kmlFilename(name)))
 	c.Data(http.StatusOK, "application/vnd.google-earth.kml+xml", BuildKML(name, points))
-}
-
-// importKML creates a private route from a KML 2.2 document posted as the
-// raw request body. Name comes from the Document or first Placemark.
-func (h *handler) importKML(c *gin.Context) {
-	body, err := io.ReadAll(io.LimitReader(c.Request.Body, 10<<20))
-	if err != nil || len(body) == 0 {
-		httpx.BadRequest(c, "empty or unreadable KML body")
-		return
-	}
-	name, points, err := ParseKML(body)
-	if err != nil {
-		httpx.BadRequest(c, err.Error())
-		return
-	}
-	if name == "" {
-		name = "KML Rotası"
-	}
-	wkt := LineStringWKT(points)
-	var id int64
-	var distance float64
-	err = h.d.DB.QueryRow(c,
-		`INSERT INTO routes (user_id, name, description, path, distance, visibility)
-		 VALUES ($1, $2, '', ST_GeomFromText($3, 4326),
-		         ST_Length(ST_GeomFromText($3, 4326)::geography) / 1000.0, 'private')
-		 RETURNING id, distance`,
-		authpkg.UserID(c), name, wkt,
-	).Scan(&id, &distance)
-	if err != nil {
-		httpx.Internal(c, "could not import route")
-		return
-	}
-	c.JSON(http.StatusCreated, Route{
-		ID:         id,
-		UserID:     authpkg.UserID(c),
-		Name:       name,
-		Distance:   distance,
-		Visibility: "private",
-		Points:     points,
-	})
 }
 
 // gpxFilenameBase sanitises a route name to safe ASCII (no extension).

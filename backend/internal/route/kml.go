@@ -22,9 +22,9 @@ type kmlDoc struct {
 }
 
 type kmlDocument struct {
-	Name    string       `xml:"name"`
-	Folders []kmlFolder  `xml:"Folder"`
-	Marks   []kmlMark    `xml:"Placemark"`
+	Name    string      `xml:"name"`
+	Folders []kmlFolder `xml:"Folder"`
+	Marks   []kmlMark   `xml:"Placemark"`
 }
 
 type kmlFolder struct {

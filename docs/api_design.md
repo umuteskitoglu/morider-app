@@ -65,8 +65,7 @@ POST gövdesi:
 | GET | `/api/routes/:id/gpx` | Rotayı GPX 1.1 dosyası olarak indir |
 | GET | `/api/routes/:id/kml` | Rotayı KML 2.2 dosyası olarak indir |
 | GET | `/api/routes/:id/elevation` | Yükseklik profili (örneklenmiş, DEM'den) |
-| POST | `/api/routes/import/kml` | Ham KML gövdesinden rota oluştur (gizli) |
-| POST | `/api/routes/import/gpx` | Ham GPX gövdesinden rota oluştur (gizli) |
+| POST | `/api/routes/import` | Ham GPX **veya** KML gövdesinden rota oluştur (gizli; format içerikten algılanır, `/import/gpx` ve `/import/kml` eski istemciler için takma ad) |
 | PUT | `/api/routes/:id` | Güncelle |
 | DELETE | `/api/routes/:id` | Sil |
 
