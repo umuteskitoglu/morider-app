@@ -40,14 +40,16 @@ export default function RoutesScreen({ navigation }: Props) {
     }, [load]),
   );
 
-  async function importGPX() {
+  // One "import from file" action: the backend sniffs GPX vs KML from the
+  // content, so the rider never has to know which format they have.
+  async function importFile() {
     try {
       const picked = await DocumentPicker.getDocumentAsync({ type: '*/*', copyToCacheDirectory: true });
       if (picked.canceled || !picked.assets?.[0]) return;
       setImporting(true);
-      const gpx = await FileSystem.readAsStringAsync(picked.assets[0].uri);
-      const { data } = await api.post('/api/routes/import/gpx', gpx, {
-        headers: { 'Content-Type': 'application/gpx+xml' },
+      const content = await FileSystem.readAsStringAsync(picked.assets[0].uri);
+      const { data } = await api.post('/api/routes/import', content, {
+        headers: { 'Content-Type': 'application/octet-stream' },
       });
       Alert.alert('İçe aktarıldı', `"${data.name}" (${(data.distance ?? 0).toFixed(2)} km) rotalarına eklendi.`);
       load();
@@ -90,7 +92,7 @@ export default function RoutesScreen({ navigation }: Props) {
               <Button title="Yeni Rota" icon="plus" onPress={() => navigation.navigate('RouteCreate')} />
             </View>
             <View style={styles.headerBtn}>
-              <Button title="GPX İçe Aktar" variant="ghost" icon="upload-outline" onPress={importGPX} loading={importing} />
+              <Button title="Dosyadan İçe Aktar" variant="ghost" icon="upload-outline" onPress={importFile} loading={importing} />
             </View>
           </View>
         }
