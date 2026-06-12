@@ -32,6 +32,7 @@ Bu repo bir **monorepo**'dur:
 flowchart TB
     MobileApp[Expo React Native App] -->|HTTPS| Gateway[API Gateway :8080]
     MobileApp -. WebSocket .-> Telemetry
+
     Gateway --> Auth[auth :8081]
     Gateway --> User[user :8082]
     Gateway --> Ride[ride :8083]
@@ -39,6 +40,8 @@ flowchart TB
     Gateway --> Reward[reward :8085]
     Gateway --> Telemetry[telemetry :8086]
     Gateway --> Feed[feed :8087]
+    Gateway --> Event[event :8088]
+
     Auth --> PG[(PostgreSQL + PostGIS)]
     User --> PG
     Ride --> PG
@@ -46,13 +49,18 @@ flowchart TB
     Reward --> PG
     Telemetry --> PG
     Feed --> PG
+    Event --> PG
+
     Ride --> Redis[(Redis)]
     Ride -->|ride.completed| NATS[(NATS)]
     NATS --> Reward
     Telemetry <-->|grup sürüşü konum fan-out| NATS
+
+    Route -->|rota planlama / yönlendirme| OSRM[OSRM :5000]
+    Route -->|yükseklik profili / DEM| OTD[OpenTopoData]
 ```
 
-> **user** servisi `/api/follows` (takip), **telemetry** `/api/telemetry` (canlı GPS) + `/api/sessions` (grup sürüşü WebSocket), **feed** `/api/feed` + `/api/posts` (foto paylaşımları) rotalarını karşılar.
+> **ride** servisi `/api/garage` (motor belgesi + servis defteri) rotalarını da karşılar. **user** servisi `/api/follows` (takip), **telemetry** `/api/telemetry` (canlı GPS) + `/api/sessions` (grup sürüşü WebSocket), **feed** `/api/feed` + `/api/posts` (foto paylaşımları), **event** `/api/events` (buluşma/etkinlik) rotalarını karşılar. OSRM geliştirme ortamında opsiyonel (`make osrm-up`); OpenTopoData varsayılan olarak genel API'yi kullanır.
 
 Detaylar için [`docs/architecture.md`](docs/architecture.md) ve [`docs/social-features.md`](docs/social-features.md).
 
