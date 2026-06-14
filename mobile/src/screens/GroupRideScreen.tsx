@@ -367,14 +367,19 @@ export default function GroupRideScreen({ route, navigation }: Props) {
           lon: loc.coords.longitude,
           speed: Math.max(0, (loc.coords.speed ?? 0) * 3.6),
         };
-        if (!centered.current && !hasRoute.current) {
-          centered.current = true;
-          mapRef.current?.animateToRegion(
-            { latitude: loc.coords.latitude, longitude: loc.coords.longitude, latitudeDelta: 0.01, longitudeDelta: 0.01 },
-            600,
-          );
-        }
+        centered.current = true;
         updateNavigation({ lat: loc.coords.latitude, lon: loc.coords.longitude });
+        // Google-Maps-style chase cam: tilted, zoomed-in, rotated to heading.
+        const heading = loc.coords.heading ?? -1;
+        mapRef.current?.animateCamera(
+          {
+            center: { latitude: loc.coords.latitude, longitude: loc.coords.longitude },
+            pitch: 55,
+            zoom: 17.5,
+            ...(heading >= 0 ? { heading } : {}),
+          },
+          { duration: 700 },
+        );
         sendPosition();
       },
     );

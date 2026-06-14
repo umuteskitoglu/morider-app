@@ -92,7 +92,7 @@ export default function RoutesScreen({ navigation }: Props) {
               <Button title="Yeni Rota" icon="plus" onPress={() => navigation.navigate('RouteCreate')} />
             </View>
             <View style={styles.headerBtn}>
-              <Button title="Dosyadan İçe Aktar" variant="ghost" icon="upload-outline" onPress={importFile} loading={importing} />
+              <Button title="İçe Aktar" variant="ghost" icon="upload-outline" onPress={importFile} loading={importing} />
             </View>
           </View>
         }
