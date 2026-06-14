@@ -17,7 +17,11 @@ else
   OSRM_PROFILE_LUA := /profiles/$(OSRM_PROFILE).lua
 endif
 
-.PHONY: help up down logs ps build restart migrate psql backend-tidy backend-test mobile-install mobile-start osrm-data osrm-up osrm-down
+# Lean production stack (single host, ~2 GB RAM): all services in one process,
+# no monitoring, no Redis. See docker-compose.prod.yml.
+PROD_COMPOSE := docker compose -f docker-compose.prod.yml
+
+.PHONY: help up down logs ps build restart migrate psql backend-tidy backend-test mobile-install mobile-start osrm-data osrm-up osrm-down prod-up prod-up-voice prod-down prod-logs prod-ps prod-migrate
 
 help: ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | sort | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-16s\033[0m %s\n", $$1, $$2}'
@@ -40,10 +44,33 @@ build: ## Build all service images
 
 restart: down up ## Restart the stack
 
+prod-up: ## Start the lean production stack (all-in-one, low RAM)
+	@[ -f .env ] || cp .env.example .env
+	$(PROD_COMPOSE) up -d --build
+
+prod-up-voice: ## Start the lean production stack with voice (LiveKit)
+	@[ -f .env ] || cp .env.example .env
+	$(PROD_COMPOSE) --profile voice up -d --build
+
+prod-down: ## Stop the production stack
+	$(PROD_COMPOSE) --profile voice down
+
+prod-logs: ## Tail logs from the production stack
+	$(PROD_COMPOSE) logs -f
+
+prod-ps: ## Show production containers
+	$(PROD_COMPOSE) ps
+
 migrate: ## Apply all database migrations in order (idempotent)
 	@for f in $$(ls backend/migrations/*.sql | sort); do \
 		echo "applying $$f"; \
 		$(COMPOSE) exec -T postgres psql -v ON_ERROR_STOP=1 -U $${POSTGRES_USER:-morider} -d $${POSTGRES_DB:-morider} < $$f || exit 1; \
+	done
+
+prod-migrate: ## Apply migrations against the production stack (initial run is automatic on first boot)
+	@for f in $$(ls backend/migrations/*.sql | sort); do \
+		echo "applying $$f"; \
+		$(PROD_COMPOSE) exec -T postgres psql -v ON_ERROR_STOP=1 -U $${POSTGRES_USER:-morider} -d $${POSTGRES_DB:-morider} < $$f || exit 1; \
 	done
 
 psql: ## Open a psql shell
