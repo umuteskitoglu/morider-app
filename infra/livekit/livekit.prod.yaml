@@ -1,0 +1,23 @@
+# LiveKit SFU configuration for the lean (single-node) production deploy.
+#
+# Unlike infra/livekit/livekit.yaml this has NO redis block: a single LiveKit
+# node does not need Redis (that is only for sharing room state across replicas),
+# so the lean stack drops the Redis container entirely.
+#
+# API keys are injected via LIVEKIT_KEYS (see docker-compose.prod.yml). Generate
+# a strong secret and set LIVEKIT_API_KEY / LIVEKIT_API_SECRET in .env to match
+# what the telemetry service signs tokens with. See docs/voice.md.
+port: 7880
+
+rtc:
+  tcp_port: 7881
+  udp_port: 7882
+  port_range_start: 0
+  port_range_end: 0
+  # On a reachable host the SFU must advertise the node's public IP so clients
+  # behind NAT can receive media. Keep true for production.
+  use_external_ip: true
+
+# Trim chattiness in normal operation; raise to debug for connection issues.
+logging:
+  level: info
