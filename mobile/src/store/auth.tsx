@@ -11,6 +11,8 @@ export type User = {
   country: string;
   avatar_url?: string;
   bio?: string;
+  license_type?: string;
+  bike_type?: string;
 };
 
 type AuthState = {

@@ -1,8 +1,9 @@
-import React, { useCallback, useState } from 'react';
-import { Alert, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
+import { Alert, Modal, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
+import { CameraView, useCameraPermissions } from 'expo-camera';
 
 import { RideStackParams } from '../navigation/RootNavigator';
 import { Button, Card, TextField } from '../components/ui';
@@ -12,11 +13,28 @@ import { colors, radius, spacing } from '../theme';
 type ActiveSession = { session_id: number; code: string; participants: number; is_host: boolean };
 type Props = NativeStackScreenProps<RideStackParams, 'GroupJoin'>;
 
-export default function GroupJoinScreen({ navigation }: Props) {
-  const [code, setCode] = useState('');
+// Pull a session code out of whatever the QR contained: a deep link
+// (morider://join/ABC123, exp://.../--/join/ABC123) or the bare code itself.
+// The `join` token must start the string or follow a path separator so an
+// unrelated URL like .../conjoin/AB1234 can't be mistaken for an invite.
+export function codeFromQR(raw: string): string | null {
+  const link = raw.match(/(?:^|[/])join[/=]([A-Za-z0-9]{4,8})/i);
+  if (link) return link[1].toUpperCase();
+  const bare = raw.trim().toUpperCase();
+  return /^[A-Z0-9]{4,8}$/.test(bare) ? bare : null;
+}
+
+export default function GroupJoinScreen({ route, navigation }: Props) {
+  const [code, setCode] = useState(route.params?.code?.toUpperCase() ?? '');
   const [creating, setCreating] = useState(false);
   const [joining, setJoining] = useState(false);
   const [active, setActive] = useState<ActiveSession[]>([]);
+  const [showScanner, setShowScanner] = useState(false);
+  const [cameraPermission, requestCameraPermission] = useCameraPermissions();
+  const scanned = useRef(false);
+  // Remembers which code we already auto-joined so a *new* invite link that
+  // arrives while the screen is mounted still triggers a join.
+  const autoJoinedCode = useRef<string | null>(null);
 
   const loadActive = useCallback(async () => {
     try {
@@ -45,18 +63,53 @@ export default function GroupJoinScreen({ navigation }: Props) {
     }
   }
 
-  async function joinSession() {
-    const c = code.trim().toUpperCase();
-    if (!c) return;
-    try {
-      setJoining(true);
-      await api.post(`/api/sessions/${c}/join`);
-      navigation.replace('GroupRide', { code: c });
-    } catch (err) {
-      Alert.alert('Katılınamadı', errorMessage(err));
-    } finally {
-      setJoining(false);
+  const join = useCallback(
+    async (raw: string) => {
+      const c = raw.trim().toUpperCase();
+      if (!c) return;
+      try {
+        setJoining(true);
+        await api.post(`/api/sessions/${c}/join`);
+        navigation.replace('GroupRide', { code: c });
+      } catch (err) {
+        Alert.alert('Katılınamadı', errorMessage(err));
+      } finally {
+        setJoining(false);
+      }
+    },
+    [navigation],
+  );
+
+  // Arriving via an invite link (morider://join/<code>) joins right away.
+  // Keyed on the code itself so a second, different link still auto-joins.
+  useEffect(() => {
+    const c = route.params?.code;
+    if (c && autoJoinedCode.current !== c) {
+      autoJoinedCode.current = c;
+      join(c);
     }
+  }, [route.params?.code, join]);
+
+  async function openScanner() {
+    if (!cameraPermission?.granted) {
+      const res = await requestCameraPermission();
+      if (!res.granted) {
+        Alert.alert('İzin gerekli', 'QR kodu okutmak için kamera izni vermelisiniz.');
+        return;
+      }
+    }
+    scanned.current = false;
+    setShowScanner(true);
+  }
+
+  function onScan(data: string) {
+    if (scanned.current) return;
+    const c = codeFromQR(data);
+    if (!c) return; // unrelated QR — keep scanning
+    scanned.current = true;
+    setShowScanner(false);
+    setCode(c);
+    join(c);
   }
 
   return (
@@ -65,7 +118,7 @@ export default function GroupJoinScreen({ navigation }: Props) {
         <MaterialCommunityIcons name="map-marker-radius" size={40} color={colors.primary} />
         <Text style={styles.heroTitle}>Birlikte Sür</Text>
         <Text style={styles.heroText}>
-          Bir grup sürüşü başlat ve karşılıklı takip ettiğin arkadaşlarını davet et, ya da bir kodla mevcut bir sürüşe katıl.
+          Bir grup sürüşü başlat ve karşılıklı takip ettiğin arkadaşlarını davet et, ya da kod, link veya QR ile mevcut bir sürüşe katıl.
         </Text>
       </Card>
 
@@ -109,8 +162,26 @@ export default function GroupJoinScreen({ navigation }: Props) {
           placeholder="ABC123"
           maxLength={6}
         />
-        <Button title="Katıl" icon="login" onPress={joinSession} loading={joining} />
+        <Button title="Katıl" icon="login" onPress={() => join(code)} loading={joining} />
+        <Button title="QR Kod Okut" variant="ghost" icon="qrcode-scan" onPress={openScanner} />
       </Card>
+
+      <Modal visible={showScanner} animationType="slide" onRequestClose={() => setShowScanner(false)}>
+        <View style={styles.scannerWrap}>
+          <CameraView
+            style={StyleSheet.absoluteFill}
+            barcodeScannerSettings={{ barcodeTypes: ['qr'] }}
+            onBarcodeScanned={({ data }) => onScan(data)}
+          />
+          <View style={styles.scannerOverlay} pointerEvents="none">
+            <View style={styles.scannerFrame} />
+            <Text style={styles.scannerHint}>Davet QR kodunu çerçeveye hizala</Text>
+          </View>
+          <Pressable style={styles.scannerClose} onPress={() => setShowScanner(false)} hitSlop={12}>
+            <MaterialCommunityIcons name="close" size={26} color="#fff" />
+          </Pressable>
+        </View>
+      </Modal>
     </ScrollView>
   );
 }
@@ -139,4 +210,26 @@ const styles = StyleSheet.create({
   line: { flex: 1, height: 1, backgroundColor: colors.border },
   or: { color: colors.textMuted, fontWeight: '700' },
   joinCard: { gap: spacing.sm },
+  scannerWrap: { flex: 1, backgroundColor: '#000' },
+  scannerOverlay: { ...StyleSheet.absoluteFillObject, alignItems: 'center', justifyContent: 'center', gap: spacing.md },
+  scannerFrame: {
+    width: 240,
+    height: 240,
+    borderRadius: radius.lg,
+    borderWidth: 3,
+    borderColor: colors.primary,
+    backgroundColor: 'transparent',
+  },
+  scannerHint: { color: '#fff', fontWeight: '700' },
+  scannerClose: {
+    position: 'absolute',
+    top: 56,
+    right: spacing.lg,
+    width: 42,
+    height: 42,
+    borderRadius: 21,
+    backgroundColor: 'rgba(0,0,0,0.5)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
 });

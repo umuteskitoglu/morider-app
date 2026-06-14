@@ -27,6 +27,8 @@ import CommentsScreen from '../screens/CommentsScreen';
 import ProfileScreen from '../screens/ProfileScreen';
 import EditProfileScreen from '../screens/EditProfileScreen';
 import FollowsScreen from '../screens/FollowsScreen';
+import GarageScreen from '../screens/GarageScreen';
+import BikeDetailScreen from '../screens/BikeDetailScreen';
 import EventsScreen from '../screens/EventsScreen';
 import EventCreateScreen from '../screens/EventCreateScreen';
 import EventDetailScreen from '../screens/EventDetailScreen';
@@ -41,7 +43,8 @@ export type AuthStackParams = {
 // Group riding lives under the Ride tab — it is a way to ride, not a route list.
 export type RideStackParams = {
   RideMain: { followRouteId?: number } | undefined;
-  GroupJoin: undefined;
+  // `code` arrives via deep link (morider://join/<code>) and auto-joins.
+  GroupJoin: { code?: string } | undefined;
   GroupRide: { code: string };
 };
 
@@ -66,6 +69,8 @@ export type ProfileStackParams = {
   Explore: undefined;
   RouteCreate: undefined;
   RouteDetail: { id: number; name: string };
+  Garage: undefined;
+  BikeDetail: { id: number; name: string };
 };
 
 export type EventsStackParams = {
@@ -165,6 +170,8 @@ function ProfileNavigator() {
       <ProfileStack.Screen name="RouteDetail" component={RouteDetailScreen} options={{ title: 'Rota' }} />
       <ProfileStack.Screen name="Follows" component={FollowsScreen} options={{ title: 'Takip' }} />
       <ProfileStack.Screen name="UserProfile" component={UserProfileScreen} options={{ title: 'Profil' }} />
+      <ProfileStack.Screen name="Garage" component={GarageScreen} options={{ title: 'Garajım' }} />
+      <ProfileStack.Screen name="BikeDetail" component={BikeDetailScreen} options={{ title: 'Motor' }} />
     </ProfileStack.Navigator>
   );
 }
@@ -220,7 +227,8 @@ const navTheme = {
   },
 };
 
-// Deep links: morider://event/<code> opens the event directly in the Events tab.
+// Deep links: morider://event/<code> opens the event directly in the Events tab,
+// morider://join/<code> lands on the group-join screen and auto-joins.
 // The Expo `scheme` ("morider") is declared in app.json.
 const linking: LinkingOptions<AppTabParams> = {
   prefixes: ['morider://'],
@@ -229,6 +237,11 @@ const linking: LinkingOptions<AppTabParams> = {
       Events: {
         screens: {
           EventDetail: 'event/:code',
+        },
+      },
+      Ride: {
+        screens: {
+          GroupJoin: 'join/:code',
         },
       },
     },

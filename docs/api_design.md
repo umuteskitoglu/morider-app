@@ -31,6 +31,8 @@ Yanıt `200`: signup ile aynı gövde.
 | GET | `/api/users/:id` | Profil getir |
 | PUT | `/api/users/:id` | Profil güncelle *(korumalı, sadece kendi profili)* |
 
+Profil alanları: `name`, `username`, `country`, `avatar_url`, **`license_type`** (`A1|A2|A|B`) ve **`bike_type`** (`naked|sport|touring|adventure|chopper|enduro|scooter|custom`). Boş gönderilen alan mevcut değeri korur.
+
 ## Rides *(korumalı)*
 
 | Method | Path | Açıklama |
@@ -60,6 +62,10 @@ POST gövdesi:
 | POST | `/api/routes/plan` | Yola oturtulmuş güzergâh önizle (kayıt yok) |
 | GET | `/api/routes` | Rotaları listele |
 | GET | `/api/routes/:id` | Rota + noktalar (GeoJSON'dan) |
+| GET | `/api/routes/:id/gpx` | Rotayı GPX 1.1 dosyası olarak indir |
+| GET | `/api/routes/:id/kml` | Rotayı KML 2.2 dosyası olarak indir |
+| GET | `/api/routes/:id/elevation` | Yükseklik profili (örneklenmiş, DEM'den) |
+| POST | `/api/routes/import` | Ham GPX **veya** KML gövdesinden rota oluştur (gizli; format içerikten algılanır, `/import/gpx` ve `/import/kml` eski istemciler için takma ad) |
 | PUT | `/api/routes/:id` | Güncelle |
 | DELETE | `/api/routes/:id` | Sil |
 
@@ -91,6 +97,35 @@ Yanıt `200` (`distance` km, `duration` dk, `steps[].distance` m):
   "steps": [ { "instruction": "Sağa dön - Rıhtım Caddesi", "name": "Rıhtım Caddesi", "distance": 320.0 } ]
 }
 ```
+
+## Garaj *(korumalı)*
+
+Sürücünün motosikletleri, belge bitiş tarihleri ve servis defteri. Ride servisi sunar; hatırlatmalar cihaz üzerinde planlanır (backend yalnız tarihleri saklar).
+
+| Method | Path | Açıklama |
+|--------|------|----------|
+| POST | `/api/garage` | Motor ekle (`name` zorunlu; `plate`, `year`, 3 tarih opsiyonel) |
+| GET | `/api/garage` | Motorlarımı listele |
+| PUT | `/api/garage/:id` | Güncelle (tam değiştirme; boş tarih = temizle) |
+| DELETE | `/api/garage/:id` | Sil (servis kayıtları cascade) |
+| POST | `/api/garage/:id/services` | Servis kaydı ekle (`title` zorunlu; `note`, `odometer_km`, `cost`, `service_date`) |
+| GET | `/api/garage/:id/services` | Servis kayıtlarını listele (tarihe göre azalan) |
+| DELETE | `/api/garage/:id/services/:sid` | Servis kaydını sil |
+
+Tarih alanları `YYYY-MM-DD` string'tir: `insurance_expiry` (trafik sigortası), `inspection_expiry` (muayene), `kasko_expiry`. `service_date` boş gönderilirse bugünün tarihi kullanılır.
+
+## POI / Mola Noktaları *(korumalı)*
+
+Topluluk katkılı noktalar: motorcu dostu kafe, yakıt, tamirci, manzara, mola. Route servisi sunar (PostGIS point + GIST index).
+
+| Method | Path | Açıklama |
+|--------|------|----------|
+| POST | `/api/pois` | Nokta ekle (`name`, `category`, `lat`, `lon`, ops. `description`) |
+| GET | `/api/pois?min_lat&min_lon&max_lat&max_lon` | Sınır kutusundaki noktalar (maks 300) |
+| GET | `/api/pois/route/:id` | Rotanın 1 km çevresindeki noktalar (rota görünürlük kuralları geçerli) |
+| DELETE | `/api/pois/:id` | Sil (yalnız ekleyen) |
+
+`category`: `cafe | fuel | repair | viewpoint | rest`. Noktalar herkese görünür; silme yalnız sahibine açıktır.
 
 ## Rewards & Leaderboard *(korumalı)*
 
