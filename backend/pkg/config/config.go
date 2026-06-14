@@ -12,6 +12,10 @@ import (
 // never be used in production; Validate rejects it when APP_ENV=production.
 const defaultJWTSecret = "change_me_in_production"
 
+// defaultLiveKitSecret is the placeholder LiveKit API secret for local dev. Like
+// the JWT secret, Validate rejects it when APP_ENV=production.
+const defaultLiveKitSecret = "devsecret_change_me_in_production_32b"
+
 // Config holds the runtime configuration shared across services.
 type Config struct {
 	AppEnv string
@@ -37,6 +41,13 @@ type Config struct {
 
 	// Directory where the feed service stores uploaded photos.
 	UploadDir string
+
+	// LiveKit (self-hosted SFU) powers always-on group ride voice chat. The
+	// telemetry service mints room-join tokens; URL is the signalling endpoint
+	// handed to clients.
+	LiveKitURL       string
+	LiveKitAPIKey    string
+	LiveKitAPISecret string
 
 	// Downstream service URLs used by the gateway.
 	AuthURL      string
@@ -72,6 +83,10 @@ func Load() Config {
 
 		UploadDir: getEnv("UPLOAD_DIR", "./uploads"),
 
+		LiveKitURL:       getEnv("LIVEKIT_URL", "ws://localhost:7880"),
+		LiveKitAPIKey:    getEnv("LIVEKIT_API_KEY", "devkey"),
+		LiveKitAPISecret: getEnv("LIVEKIT_API_SECRET", defaultLiveKitSecret),
+
 		AuthURL:      getEnv("AUTH_SERVICE_URL", "http://localhost:8081"),
 		UserURL:      getEnv("USER_SERVICE_URL", "http://localhost:8082"),
 		RideURL:      getEnv("RIDE_SERVICE_URL", "http://localhost:8083"),
@@ -89,6 +104,9 @@ func Load() Config {
 func (c Config) Validate() error {
 	if c.AppEnv == "production" && (c.JWTSecret == "" || c.JWTSecret == defaultJWTSecret) {
 		return fmt.Errorf("JWT_SECRET must be set to a strong value when APP_ENV=production")
+	}
+	if c.AppEnv == "production" && (c.LiveKitAPISecret == "" || c.LiveKitAPISecret == defaultLiveKitSecret) {
+		return fmt.Errorf("LIVEKIT_API_SECRET must be set to a strong value when APP_ENV=production")
 	}
 	return nil
 }
