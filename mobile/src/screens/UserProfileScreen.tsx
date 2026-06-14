@@ -32,6 +32,8 @@ export default function UserProfileScreen({ route, navigation }: Props) {
   const [following, setFollowing] = useState(false);
   const [avatarUrl, setAvatarUrl] = useState('');
   const [username, setUsername] = useState('');
+  const [bio, setBio] = useState('');
+  const [stats, setStats] = useState({ postCount: 0, followerCount: 0, followingCount: 0 });
   const [zoomUri, setZoomUri] = useState<string | null>(null);
 
   const isSelf = user?.id === userId;
@@ -53,6 +55,12 @@ export default function UserProfileScreen({ route, navigation }: Props) {
       const [u, p, b, s] = await Promise.all(reqs);
       setAvatarUrl(u.data.avatar_url ?? '');
       setUsername(u.data.username ?? '');
+      setBio(u.data.bio ?? '');
+      setStats({
+        postCount: u.data.post_count ?? 0,
+        followerCount: u.data.follower_count ?? 0,
+        followingCount: u.data.following_count ?? 0,
+      });
       setPosts(p.data.posts ?? []);
       setBadges(b.data.rewards ?? []);
       if (s) setFollowing(s.data.following ?? false);
@@ -92,7 +100,22 @@ export default function UserProfileScreen({ route, navigation }: Props) {
           )}
           <Text style={styles.name}>{name}</Text>
           {username ? <Text style={styles.handle}>@{username}</Text> : null}
-          <Text style={styles.muted}>{posts.length} paylaşım</Text>
+          {bio ? <Text style={styles.bio}>{bio}</Text> : null}
+
+          <View style={styles.statsRow}>
+            <View style={styles.statItem}>
+              <Text style={styles.statNum}>{stats.postCount}</Text>
+              <Text style={styles.statLabel}>Gönderi</Text>
+            </View>
+            <View style={styles.statItem}>
+              <Text style={styles.statNum}>{stats.followerCount}</Text>
+              <Text style={styles.statLabel}>Takipçi</Text>
+            </View>
+            <View style={styles.statItem}>
+              <Text style={styles.statNum}>{stats.followingCount}</Text>
+              <Text style={styles.statLabel}>Takip</Text>
+            </View>
+          </View>
           {badges.length > 0 && (
             <View style={styles.badges}>
               {badges.map((b) => (
@@ -106,7 +129,14 @@ export default function UserProfileScreen({ route, navigation }: Props) {
         </LinearGradient>
 
         {!isSelf && (
-          <FollowButton userId={userId} following={following} onChange={setFollowing} />
+          <FollowButton
+            userId={userId}
+            following={following}
+            onChange={(next) => {
+              setFollowing(next);
+              setStats((s) => ({ ...s, followerCount: Math.max(0, s.followerCount + (next ? 1 : -1)) }));
+            }}
+          />
         )}
 
         {posts.length === 0 ? (
@@ -148,6 +178,17 @@ const styles = StyleSheet.create({
   name: { color: colors.text, fontSize: 22, fontWeight: '900' },
   handle: { color: colors.primary, fontWeight: '700', marginTop: 2 },
   muted: { color: colors.textMuted, marginTop: 2 },
+  bio: { color: colors.text, textAlign: 'center', marginTop: spacing.sm, paddingHorizontal: spacing.lg, lineHeight: 19 },
+  statsRow: {
+    flexDirection: 'row',
+    alignSelf: 'stretch',
+    justifyContent: 'space-around',
+    marginTop: spacing.md,
+    paddingHorizontal: spacing.lg,
+  },
+  statItem: { alignItems: 'center', gap: 2, flex: 1 },
+  statNum: { color: colors.text, fontWeight: '900', fontSize: 18 },
+  statLabel: { color: colors.textMuted, fontSize: 12, fontWeight: '600' },
   badges: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.xs, justifyContent: 'center', marginTop: spacing.md, paddingHorizontal: spacing.md },
   chip: {
     flexDirection: 'row',

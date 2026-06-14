@@ -10,6 +10,7 @@ export type User = {
   email: string;
   country: string;
   avatar_url?: string;
+  bio?: string;
 };
 
 type AuthState = {
