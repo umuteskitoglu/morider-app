@@ -331,20 +331,19 @@ export default function MapScreen({ route, navigation }: Props) {
         const navigating = updateNavigation({ lat: coord.latitude, lon: coord.longitude });
         if (navigating) {
           maybeReroute({ lat: coord.latitude, lon: coord.longitude });
-          // Google-Maps-style chase cam: tilted, zoomed-in, rotated to heading.
-          const heading = loc.coords.heading ?? -1;
-          mapRef.current?.animateCamera(
-            {
-              center: coord,
-              pitch: 55,
-              zoom: 17.5,
-              ...(heading >= 0 ? { heading } : {}),
-            },
-            { duration: 700 },
-          );
-        } else {
-          mapRef.current?.animateCamera({ center: coord });
         }
+        // Google-Maps-style chase cam: tilted, zoomed-in, rotated to heading.
+        // Applies to every active ride, not just turn-by-turn navigation.
+        const heading = loc.coords.heading ?? -1;
+        mapRef.current?.animateCamera(
+          {
+            center: coord,
+            pitch: 55,
+            zoom: 17.5,
+            ...(heading >= 0 ? { heading } : {}),
+          },
+          { duration: 700 },
+        );
       },
     );
   }
@@ -404,7 +403,7 @@ export default function MapScreen({ route, navigation }: Props) {
         initialRegion={INITIAL_REGION}
         showsUserLocation
         showsMyLocationButton={false}
-        followsUserLocation={recording}
+        followsUserLocation={false}
         onLongPress={onMapLongPress}
         onRegionChangeComplete={loadPois}
       >

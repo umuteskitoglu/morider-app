@@ -29,7 +29,11 @@
       "Bash(pkill -f \"expo start\")",
       "Bash(cd /Users/umuteskitoglu/Desktop/projects/morider-app/mobile *)",
       "Bash(echo \"Backend 8080: $\\(curl -s -o /dev/null -w '%{http_code}' http://192.168.1.7:8080/health || echo DOWN\\)\")",
-      "Bash(git mv *)"
+      "Bash(git mv *)",
+      "Bash(python3 -)",
+      "Bash(afconvert -f m4af -d aac /tmp/synth_eng.wav /tmp/synth_eng.m4a)",
+      "Read(//tmp/**)",
+      "Bash(afinfo /tmp/synth_eng.m4a)"
     ]
   }
 }

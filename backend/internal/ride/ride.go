@@ -45,6 +45,7 @@ func registerRoutes(d *server.Deps, h *handler) {
 	g := d.Engine.Group("/api/rides", d.JWT.Middleware())
 	g.POST("", h.create)
 	g.GET("", h.list)
+	g.GET("/recap", h.recap)
 	g.GET("/:id", h.get)
 }
 
@@ -142,6 +143,66 @@ func (h *handler) list(c *gin.Context) {
 		rides = append(rides, r)
 	}
 	c.JSON(http.StatusOK, gin.H{"rides": rides})
+}
+
+// recapStat aggregates a single ISO week of the caller's rides.
+type recapStat struct {
+	WeekStart       time.Time `json:"week_start"`
+	Distance        float64   `json:"distance"`
+	DurationSeconds float64   `json:"duration_seconds"`
+	AvgSpeed        float64   `json:"avg_speed"`
+	RideCount       int64     `json:"ride_count"`
+}
+
+// recap returns the caller's current-week ride summary alongside the previous
+// week so the client can show week-over-week change. Weeks are ISO (Mon-start)
+// in the server timezone, matching date_trunc('week', ...).
+func (h *handler) recap(c *gin.Context) {
+	// is_current is computed in SQL so the bucketing matches date_trunc exactly,
+	// regardless of how the server and DB timezones line up.
+	rows, err := h.d.DB.Query(c,
+		`SELECT date_trunc('week', start_time) = date_trunc('week', now()) AS is_current,
+		        COALESCE(SUM(distance), 0) AS dist,
+		        COALESCE(SUM(EXTRACT(EPOCH FROM (end_time - start_time))), 0) AS dur,
+		        COUNT(*) AS rides
+		 FROM rides
+		 WHERE user_id = $1 AND start_time IS NOT NULL
+		   AND start_time >= date_trunc('week', now()) - interval '1 week'
+		 GROUP BY is_current`, authpkg.UserID(c))
+	if err != nil {
+		httpx.Internal(c, "could not load recap")
+		return
+	}
+	defer rows.Close()
+
+	thisWeek := truncWeek(time.Now())
+	week := recapStat{WeekStart: thisWeek}
+	prev := recapStat{WeekStart: thisWeek.AddDate(0, 0, -7)}
+	for rows.Next() {
+		var isCurrent bool
+		var s recapStat
+		if err := rows.Scan(&isCurrent, &s.Distance, &s.DurationSeconds, &s.RideCount); err != nil {
+			httpx.Internal(c, "could not read recap")
+			return
+		}
+		s.AvgSpeed = AvgSpeed(s.Distance, time.Duration(s.DurationSeconds*float64(time.Second)))
+		if isCurrent {
+			s.WeekStart = week.WeekStart
+			week = s
+		} else {
+			s.WeekStart = prev.WeekStart
+			prev = s
+		}
+	}
+	c.JSON(http.StatusOK, gin.H{"week": week, "prev_week": prev})
+}
+
+// truncWeek returns Monday 00:00 of t's ISO week (local tz), mirroring Postgres
+// date_trunc('week', ...) so the WeekStart label lines up with the SQL bucket.
+func truncWeek(t time.Time) time.Time {
+	t = time.Date(t.Year(), t.Month(), t.Day(), 0, 0, 0, 0, t.Location())
+	offset := (int(t.Weekday()) + 6) % 7 // Go Sun=0..Sat=6; ISO week starts Mon.
+	return t.AddDate(0, 0, -offset)
 }
 
 func (h *handler) get(c *gin.Context) {

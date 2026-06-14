@@ -42,6 +42,7 @@ func registerRoutes(d *server.Deps, h *handler) {
 	g.POST("/plan", h.plan)
 	g.GET("", h.list)
 	g.GET("/explore", h.explore)
+	g.GET("/user/:id", h.userRoutes)
 	g.GET("/:id", h.get)
 	g.GET("/:id/gpx", h.exportGPX)
 	g.GET("/:id/kml", h.exportKML)
@@ -227,6 +228,36 @@ func (h *handler) explore(c *gin.Context) {
 		if err := rows.Scan(&r.ID, &r.UserID, &r.Name, &r.Description, &r.Distance, &r.Visibility, &r.OwnerName,
 			&r.AvgRating, &r.RatingCount, &r.MyRating, &r.IFollow); err != nil {
 			httpx.Internal(c, "could not read explore feed")
+			return
+		}
+		routes = append(routes, r)
+	}
+	c.JSON(http.StatusOK, gin.H{"routes": routes})
+}
+
+// userRoutes lists a single user's public routes for their profile. Only
+// 'public' routes are returned, so per-route visibility stays authoritative.
+func (h *handler) userRoutes(c *gin.Context) {
+	uid, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil {
+		httpx.BadRequest(c, "invalid user id")
+		return
+	}
+	rows, err := h.d.DB.Query(c,
+		`SELECT id, user_id, name, COALESCE(description, ''), distance, visibility
+		 FROM routes WHERE user_id = $1 AND visibility = 'public'
+		 ORDER BY created_at DESC LIMIT 100`, uid)
+	if err != nil {
+		httpx.Internal(c, "could not list routes")
+		return
+	}
+	defer rows.Close()
+
+	routes := make([]Route, 0)
+	for rows.Next() {
+		var r Route
+		if err := rows.Scan(&r.ID, &r.UserID, &r.Name, &r.Description, &r.Distance, &r.Visibility); err != nil {
+			httpx.Internal(c, "could not read routes")
 			return
 		}
 		routes = append(routes, r)

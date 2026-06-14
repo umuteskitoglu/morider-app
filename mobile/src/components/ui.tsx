@@ -40,7 +40,7 @@ export function Button({ title, onPress, loading, disabled, variant = 'primary',
           style={{ marginRight: spacing.sm }}
         />
       ) : null}
-      <Text style={[styles.buttonText, variant === 'ghost' && styles.buttonGhostText]}>{title}</Text>
+      <Text numberOfLines={1} style={[styles.buttonText, variant === 'ghost' && styles.buttonGhostText]}>{title}</Text>
     </View>
   );
 
@@ -126,7 +126,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  btnRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center' },
+  btnRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', flexShrink: 1 },
   ghost: {
     backgroundColor: 'transparent',
     borderWidth: 1.5,
@@ -139,6 +139,7 @@ const styles = StyleSheet.create({
     fontSize: 15,
     letterSpacing: 0.5,
     textTransform: 'uppercase',
+    flexShrink: 1,
   },
   buttonGhostText: { color: colors.text },
   fieldWrap: { marginBottom: spacing.md },

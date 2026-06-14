@@ -46,6 +46,7 @@ func registerGarageRoutes(d *server.Deps, h *handler) {
 	g := d.Engine.Group("/api/garage", d.JWT.Middleware())
 	g.POST("", h.createMoto)
 	g.GET("", h.listMotos)
+	g.GET("/user/:id", h.listMotosPublic)
 	g.PUT("/:id", h.updateMoto)
 	g.DELETE("/:id", h.removeMoto)
 	g.POST("/:id/services", h.addServiceRecord)
@@ -146,6 +147,61 @@ func (h *handler) listMotos(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"motorcycles": motos})
+}
+
+// PublicMotorcycle is the sanitized view of a bike shown on another rider's
+// profile: name and year only. Plates and document expiry dates stay private.
+type PublicMotorcycle struct {
+	ID   int64  `json:"id"`
+	Name string `json:"name"`
+	Year int    `json:"year"`
+}
+
+// listMotosPublic returns a target user's garage for their public profile.
+// The list is sanitized and only served when that user has show_garage on;
+// otherwise it responds with visible=false and an empty list.
+func (h *handler) listMotosPublic(c *gin.Context) {
+	uid, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil {
+		httpx.BadRequest(c, "invalid user id")
+		return
+	}
+	var show bool
+	err = h.d.DB.QueryRow(c, `SELECT show_garage FROM users WHERE id = $1`, uid).Scan(&show)
+	if errors.Is(err, pgx.ErrNoRows) {
+		httpx.Error(c, http.StatusNotFound, "user not found")
+		return
+	}
+	if err != nil {
+		httpx.Internal(c, "could not load garage")
+		return
+	}
+	if !show {
+		c.JSON(http.StatusOK, gin.H{"visible": false, "motorcycles": []PublicMotorcycle{}})
+		return
+	}
+	rows, err := h.d.DB.Query(c,
+		`SELECT id, name, COALESCE(year, 0)
+		 FROM motorcycles WHERE user_id = $1 ORDER BY created_at`, uid)
+	if err != nil {
+		httpx.Internal(c, "could not list motorcycles")
+		return
+	}
+	defer rows.Close()
+	motos := make([]PublicMotorcycle, 0)
+	for rows.Next() {
+		var m PublicMotorcycle
+		if err := rows.Scan(&m.ID, &m.Name, &m.Year); err != nil {
+			httpx.Internal(c, "could not read motorcycles")
+			return
+		}
+		motos = append(motos, m)
+	}
+	if rows.Err() != nil {
+		httpx.Internal(c, "could not read motorcycles")
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"visible": true, "motorcycles": motos})
 }
 
 func (h *handler) updateMoto(c *gin.Context) {
