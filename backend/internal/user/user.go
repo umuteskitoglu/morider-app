@@ -72,6 +72,7 @@ type profile struct {
 	PostCount      int64  `json:"post_count"`
 	FollowerCount  int64  `json:"follower_count"`
 	FollowingCount int64  `json:"following_count"`
+	ShowGarage     bool   `json:"show_garage"`
 }
 
 func (h *handler) get(c *gin.Context) {
@@ -87,10 +88,11 @@ func (h *handler) get(c *gin.Context) {
 		        COALESCE(u.license_type, ''), COALESCE(u.bike_type, ''),
 		        (SELECT COUNT(*) FROM posts p WHERE p.user_id = u.id AND p.archived_at IS NULL),
 		        (SELECT COUNT(*) FROM follows f WHERE f.followee_id = u.id),
-		        (SELECT COUNT(*) FROM follows f WHERE f.follower_id = u.id)
+		        (SELECT COUNT(*) FROM follows f WHERE f.follower_id = u.id),
+		        u.show_garage
 		 FROM users u WHERE u.id = $1`, id,
 	).Scan(&p.ID, &p.Name, &p.Username, &p.Email, &p.Country, &p.AvatarURL, &p.Bio,
-		&p.LicenseType, &p.BikeType, &p.PostCount, &p.FollowerCount, &p.FollowingCount)
+		&p.LicenseType, &p.BikeType, &p.PostCount, &p.FollowerCount, &p.FollowingCount, &p.ShowGarage)
 	if errors.Is(err, pgx.ErrNoRows) {
 		httpx.Error(c, http.StatusNotFound, "user not found")
 		return
@@ -115,6 +117,8 @@ type updateReq struct {
 	// convention (validated against allow-lists below).
 	LicenseType string `json:"license_type"`
 	BikeType    string `json:"bike_type"`
+	// Privacy flags: pointer so an omitted field keeps the stored value.
+	ShowGarage *bool `json:"show_garage"`
 }
 
 func (h *handler) update(c *gin.Context) {
@@ -160,6 +164,7 @@ func (h *handler) update(c *gin.Context) {
 		     bio = COALESCE($6, bio),
 		     license_type = COALESCE(NULLIF($7, ''), license_type),
 		     bike_type = COALESCE(NULLIF($8, ''), bike_type),
+		     show_garage = COALESCE($9, show_garage),
 		     updated_at = now()
 		 WHERE id = $1
 		 RETURNING id, name, COALESCE(username, ''), email, COALESCE(country, ''),
@@ -167,10 +172,11 @@ func (h *handler) update(c *gin.Context) {
 		           COALESCE(license_type, ''), COALESCE(bike_type, ''),
 		           (SELECT COUNT(*) FROM posts p WHERE p.user_id = users.id AND p.archived_at IS NULL),
 		           (SELECT COUNT(*) FROM follows f WHERE f.followee_id = users.id),
-		           (SELECT COUNT(*) FROM follows f WHERE f.follower_id = users.id)`,
-		id, req.Name, req.Username, req.Country, req.AvatarURL, req.Bio, req.LicenseType, req.BikeType,
+		           (SELECT COUNT(*) FROM follows f WHERE f.follower_id = users.id),
+		           show_garage`,
+		id, req.Name, req.Username, req.Country, req.AvatarURL, req.Bio, req.LicenseType, req.BikeType, req.ShowGarage,
 	).Scan(&p.ID, &p.Name, &p.Username, &p.Email, &p.Country, &p.AvatarURL, &p.Bio,
-		&p.LicenseType, &p.BikeType, &p.PostCount, &p.FollowerCount, &p.FollowingCount)
+		&p.LicenseType, &p.BikeType, &p.PostCount, &p.FollowerCount, &p.FollowingCount, &p.ShowGarage)
 	if errors.Is(err, pgx.ErrNoRows) {
 		httpx.Error(c, http.StatusNotFound, "user not found")
 		return

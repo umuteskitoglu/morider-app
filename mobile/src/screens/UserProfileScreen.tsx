@@ -13,6 +13,8 @@ import { api, apiBaseURL } from '../api/client';
 import { colors, gradients, radius, shadow, spacing } from '../theme';
 
 type Badge = { id: number; type: string; description: string };
+type PublicMoto = { id: number; name: string; year: number };
+type PublicRoute = { id: number; name: string; distance: number };
 
 // Stack-agnostic props: this screen is registered in both the Feed and Profile
 // stacks. It only needs the route params and setOptions, so we avoid binding it
@@ -28,6 +30,8 @@ export default function UserProfileScreen({ route, navigation }: Props) {
   const { width } = useWindowDimensions();
   const [posts, setPosts] = useState<DetailPost[]>([]);
   const [badges, setBadges] = useState<Badge[]>([]);
+  const [garage, setGarage] = useState<PublicMoto[]>([]);
+  const [routes, setRoutes] = useState<PublicRoute[]>([]);
   const [viewer, setViewer] = useState<DetailPost | null>(null);
   const [refreshing, setRefreshing] = useState(false);
   const [following, setFollowing] = useState(false);
@@ -53,9 +57,11 @@ export default function UserProfileScreen({ route, navigation }: Props) {
         api.get(`/api/users/${userId}`),
         api.get(`/api/feed/user/${userId}`),
         api.get(`/api/rewards/user/${userId}`),
+        api.get(`/api/garage/user/${userId}`),
+        api.get(`/api/routes/user/${userId}`),
       ];
       if (!isSelf) reqs.push(api.get(`/api/follows/status/${userId}`));
-      const [u, p, b, s] = await Promise.all(reqs);
+      const [u, p, b, g, r, s] = await Promise.all(reqs);
       setAvatarUrl(u.data.avatar_url ?? '');
       setUsername(u.data.username ?? '');
       setBio(u.data.bio ?? '');
@@ -68,6 +74,8 @@ export default function UserProfileScreen({ route, navigation }: Props) {
       setBikeType(u.data.bike_type ?? '');
       setPosts(p.data.posts ?? []);
       setBadges(b.data.rewards ?? []);
+      setGarage(g.data.motorcycles ?? []);
+      setRoutes(r.data.routes ?? []);
       if (s) setFollowing(s.data.following ?? false);
     } catch {
       // ignore
@@ -161,6 +169,42 @@ export default function UserProfileScreen({ route, navigation }: Props) {
             ))}
           </View>
         )}
+
+        {garage.length > 0 && (
+          <View>
+            <View style={styles.sectionRow}>
+              <MaterialCommunityIcons name="garage-variant" size={18} color={colors.primary} />
+              <Text style={styles.sectionTitle}>Garaj</Text>
+            </View>
+            <View style={styles.listCard}>
+              {garage.map((m, i) => (
+                <View key={m.id} style={[styles.listRow, i > 0 && styles.listDivider]}>
+                  <MaterialCommunityIcons name="motorbike" size={20} color={colors.primary} />
+                  <Text style={styles.listName} numberOfLines={1}>{m.name}</Text>
+                  {m.year ? <Text style={styles.listMeta}>{m.year}</Text> : null}
+                </View>
+              ))}
+            </View>
+          </View>
+        )}
+
+        {routes.length > 0 && (
+          <View>
+            <View style={styles.sectionRow}>
+              <MaterialCommunityIcons name="map-marker-path" size={18} color={colors.primary} />
+              <Text style={styles.sectionTitle}>Rotalar</Text>
+            </View>
+            <View style={styles.listCard}>
+              {routes.map((r, i) => (
+                <View key={r.id} style={[styles.listRow, i > 0 && styles.listDivider]}>
+                  <MaterialCommunityIcons name="map-marker-path" size={20} color={colors.primary} />
+                  <Text style={styles.listName} numberOfLines={1}>{r.name}</Text>
+                  <Text style={styles.listMeta}>{r.distance.toFixed(1)} km</Text>
+                </View>
+              ))}
+            </View>
+          </View>
+        )}
       </ScrollView>
       <PostDetail post={viewer} onClose={() => setViewer(null)} />
       <AvatarViewer uri={zoomUri} onClose={() => setZoomUri(null)} />
@@ -210,6 +254,19 @@ const styles = StyleSheet.create({
   chipIcon: { fontSize: 13 },
   chipText: { color: colors.text, fontWeight: '700', fontSize: 12 },
   empty: { color: colors.textMuted, textAlign: 'center', marginTop: spacing.xl },
+  sectionRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.xs, marginBottom: spacing.sm },
+  sectionTitle: { color: colors.text, fontWeight: '800', fontSize: 15, letterSpacing: 0.3 },
+  listCard: {
+    backgroundColor: colors.surface,
+    borderRadius: radius.lg,
+    borderWidth: 1,
+    borderColor: colors.border,
+    paddingHorizontal: spacing.md,
+  },
+  listRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, paddingVertical: spacing.md },
+  listDivider: { borderTopWidth: 1, borderTopColor: colors.border },
+  listName: { color: colors.text, flex: 1, fontWeight: '700', fontSize: 14 },
+  listMeta: { color: colors.primary, fontWeight: '800', fontSize: 13 },
   grid: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.xs },
   gridItem: { borderRadius: radius.sm, overflow: 'hidden', backgroundColor: colors.surface },
   gridImg: { width: '100%', height: '100%' },

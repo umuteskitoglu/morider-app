@@ -50,7 +50,8 @@
           "cameraPermission": "Morider, grup sürüşü davet QR kodunu okutmak için kameraya erişir."
         }
       ],
-      "@react-native-community/datetimepicker"
+      "@react-native-community/datetimepicker",
+      "expo-audio"
     ]
   }
 }

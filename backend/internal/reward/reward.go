@@ -52,6 +52,7 @@ func registerRoutes(d *server.Deps, h *handler) {
 	g.PUT("/rewards/showcase", h.showcase)
 	g.GET("/rewards/user/:uid", h.userBadges)
 	g.GET("/leaderboard/top", h.leaderboard)
+	g.GET("/leaderboard/following", h.leaderboardFollowing)
 }
 
 type handler struct {
@@ -160,18 +161,53 @@ func (h *handler) award(c *gin.Context) {
 type leaderboardEntry struct {
 	UserID        int64   `json:"user_id"`
 	Name          string  `json:"name"`
+	AvatarURL     string  `json:"avatar_url"`
 	TotalDistance float64 `json:"total_distance"`
 	RideCount     int64   `json:"ride_count"`
+	AvgSpeed      float64 `json:"avg_speed"`
 }
 
+// leaderboard ranks every rider by total distance.
 func (h *handler) leaderboard(c *gin.Context) {
+	h.runLeaderboard(c, false)
+}
+
+// leaderboardFollowing ranks only the caller and the people they follow, so a
+// rider competes within their own circle.
+func (h *handler) leaderboardFollowing(c *gin.Context) {
+	h.runLeaderboard(c, true)
+}
+
+// runLeaderboard ranks riders by total distance. With followingOnly the pool is
+// the caller plus everyone they follow; otherwise it is everyone. ?period=week
+// restricts the ride aggregates to the current ISO week (riders still appear
+// with zeroed totals when they have no rides in range).
+func (h *handler) runLeaderboard(c *gin.Context, followingOnly bool) {
+	// Period filter lives in the LEFT JOIN's ON clause (not WHERE) so users with
+	// no rides this week still show up at the bottom with zeros.
+	rideFilter := ""
+	if c.Query("period") == "week" {
+		rideFilter = "AND r.start_time >= date_trunc('week', now())"
+	}
+
+	where := ""
+	var args []any
+	if followingOnly {
+		where = `WHERE u.id = $1 OR u.id IN (SELECT followee_id FROM follows WHERE follower_id = $1)`
+		args = append(args, authpkg.UserID(c))
+	}
+
 	rows, err := h.d.DB.Query(c,
-		`SELECT u.id, u.name, COALESCE(SUM(r.distance), 0) AS total, COUNT(r.id) AS rides
+		`SELECT u.id, u.name, COALESCE(u.avatar_url, ''),
+		        COALESCE(SUM(r.distance), 0) AS total,
+		        COUNT(r.id) AS rides,
+		        COALESCE(SUM(r.distance) / NULLIF(SUM(EXTRACT(EPOCH FROM (r.end_time - r.start_time))) / 3600.0, 0), 0) AS avg_speed
 		 FROM users u
-		 LEFT JOIN rides r ON r.user_id = u.id
-		 GROUP BY u.id, u.name
+		 LEFT JOIN rides r ON r.user_id = u.id `+rideFilter+`
+		 `+where+`
+		 GROUP BY u.id, u.name, u.avatar_url
 		 ORDER BY total DESC
-		 LIMIT 20`)
+		 LIMIT 50`, args...)
 	if err != nil {
 		httpx.Internal(c, "could not load leaderboard")
 		return
@@ -181,7 +217,7 @@ func (h *handler) leaderboard(c *gin.Context) {
 	entries := make([]leaderboardEntry, 0)
 	for rows.Next() {
 		var e leaderboardEntry
-		if err := rows.Scan(&e.UserID, &e.Name, &e.TotalDistance, &e.RideCount); err != nil {
+		if err := rows.Scan(&e.UserID, &e.Name, &e.AvatarURL, &e.TotalDistance, &e.RideCount, &e.AvgSpeed); err != nil {
 			httpx.Internal(c, "could not read leaderboard")
 			return
 		}
