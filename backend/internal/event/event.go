@@ -51,6 +51,7 @@ func registerRoutes(d *server.Deps, h *handler) {
 	g.GET("/:code", jwt, h.get)
 	g.PATCH("/:code", jwt, h.update)
 	g.POST("/:code/rsvp", jwt, h.rsvp)
+	g.POST("/:code/ride", jwt, h.startRide)
 	g.POST("/:code/cancel", jwt, h.cancel)
 	g.GET("/:code/messages", jwt, h.messages)
 	// WebSocket auth uses ?token= because browsers cannot set custom headers.
@@ -181,16 +182,16 @@ func (h *handler) list(c *gin.Context) {
 	defer rows.Close()
 
 	type item struct {
-		EventID   int64     `json:"event_id"`
-		Code      string    `json:"code"`
-		Title     string    `json:"title"`
-		HostID    int64     `json:"host_id"`
-		MeetAt    time.Time `json:"meet_at"`
-		StartAt   time.Time `json:"start_at"`
-		Status    string    `json:"status"`
-		MyRSVP    string    `json:"my_rsvp"`
-		GoingCount int64    `json:"going_count"`
-		IsHost    bool      `json:"is_host"`
+		EventID    int64     `json:"event_id"`
+		Code       string    `json:"code"`
+		Title      string    `json:"title"`
+		HostID     int64     `json:"host_id"`
+		MeetAt     time.Time `json:"meet_at"`
+		StartAt    time.Time `json:"start_at"`
+		Status     string    `json:"status"`
+		MyRSVP     string    `json:"my_rsvp"`
+		GoingCount int64     `json:"going_count"`
+		IsHost     bool      `json:"is_host"`
 	}
 	events := make([]item, 0)
 	for rows.Next() {
@@ -212,20 +213,24 @@ func (h *handler) get(c *gin.Context) {
 	code := c.Param("code")
 
 	var (
-		eventID, hostID                int64
-		title, status                  string
+		eventID, hostID                 int64
+		title, status                   string
 		description, startName, endName *string
-		meetAt, startAt                time.Time
-		routeID                        *int64
-		startLat, startLon             *float64
-		endLat, endLon                 *float64
+		meetAt, startAt                 time.Time
+		routeID                         *int64
+		startLat, startLon              *float64
+		endLat, endLon                  *float64
+		// Code of the linked live group ride, present only while that session is
+		// still active so the app shows "join" vs "start" correctly.
+		rideCode *string
 	)
 	err := h.d.DB.QueryRow(c,
-		`SELECT id, host_id, title, description, meet_at, start_at, status, route_id,
-		        start_lat, start_lon, start_name, end_lat, end_lon, end_name
-		 FROM events WHERE code = $1`, code).
+		`SELECT e.id, e.host_id, e.title, e.description, e.meet_at, e.start_at, e.status, e.route_id,
+		        e.start_lat, e.start_lon, e.start_name, e.end_lat, e.end_lon, e.end_name,
+		        (SELECT s.code FROM ride_sessions s WHERE s.id = e.ride_session_id AND s.status = 'active')
+		 FROM events e WHERE e.code = $1`, code).
 		Scan(&eventID, &hostID, &title, &description, &meetAt, &startAt, &status, &routeID,
-			&startLat, &startLon, &startName, &endLat, &endLon, &endName)
+			&startLat, &startLon, &startName, &endLat, &endLon, &endName, &rideCode)
 	if errors.Is(err, pgx.ErrNoRows) {
 		httpx.Error(c, http.StatusNotFound, "event not found")
 		return
@@ -279,23 +284,24 @@ func (h *handler) get(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, gin.H{
-		"event_id":     eventID,
-		"code":         code,
-		"host_id":      hostID,
-		"title":        title,
-		"description":  deref(description),
-		"meet_at":      meetAt,
-		"start_at":     startAt,
-		"status":       status,
-		"route_id":     resolvedRouteID,
-		"route_points": routePoints,
-		"start_lat":    startLat,
-		"start_lon":    startLon,
-		"start_name":   deref(startName),
-		"end_lat":      endLat,
-		"end_lon":      endLon,
-		"end_name":     deref(endName),
-		"participants": participants,
+		"event_id":          eventID,
+		"code":              code,
+		"host_id":           hostID,
+		"title":             title,
+		"description":       deref(description),
+		"meet_at":           meetAt,
+		"start_at":          startAt,
+		"status":            status,
+		"route_id":          resolvedRouteID,
+		"route_points":      routePoints,
+		"start_lat":         startLat,
+		"start_lon":         startLon,
+		"start_name":        deref(startName),
+		"end_lat":           endLat,
+		"end_lon":           endLon,
+		"end_name":          deref(endName),
+		"participants":      participants,
+		"ride_session_code": deref(rideCode),
 	})
 }
 
@@ -418,6 +424,76 @@ func (h *handler) cancel(c *gin.Context) {
 		return
 	}
 	c.Status(http.StatusNoContent)
+}
+
+// startRide turns the planned event into a live group ride. Host only and
+// idempotent: if a still-active ride is already linked it returns that code, so
+// the host re-entering the screen rejoins instead of spawning duplicates. The
+// new session inherits the event's route (if any); attendees who RSVP'd "going"
+// join it via the telemetry service's /api/sessions/:code/join.
+func (h *handler) startRide(c *gin.Context) {
+	eventID, ok := h.hostOnly(c, c.Param("code"))
+	if !ok {
+		return
+	}
+	host := authpkg.UserID(c)
+
+	// Reuse the linked session while it is still active.
+	var existing *string
+	var routeID *int64
+	if err := h.d.DB.QueryRow(c,
+		`SELECT (SELECT s.code FROM ride_sessions s WHERE s.id = e.ride_session_id AND s.status = 'active'),
+		        e.route_id
+		 FROM events e WHERE e.id = $1`, eventID).Scan(&existing, &routeID); err != nil {
+		httpx.Internal(c, "could not load event")
+		return
+	}
+	if existing != nil {
+		c.JSON(http.StatusOK, gin.H{"code": *existing})
+		return
+	}
+
+	var (
+		sessionID int64
+		code      string
+	)
+	// Retry on the rare code collision (unique violation).
+	for attempt := 0; attempt < 5; attempt++ {
+		gen, err := generateCode()
+		if err != nil {
+			httpx.Internal(c, "could not start ride")
+			return
+		}
+		err = h.d.DB.QueryRow(c,
+			`INSERT INTO ride_sessions (code, host_id, route_id) VALUES ($1, $2, $3) RETURNING id`,
+			gen, host, routeID).Scan(&sessionID)
+		if err == nil {
+			code = gen
+			break
+		}
+		var pgErr *pgconn.PgError
+		if !(errors.As(err, &pgErr) && pgErr.Code == "23505") {
+			httpx.Internal(c, "could not start ride")
+			return
+		}
+	}
+	if code == "" {
+		httpx.Internal(c, "could not allocate session code")
+		return
+	}
+
+	if _, err := h.d.DB.Exec(c,
+		`INSERT INTO session_participants (session_id, user_id) VALUES ($1, $2) ON CONFLICT DO NOTHING`,
+		sessionID, host); err != nil {
+		httpx.Internal(c, "could not start ride")
+		return
+	}
+	if _, err := h.d.DB.Exec(c,
+		`UPDATE events SET ride_session_id = $2 WHERE id = $1`, eventID, sessionID); err != nil {
+		httpx.Internal(c, "could not link ride")
+		return
+	}
+	c.JSON(http.StatusCreated, gin.H{"code": code})
 }
 
 // hostOnly loads the event by code and verifies the caller is its host,
