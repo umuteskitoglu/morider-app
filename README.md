@@ -14,12 +14,17 @@ Bu repo bir **monorepo**'dur:
 ## Özellikler
 
 - **Sürüş takibi** — GPS ile canlı kayıt, mesafe/hız/rota; sürüş geçmişi.
-- **Rotalar** — rota oluştur (yol-takipli snap), görünürlük seç (gizli / herkese açık / arkadaşlar), kaydedilen bir rotada sür (haritada rehber çizgi), **kaydırarak silme**.
+- **Rotalar** — rota oluştur (yol-takipli snap), görünürlük seç (gizli / herkese açık / arkadaşlar), kaydedilen bir rotada sür (haritada rehber çizgi), **virajlılık tercihi** (düz ↔ virajlı sürgüsü, 2 nokta arasında alternatif rotalardan seçer), **yükseklik profili** (DEM'den tırmanış/iniş + rakım grafiği), **GPX ve KML içe/dışa aktarma**, **kaydırarak silme**. İsteğe bağlı **motosiklete özel OSRM profili** (manzaralı yolları öne çıkarır, otoyolu caydırır — self-hosted; bkz. [`docs/routing.md`](docs/routing.md)).
 - **Keşfet & puanlama** — herkese açık rotaları keşfet, 5 yıldız üzerinden puanla.
+- **Mola noktaları (POI)** — haritaya uzun basarak motorcu dostu kafe / yakıt / tamirci / manzara / mola noktası ekle; rota detayında rotanın 1 km çevresindeki noktalar otomatik görünür (PostGIS `ST_DWithin`).
+- **Adım adım navigasyon** — rota takipli sürüşte Google Maps tarzı eğimli takip kamerası, üstte ok ikonlu Türkçe talimat banner'ı ("350 m • Sağa dön - Rıhtım Caddesi") ve **sesli yönlendirme** (250 m ve 50 m kala, kapatılabilir); grup sürüşünde rota varsa aynı banner. Rotadan 100 m+ sapınca **otomatik re-route** (rotaya ileriden katılan yeni plan).
 - **Foto akışı** — Instagram tarzı çoklu-foto paylaşımları, beğeni & yorum, konum etiketi.
 - **Takip sistemi** — tek yönlü takip (profilden veya Keşfet'ten tek dokunuşla); `arkadaşlar` görünürlüğü = **karşılıklı takip**.
-- **Canlı grup sürüşü** — kod ile oturuma katıl, katılımcıların konumunu gerçek zamanlı ortak haritada gör (WebSocket + NATS fan-out). Host **moderasyonu** (at / banla / host devret), tek aktif oturum kuralı, otomatik yeniden bağlanma ve devam eden sürüşe geri dönme.
+- **Sürücü profili** — ehliyet sınıfı (A1 / A2 / A / B) ve motor türü (naked, sport, touring, adventure, chopper, enduro, scooter, custom); profil ve kullanıcı kartlarında rozet olarak görünür.
+- **Canlı grup sürüşü** — kod, **davet linki veya QR kod** ile oturuma katıl (deep link `morider://join/<kod>`, uygulama içi QR tarayıcı), katılımcıların konumunu gerçek zamanlı ortak haritada gör (WebSocket + NATS fan-out). Host **moderasyonu** (at / banla / host devret), tek aktif oturum kuralı, otomatik yeniden bağlanma ve devam eden sürüşe geri dönme.
 - **Ödüller** — sürüşlere göre rozetler ve liderlik tablosu.
+- **Kaza algılama (MVP)** — sürüşte ivmeölçerle darbe tespiti, 30 sn iptal edilebilir geri sayım; süre dolunca grup sürüşünde tüm katılımcılara **SOS uyarısı**, acil durum kişisine konumlu SMS taslağı, 112 arama kısayolu. Ayrıntı: [`docs/safety.md`](docs/safety.md).
+- **Garaj** — motosikletlerini ekle; **trafik sigortası / muayene / kasko** bitiş tarihlerine 7 gün ve 1 gün kala cihaz bildirimi (development build'de), renkli aciliyet rozetleri ve motor başına **servis defteri** (işlem, km, tutar, not).
 
 ## Mimari (özet)
 
@@ -27,6 +32,7 @@ Bu repo bir **monorepo**'dur:
 flowchart TB
     MobileApp[Expo React Native App] -->|HTTPS| Gateway[API Gateway :8080]
     MobileApp -. WebSocket .-> Telemetry
+
     Gateway --> Auth[auth :8081]
     Gateway --> User[user :8082]
     Gateway --> Ride[ride :8083]
@@ -34,6 +40,8 @@ flowchart TB
     Gateway --> Reward[reward :8085]
     Gateway --> Telemetry[telemetry :8086]
     Gateway --> Feed[feed :8087]
+    Gateway --> Event[event :8088]
+
     Auth --> PG[(PostgreSQL + PostGIS)]
     User --> PG
     Ride --> PG
@@ -41,13 +49,18 @@ flowchart TB
     Reward --> PG
     Telemetry --> PG
     Feed --> PG
+    Event --> PG
+
     Ride --> Redis[(Redis)]
     Ride -->|ride.completed| NATS[(NATS)]
     NATS --> Reward
     Telemetry <-->|grup sürüşü konum fan-out| NATS
+
+    Route -->|rota planlama / yönlendirme| OSRM[OSRM :5000]
+    Route -->|yükseklik profili / DEM| OTD[OpenTopoData]
 ```
 
-> **user** servisi `/api/follows` (takip), **telemetry** `/api/telemetry` (canlı GPS) + `/api/sessions` (grup sürüşü WebSocket), **feed** `/api/feed` + `/api/posts` (foto paylaşımları) rotalarını karşılar.
+> **ride** servisi `/api/garage` (motor belgesi + servis defteri) rotalarını da karşılar. **user** servisi `/api/follows` (takip), **telemetry** `/api/telemetry` (canlı GPS) + `/api/sessions` (grup sürüşü WebSocket), **feed** `/api/feed` + `/api/posts` (foto paylaşımları), **event** `/api/events` (buluşma/etkinlik) rotalarını karşılar. OSRM geliştirme ortamında opsiyonel (`make osrm-up`); OpenTopoData varsayılan olarak genel API'yi kullanır.
 
 Detaylar için [`docs/architecture.md`](docs/architecture.md) ve [`docs/social-features.md`](docs/social-features.md).
 

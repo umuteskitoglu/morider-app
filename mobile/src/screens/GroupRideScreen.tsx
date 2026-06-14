@@ -1,13 +1,33 @@
 import React, { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
-import { Alert, Modal, Pressable, ScrollView, Share, StyleSheet, Text, View } from 'react-native';
+import { Alert, Modal, Pressable, ScrollView, Share, StyleSheet, Text, Vibration, View } from 'react-native';
 import MapView, { Marker, Polyline, Region } from 'react-native-maps';
 import * as Location from 'expo-location';
+import * as Linking from 'expo-linking';
+import QRCode from 'react-native-qrcode-svg';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 
 import { RideStackParams } from '../navigation/RootNavigator';
 import { Button, Card } from '../components/ui';
+import { CrashCountdown } from '../components/CrashCountdown';
+import { NavBanner } from '../components/NavBanner';
+import { useCrashDetection } from '../lib/crashDetection';
+import { composeEmergencySMS, getEmergencyContact } from '../lib/emergency';
+import {
+  advanceStep,
+  fetchRouteSteps,
+  distanceM,
+  LatLon,
+  maybeSpeak,
+  NavStep,
+  newRerouteState,
+  offRouteTick,
+  rerouteFromPosition,
+  speakRerouted,
+  SpokenState,
+  stopSpeaking,
+} from '../lib/navigation';
 import { useAuth } from '../store/auth';
 import { api, apiBaseURL, errorMessage, TOKEN_KEY } from '../api/client';
 import { colors, radius, shadow, spacing } from '../theme';
@@ -37,6 +57,23 @@ export default function GroupRideScreen({ route, navigation }: Props) {
   const [positions, setPositions] = useState<Record<number, LiveMarker>>({});
   const [connected, setConnected] = useState(false);
   const [showParticipants, setShowParticipants] = useState(false);
+  const [showInvite, setShowInvite] = useState(false);
+  const [crashAlarm, setCrashAlarm] = useState(false);
+
+  // Turn-by-turn for the session's route (banner only; the map stays free so
+  // the rider can keep an eye on the whole group).
+  const [navStep, setNavStep] = useState<NavStep | null>(null);
+  const [navDist, setNavDist] = useState(0);
+  const [voiceOn, setVoiceOn] = useState(true);
+  const navSteps = useRef<NavStep[] | null>(null);
+  const navIdx = useRef(0);
+  const spoken = useRef<SpokenState>({ idx: -1, far: false, near: false });
+  const voiceRef = useRef(true);
+  voiceRef.current = voiceOn;
+  // Session route geometry for off-route detection (refs because the location
+  // callback outlives the render that created it).
+  const routePointsRef = useRef<LatLon[]>([]);
+  const reroute = useRef(newRerouteState());
 
   const ws = useRef<WebSocket | null>(null);
   const locSub = useRef<Location.LocationSubscription | null>(null);
@@ -89,6 +126,15 @@ export default function GroupRideScreen({ route, navigation }: Props) {
           () => mapRef.current?.fitToCoordinates(pts, { edgePadding: { top: 100, right: 60, bottom: 240, left: 60 }, animated: true }),
           400,
         );
+      }
+      // Turn-by-turn steps for the session route (best effort, once).
+      routePointsRef.current = pts.map((p) => ({ lat: p.latitude, lon: p.longitude }));
+      if (pts.length > 1 && !navSteps.current) {
+        fetchRouteSteps(routePointsRef.current)
+          .then((steps) => {
+            if (steps.length > 0) navSteps.current = steps;
+          })
+          .catch(() => {});
       }
     } catch (err) {
       Alert.alert('Oturum yüklenemedi', errorMessage(err));
@@ -155,6 +201,32 @@ export default function GroupRideScreen({ route, navigation }: Props) {
           setParticipants((prev) => prev.filter((p) => p.id !== raw.user_id));
           return;
         }
+        // Group alert: another rider's crash countdown expired. Vibrate hard,
+        // tell everyone who and where, and offer to jump to the location.
+        if (raw.type === 'sos') {
+          if (raw.user_id === user?.id) return; // our own echo
+          Vibration.vibrate([400, 300, 400, 300, 400]);
+          const hasLoc = raw.has_loc && raw.lat != null && raw.lon != null;
+          const goto = () =>
+            hasLoc &&
+            mapRef.current?.animateToRegion(
+              { latitude: raw.lat, longitude: raw.lon, latitudeDelta: 0.005, longitudeDelta: 0.005 },
+              600,
+            );
+          Alert.alert(
+            '🚨 ACİL DURUM',
+            hasLoc
+              ? `${raw.name ?? 'Bir sürücü'} kaza yapmış olabilir! Son konumuna gidip durumu kontrol et.`
+              : `${raw.name ?? 'Bir sürücü'} kaza yapmış olabilir! (Konum alınamadı.)`,
+            hasLoc
+              ? [
+                  { text: 'Konuma Git', onPress: goto },
+                  { text: 'Tamam', style: 'cancel' },
+                ]
+              : [{ text: 'Tamam', style: 'cancel' }],
+          );
+          return;
+        }
         if (raw.type === 'ended') {
           if (leaving.current) return; // we ended/left it ourselves
           teardown();
@@ -208,6 +280,51 @@ export default function GroupRideScreen({ route, navigation }: Props) {
     }
   }
 
+  // Advance the turn-by-turn banner for the rider's own position.
+  function updateNavigation(pos: { lat: number; lon: number }): void {
+    const steps = navSteps.current;
+    if (!steps) return;
+    const idx = advanceStep(steps, pos, navIdx.current);
+    navIdx.current = idx;
+    if (idx >= steps.length) {
+      navSteps.current = null;
+      setNavStep(null);
+      return;
+    }
+    const step = steps[idx];
+    const d = distanceM(pos, step);
+    setNavStep(step);
+    setNavDist(d);
+    maybeSpeak(spoken.current, idx, step, d, voiceRef.current);
+    maybeReroute(pos);
+  }
+
+  // Strayed from the group's route → refresh own guidance with a path that
+  // rejoins it ahead. The shared route polyline stays untouched; only this
+  // rider's banner instructions change.
+  function maybeReroute(pos: LatLon): void {
+    if (!navSteps.current) return;
+    if (!offRouteTick(reroute.current, routePointsRef.current, pos)) return;
+    reroute.current.inFlight = true;
+    rerouteFromPosition(routePointsRef.current, pos)
+      .then(({ steps }) => {
+        if (steps.length === 0) return;
+        navSteps.current = steps;
+        navIdx.current = 0;
+        // The shared group route stays as the deviation reference, so the
+        // counter must restart from zero or the cooldown alone would let
+        // re-routes fire back to back while riding the detour.
+        reroute.current.offCount = 0;
+        spoken.current = { idx: -1, far: false, near: false };
+        speakRerouted(voiceRef.current);
+      })
+      .catch(() => {})
+      .finally(() => {
+        reroute.current.lastAt = Date.now();
+        reroute.current.inFlight = false;
+      });
+  }
+
   // Ask for location permission once and stream our own GPS. We send on every
   // GPS update AND on a steady heartbeat, so a stationary rider still appears to
   // the rest of the group (watchPositionAsync alone fires only when you move).
@@ -257,6 +374,7 @@ export default function GroupRideScreen({ route, navigation }: Props) {
             600,
           );
         }
+        updateNavigation({ lat: loc.coords.latitude, lon: loc.coords.longitude });
         sendPosition();
       },
     );
@@ -313,12 +431,51 @@ export default function GroupRideScreen({ route, navigation }: Props) {
     if (heartbeat.current) clearInterval(heartbeat.current);
     locSub.current?.remove();
     locSub.current = null;
+    navSteps.current = null;
+    stopSpeaking();
     detachSocket();
   }
 
-  async function shareCode() {
+  // Crash detection runs for the whole ride; a suspected impact opens the
+  // 30s countdown. Cancel = false alarm; expiry = SOS to the group + SMS.
+  useCrashDetection(connected, () => setCrashAlarm(true));
+
+  async function sendSOS() {
+    setCrashAlarm(false);
+    const c = lastCoord.current;
+    // No GPS fix yet (e.g. crash seconds after connecting, or permission
+    // denied): flag the SOS as location-less rather than reporting 0,0, which
+    // would point rescuers at the Gulf of Guinea.
+    const hasLoc = c?.lat != null && c?.lon != null;
+    if (ws.current?.readyState === WebSocket.OPEN) {
+      ws.current.send(
+        JSON.stringify({ type: 'sos', has_loc: hasLoc, lat: c?.lat ?? 0, lon: c?.lon ?? 0 }),
+      );
+    }
+    const contact = await getEmergencyContact();
+    if (contact) {
+      try {
+        await composeEmergencySMS(contact, hasLoc ? c?.lat : undefined, hasLoc ? c?.lon : undefined);
+      } catch {
+        // SMS composer unavailable — the group SOS already went out
+      }
+    } else {
+      Alert.alert(
+        'Acil durum bildirildi',
+        'Gruptaki sürücüler uyarıldı. Profilden bir acil durum kişisi eklersen SMS taslağı da hazırlanır.',
+      );
+    }
+  }
+
+  // Deep link that lands on GroupJoin and auto-joins (morider://join/<code>;
+  // in Expo Go dev builds createURL produces the matching exp:// URL).
+  const inviteUrl = Linking.createURL(`join/${code}`);
+
+  async function shareInvite() {
     try {
-      await Share.share({ message: `Morider grup sürüşüme katıl! Kod: ${code}` });
+      await Share.share({
+        message: `Morider grup sürüşüme katıl!\n\nLink: ${inviteUrl}\nKod: ${code}`,
+      });
     } catch {
       // ignore
     }
@@ -460,13 +617,17 @@ export default function GroupRideScreen({ route, navigation }: Props) {
         ))}
       </MapView>
 
-      {/* Status badge */}
-      <View style={styles.badgeWrap} pointerEvents="none">
-        <View style={[styles.badge, connected ? styles.badgeLive : styles.badgeIdle]}>
-          <View style={[styles.dot, { backgroundColor: connected ? colors.success : colors.textMuted }]} />
-          <Text style={styles.badgeText}>{connected ? 'CANLI' : 'BAĞLANIYOR…'}</Text>
+      {/* Turn-by-turn banner (when the session has a route) or the status badge */}
+      {navStep ? (
+        <NavBanner step={navStep} distM={navDist} voiceOn={voiceOn} onToggleVoice={() => setVoiceOn((v) => !v)} />
+      ) : (
+        <View style={styles.badgeWrap} pointerEvents="none">
+          <View style={[styles.badge, connected ? styles.badgeLive : styles.badgeIdle]}>
+            <View style={[styles.dot, { backgroundColor: connected ? colors.success : colors.textMuted }]} />
+            <Text style={styles.badgeText}>{connected ? 'CANLI' : 'BAĞLANIYOR…'}</Text>
+          </View>
         </View>
-      </View>
+      )}
 
       <Card style={styles.panel}>
         <View style={styles.panelHeader}>
@@ -486,8 +647,8 @@ export default function GroupRideScreen({ route, navigation }: Props) {
             <Text style={styles.count}>{liveCount}/{roster.length}</Text>
             <MaterialCommunityIcons name="chevron-up" size={16} color={colors.textMuted} />
           </Pressable>
-          <Pressable style={styles.shareBtn} onPress={shareCode} hitSlop={8}>
-            <MaterialCommunityIcons name="share-variant" size={20} color={colors.text} />
+          <Pressable style={styles.shareBtn} onPress={() => setShowInvite(true)} hitSlop={8}>
+            <MaterialCommunityIcons name="qrcode" size={20} color={colors.text} />
           </Pressable>
         </View>
         {isHost ? (
@@ -496,6 +657,23 @@ export default function GroupRideScreen({ route, navigation }: Props) {
           <Button title="Ayrıl" variant="ghost" icon="exit-run" onPress={leave} />
         )}
       </Card>
+
+      <CrashCountdown visible={crashAlarm} onCancel={() => setCrashAlarm(false)} onExpire={sendSOS} />
+
+      <Modal visible={showInvite} animationType="fade" transparent onRequestClose={() => setShowInvite(false)}>
+        <Pressable style={styles.modalBackdrop} onPress={() => setShowInvite(false)}>
+          <Pressable style={styles.inviteCard} onPress={() => {}}>
+            <Text style={styles.inviteTitle}>Arkadaşlarını Davet Et</Text>
+            <Text style={styles.inviteSub}>QR kodu okutsunlar ya da daveti link olarak gönder.</Text>
+            <View style={styles.qrWrap}>
+              <QRCode value={inviteUrl} size={200} backgroundColor="#fff" color="#000" />
+            </View>
+            <Text style={styles.inviteCode}>{code}</Text>
+            <Button title="Davet Linkini Paylaş" icon="share-variant" onPress={shareInvite} />
+            <Button title="Kapat" variant="ghost" onPress={() => setShowInvite(false)} />
+          </Pressable>
+        </Pressable>
+      </Modal>
 
       <Modal visible={showParticipants} animationType="slide" transparent onRequestClose={() => setShowParticipants(false)}>
         <Pressable style={styles.modalBackdrop} onPress={() => setShowParticipants(false)}>
@@ -602,6 +780,23 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   modalBackdrop: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'flex-end' },
+  inviteCard: {
+    alignSelf: 'center',
+    marginBottom: 'auto',
+    marginTop: 'auto',
+    width: '86%',
+    backgroundColor: colors.surface,
+    borderRadius: radius.lg,
+    borderWidth: 1,
+    borderColor: colors.border,
+    padding: spacing.lg,
+    alignItems: 'center',
+    gap: spacing.sm,
+  },
+  inviteTitle: { color: colors.text, fontSize: 18, fontWeight: '900' },
+  inviteSub: { color: colors.textMuted, fontSize: 13, textAlign: 'center' },
+  qrWrap: { backgroundColor: '#fff', padding: spacing.md, borderRadius: radius.md, marginVertical: spacing.sm },
+  inviteCode: { color: colors.text, fontSize: 24, fontWeight: '900', letterSpacing: 4 },
   sheet: {
     backgroundColor: colors.surface,
     borderTopLeftRadius: radius.lg,

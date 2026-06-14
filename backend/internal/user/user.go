@@ -22,6 +22,15 @@ import (
 // usernamePattern bounds a @username to a safe, predictable charset/length.
 var usernamePattern = regexp.MustCompile(`^[a-zA-Z0-9_]{3,20}$`)
 
+// Allowed rider-profile values; mirrored by CHECK constraints in 0018.
+var (
+	licenseTypes = map[string]bool{"A1": true, "A2": true, "A": true, "B": true}
+	bikeTypes    = map[string]bool{
+		"naked": true, "sport": true, "touring": true, "adventure": true,
+		"chopper": true, "enduro": true, "scooter": true, "custom": true,
+	}
+)
+
 // Run boots the user service.
 func Run(cfg config.Config) error {
 	deps, err := server.New(context.Background(), "user", cfg)
@@ -58,6 +67,8 @@ type profile struct {
 	Country        string `json:"country"`
 	AvatarURL      string `json:"avatar_url"`
 	Bio            string `json:"bio"`
+	LicenseType    string `json:"license_type"`
+	BikeType       string `json:"bike_type"`
 	PostCount      int64  `json:"post_count"`
 	FollowerCount  int64  `json:"follower_count"`
 	FollowingCount int64  `json:"following_count"`
@@ -73,12 +84,13 @@ func (h *handler) get(c *gin.Context) {
 	err = h.d.DB.QueryRow(c,
 		`SELECT u.id, u.name, COALESCE(u.username, ''), u.email, COALESCE(u.country, ''),
 		        COALESCE(u.avatar_url, ''), COALESCE(u.bio, ''),
+		        COALESCE(u.license_type, ''), COALESCE(u.bike_type, ''),
 		        (SELECT COUNT(*) FROM posts p WHERE p.user_id = u.id AND p.archived_at IS NULL),
 		        (SELECT COUNT(*) FROM follows f WHERE f.followee_id = u.id),
 		        (SELECT COUNT(*) FROM follows f WHERE f.follower_id = u.id)
 		 FROM users u WHERE u.id = $1`, id,
 	).Scan(&p.ID, &p.Name, &p.Username, &p.Email, &p.Country, &p.AvatarURL, &p.Bio,
-		&p.PostCount, &p.FollowerCount, &p.FollowingCount)
+		&p.LicenseType, &p.BikeType, &p.PostCount, &p.FollowerCount, &p.FollowingCount)
 	if errors.Is(err, pgx.ErrNoRows) {
 		httpx.Error(c, http.StatusNotFound, "user not found")
 		return
@@ -99,6 +111,10 @@ type updateReq struct {
 	Country   *string `json:"country"`
 	AvatarURL *string `json:"avatar_url"`
 	Bio       *string `json:"bio"`
+	// license_type/bike_type keep the legacy empty-string-means-unchanged
+	// convention (validated against allow-lists below).
+	LicenseType string `json:"license_type"`
+	BikeType    string `json:"bike_type"`
 }
 
 func (h *handler) update(c *gin.Context) {
@@ -125,6 +141,14 @@ func (h *handler) update(c *gin.Context) {
 		httpx.BadRequest(c, "username must be 3-20 chars: letters, digits, underscore")
 		return
 	}
+	if req.LicenseType != "" && !licenseTypes[req.LicenseType] {
+		httpx.BadRequest(c, "license_type must be one of A1, A2, A, B")
+		return
+	}
+	if req.BikeType != "" && !bikeTypes[req.BikeType] {
+		httpx.BadRequest(c, "invalid bike_type")
+		return
+	}
 
 	var p profile
 	err = h.d.DB.QueryRow(c,
@@ -134,16 +158,19 @@ func (h *handler) update(c *gin.Context) {
 		     country = COALESCE($4, country),
 		     avatar_url = COALESCE($5, avatar_url),
 		     bio = COALESCE($6, bio),
+		     license_type = COALESCE(NULLIF($7, ''), license_type),
+		     bike_type = COALESCE(NULLIF($8, ''), bike_type),
 		     updated_at = now()
 		 WHERE id = $1
 		 RETURNING id, name, COALESCE(username, ''), email, COALESCE(country, ''),
 		           COALESCE(avatar_url, ''), COALESCE(bio, ''),
+		           COALESCE(license_type, ''), COALESCE(bike_type, ''),
 		           (SELECT COUNT(*) FROM posts p WHERE p.user_id = users.id AND p.archived_at IS NULL),
 		           (SELECT COUNT(*) FROM follows f WHERE f.followee_id = users.id),
 		           (SELECT COUNT(*) FROM follows f WHERE f.follower_id = users.id)`,
-		id, req.Name, req.Username, req.Country, req.AvatarURL, req.Bio,
+		id, req.Name, req.Username, req.Country, req.AvatarURL, req.Bio, req.LicenseType, req.BikeType,
 	).Scan(&p.ID, &p.Name, &p.Username, &p.Email, &p.Country, &p.AvatarURL, &p.Bio,
-		&p.PostCount, &p.FollowerCount, &p.FollowingCount)
+		&p.LicenseType, &p.BikeType, &p.PostCount, &p.FollowerCount, &p.FollowingCount)
 	if errors.Is(err, pgx.ErrNoRows) {
 		httpx.Error(c, http.StatusNotFound, "user not found")
 		return

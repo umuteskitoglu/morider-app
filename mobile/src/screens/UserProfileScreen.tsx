@@ -8,6 +8,7 @@ import { PostDetail, DetailPost } from '../components/PostDetail';
 import { AvatarViewer } from '../components/AvatarViewer';
 import FollowButton from '../components/FollowButton';
 import { useAuth } from '../store/auth';
+import { RiderChips } from '../components/RiderChips';
 import { api, apiBaseURL } from '../api/client';
 import { colors, gradients, radius, shadow, spacing } from '../theme';
 
@@ -34,6 +35,8 @@ export default function UserProfileScreen({ route, navigation }: Props) {
   const [username, setUsername] = useState('');
   const [bio, setBio] = useState('');
   const [stats, setStats] = useState({ postCount: 0, followerCount: 0, followingCount: 0 });
+  const [licenseType, setLicenseType] = useState('');
+  const [bikeType, setBikeType] = useState('');
   const [zoomUri, setZoomUri] = useState<string | null>(null);
 
   const isSelf = user?.id === userId;
@@ -61,6 +64,8 @@ export default function UserProfileScreen({ route, navigation }: Props) {
         followerCount: u.data.follower_count ?? 0,
         followingCount: u.data.following_count ?? 0,
       });
+      setLicenseType(u.data.license_type ?? '');
+      setBikeType(u.data.bike_type ?? '');
       setPosts(p.data.posts ?? []);
       setBadges(b.data.rewards ?? []);
       if (s) setFollowing(s.data.following ?? false);
@@ -101,6 +106,7 @@ export default function UserProfileScreen({ route, navigation }: Props) {
           <Text style={styles.name}>{name}</Text>
           {username ? <Text style={styles.handle}>@{username}</Text> : null}
           {bio ? <Text style={styles.bio}>{bio}</Text> : null}
+          <RiderChips licenseType={licenseType} bikeType={bikeType} />
 
           <View style={styles.statsRow}>
             <View style={styles.statItem}>

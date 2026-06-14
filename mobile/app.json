@@ -44,6 +44,12 @@
           "cameraPermission": "Morider, profil fotoğrafı çekmek için kameraya erişir."
         }
       ],
+      [
+        "expo-camera",
+        {
+          "cameraPermission": "Morider, grup sürüşü davet QR kodunu okutmak için kameraya erişir."
+        }
+      ],
       "@react-native-community/datetimepicker"
     ]
   }

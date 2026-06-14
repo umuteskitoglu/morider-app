@@ -37,6 +37,7 @@ func Run(cfg config.Config) error {
 	}
 
 	registerRoutes(deps, h)
+	registerGarageRoutes(deps, h)
 	return deps.Run(config.ResolvePort("RIDE_PORT", "8083"))
 }
 

@@ -3,7 +3,9 @@ import {
   ActivityIndicator,
   Alert,
   Image,
+  KeyboardAvoidingView,
   Modal,
+  Platform,
   Pressable,
   RefreshControl,
   ScrollView,
@@ -18,10 +20,13 @@ import { LinearGradient } from 'expo-linear-gradient';
 import * as ImagePicker from 'expo-image-picker';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 
-import { Button, Card } from '../components/ui';
+import { Button, Card, TextField } from '../components/ui';
+import { BIKE_LABELS, BIKE_TYPES, bikeLabel, LICENSE_LABELS, LICENSE_TYPES, licenseLabel } from '../lib/rider';
+import { getEmergencyContact, setEmergencyContact } from '../lib/emergency';
 import { PostDetail, DetailPost } from '../components/PostDetail';
 import { AvatarViewer } from '../components/AvatarViewer';
-import { useAuth } from '../store/auth';
+import { RiderChips } from '../components/RiderChips';
+import { useAuth, User } from '../store/auth';
 import { ProfileStackParams } from '../navigation/RootNavigator';
 import { api, apiBaseURL, errorMessage } from '../api/client';
 import { colors, gradients, radius, shadow, spacing } from '../theme';
@@ -44,11 +49,19 @@ export default function ProfileScreen() {
   const [saving, setSaving] = useState(false);
   const [stats, setStats] = useState({ bio: '', postCount: 0, followerCount: 0, followingCount: 0 });
   const [zoomUri, setZoomUri] = useState<string | null>(null);
+  const [editRider, setEditRider] = useState(false);
+  const [riderLicense, setRiderLicense] = useState('');
+  const [riderBike, setRiderBike] = useState('');
+  const [savingRider, setSavingRider] = useState(false);
+  const [emergencyPhone, setEmergencyPhone] = useState('');
+  const [editEmergency, setEditEmergency] = useState(false);
+  const [emergencyInput, setEmergencyInput] = useState('');
 
   const thumb = (width - spacing.md * 2 - spacing.xs * 2) / 3;
   const showcased = rewards.filter((r) => r.showcased);
 
   const load = useCallback(async () => {
+    getEmergencyContact().then(setEmergencyPhone).catch(() => {});
     try {
       const reqs: Promise<any>[] = [
         api.get('/api/rewards'),
@@ -68,11 +81,14 @@ export default function ProfileScreen() {
           followingCount: u.data.following_count ?? 0,
         });
         // Keep the cached user fresh (e.g. sessions from before these fields
-        // shipped, or edits made on another device).
-        const patch: { username?: string; bio?: string } = {};
-        if (u.data.username && u.data.username !== user?.username) patch.username = u.data.username;
-        if ((u.data.bio ?? '') !== (user?.bio ?? '')) patch.bio = u.data.bio ?? '';
-        if (Object.keys(patch).length > 0) updateUser(patch);
+        // shipped, or edits made on another device). Store undefined (not '')
+        // for absent fields so the cache matches the User type and server truth.
+        const fresh: Partial<User> = {};
+        if (u.data.username && u.data.username !== user?.username) fresh.username = u.data.username;
+        if ((u.data.bio ?? '') !== (user?.bio ?? '')) fresh.bio = u.data.bio || undefined;
+        if ((u.data.license_type ?? '') !== (user?.license_type ?? '')) fresh.license_type = u.data.license_type || undefined;
+        if ((u.data.bike_type ?? '') !== (user?.bike_type ?? '')) fresh.bike_type = u.data.bike_type || undefined;
+        if (Object.keys(fresh).length > 0) updateUser(fresh);
       }
     } catch {
       // Silently ignore; screen still renders profile info.
@@ -139,6 +155,37 @@ export default function ProfileScreen() {
     }
   }
 
+  function openRiderEdit() {
+    setRiderLicense(user?.license_type ?? '');
+    setRiderBike(user?.bike_type ?? '');
+    setEditRider(true);
+  }
+
+  async function saveRider() {
+    if (!user) return;
+    try {
+      setSavingRider(true);
+      await api.put(`/api/users/${user.id}`, { license_type: riderLicense, bike_type: riderBike });
+      await updateUser({ license_type: riderLicense, bike_type: riderBike });
+      setEditRider(false);
+    } catch (err) {
+      Alert.alert('Kaydedilemedi', errorMessage(err));
+    } finally {
+      setSavingRider(false);
+    }
+  }
+
+  function openEmergencyEdit() {
+    setEmergencyInput(emergencyPhone);
+    setEditEmergency(true);
+  }
+
+  async function saveEmergency() {
+    await setEmergencyContact(emergencyInput);
+    setEmergencyPhone(emergencyInput.trim());
+    setEditEmergency(false);
+  }
+
   function openManage() {
     setSelected(showcased.map((r) => r.type));
     setManage(true);
@@ -193,6 +240,17 @@ export default function ProfileScreen() {
           <Text style={styles.email}>{user?.email}</Text>
           {stats.bio ? <Text style={styles.bio}>{stats.bio}</Text> : null}
 
+          <Pressable style={styles.riderRow} onPress={openRiderEdit} hitSlop={8}>
+            {licenseLabel(user?.license_type) || bikeLabel(user?.bike_type) ? (
+              <>
+                <RiderChips licenseType={user?.license_type} bikeType={user?.bike_type} style={styles.riderChipsInline} />
+                <MaterialCommunityIcons name="pencil" size={13} color={colors.textMuted} />
+              </>
+            ) : (
+              <Text style={styles.riderHint}>Ehliyet ve motor türünü ekle →</Text>
+            )}
+          </Pressable>
+
           <View style={styles.statsRow}>
             <View style={styles.statItem}>
               <Text style={styles.statNum}>{stats.postCount}</Text>
@@ -228,6 +286,7 @@ export default function ProfileScreen() {
         <View style={styles.quickRow}>
           <QuickTile icon="history" label="Sürüşlerim" onPress={() => navigation.navigate('Rides')} />
           <QuickTile icon="map-marker-path" label="Rotalarım" onPress={() => navigation.navigate('RoutesList')} />
+          <QuickTile icon="garage-variant" label="Garaj" onPress={() => navigation.navigate('Garage')} />
           <QuickTile icon="account-multiple" label="Takip" onPress={() => navigation.navigate('Follows')} />
         </View>
 
@@ -293,6 +352,20 @@ export default function ProfileScreen() {
           )}
         </Card>
 
+        <SectionTitle icon="shield-alert-outline" title="Güvenlik" />
+        <Pressable onPress={openEmergencyEdit}>
+          <Card style={styles.emRow}>
+            <MaterialCommunityIcons name="phone-alert" size={22} color={colors.primary} />
+            <View style={styles.flex}>
+              <Text style={styles.emTitle}>Acil Durum Kişisi</Text>
+              <Text style={styles.muted}>
+                {emergencyPhone || 'Kayıtlı değil — kaza algılandığında SMS taslağı için ekle'}
+              </Text>
+            </View>
+            <MaterialCommunityIcons name="chevron-right" size={22} color={colors.textMuted} />
+          </Card>
+        </Pressable>
+
         <View style={{ height: spacing.lg }} />
         <Button title="Çıkış Yap" variant="ghost" icon="logout" onPress={signOut} />
       </ScrollView>
@@ -300,6 +373,69 @@ export default function ProfileScreen() {
       <PostDetail post={viewer} onClose={() => setViewer(null)} />
 
       <AvatarViewer uri={zoomUri} onClose={() => setZoomUri(null)} />
+
+      {/* Edit emergency contact (device-only; never sent to the backend) */}
+      <Modal visible={editEmergency} animationType="slide" transparent statusBarTranslucent onRequestClose={() => setEditEmergency(false)}>
+        <KeyboardAvoidingView style={styles.flex} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+          <Pressable style={styles.backdrop} onPress={() => setEditEmergency(false)}>
+            <Pressable style={styles.usernameSheet} onPress={() => {}}>
+              <Text style={styles.sheetTitle}>Acil Durum Kişisi</Text>
+              <Text style={styles.muted}>
+                Kaza algılandığında bu numaraya konumunu içeren SMS taslağı hazırlanır. Numara yalnız bu cihazda saklanır.
+              </Text>
+              <TextField
+                icon="phone"
+                placeholder="+90 5xx xxx xx xx"
+                value={emergencyInput}
+                onChangeText={setEmergencyInput}
+                keyboardType="phone-pad"
+                autoFocus
+              />
+              <View style={{ height: spacing.sm }} />
+              <Button title="Kaydet" icon="content-save" onPress={saveEmergency} />
+            </Pressable>
+          </Pressable>
+        </KeyboardAvoidingView>
+      </Modal>
+
+      {/* Edit rider profile (license + bike type) */}
+      <Modal visible={editRider} animationType="slide" transparent statusBarTranslucent onRequestClose={() => setEditRider(false)}>
+        <Pressable style={styles.backdrop} onPress={() => setEditRider(false)}>
+          <Pressable style={styles.usernameSheet} onPress={() => {}}>
+            <Text style={styles.sheetTitle}>Sürücü Profili</Text>
+            <Text style={styles.muted}>Sana uygun rota ve etkinlik önerileri için kullanılır.</Text>
+
+            <Text style={styles.pickLabel}>Ehliyet</Text>
+            <View style={styles.pillRow}>
+              {LICENSE_TYPES.map((t) => (
+                <Pressable
+                  key={t}
+                  style={[styles.pill, riderLicense === t && styles.pillOn]}
+                  onPress={() => setRiderLicense((cur) => (cur === t ? '' : t))}
+                >
+                  <Text style={[styles.pillText, riderLicense === t && styles.pillTextOn]}>{LICENSE_LABELS[t]}</Text>
+                </Pressable>
+              ))}
+            </View>
+
+            <Text style={styles.pickLabel}>Motor Türü</Text>
+            <View style={styles.pillRow}>
+              {BIKE_TYPES.map((t) => (
+                <Pressable
+                  key={t}
+                  style={[styles.pill, riderBike === t && styles.pillOn]}
+                  onPress={() => setRiderBike((cur) => (cur === t ? '' : t))}
+                >
+                  <Text style={[styles.pillText, riderBike === t && styles.pillTextOn]}>{BIKE_LABELS[t]}</Text>
+                </Pressable>
+              ))}
+            </View>
+
+            <View style={{ height: spacing.sm }} />
+            <Button title="Kaydet" icon="content-save" onPress={saveRider} loading={savingRider} />
+          </Pressable>
+        </Pressable>
+      </Modal>
 
       {/* Manage showcased badges */}
       <Modal visible={manage} animationType="slide" onRequestClose={() => setManage(false)}>
@@ -397,6 +533,36 @@ const styles = StyleSheet.create({
   username: { color: colors.primary, fontWeight: '700', marginTop: 2 },
   email: { color: colors.textMuted, marginTop: 2 },
   bio: { color: colors.text, textAlign: 'center', marginTop: spacing.sm, paddingHorizontal: spacing.lg, lineHeight: 19 },
+  riderRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.xs, marginTop: spacing.sm, flexWrap: 'wrap', justifyContent: 'center' },
+  // The shared RiderChips row carries its own top margin; cancel it here since
+  // the surrounding Pressable already provides the spacing.
+  riderChipsInline: { marginTop: 0 },
+  riderHint: { color: colors.primary, fontWeight: '700', fontSize: 13 },
+  pickLabel: { color: colors.text, fontWeight: '800', fontSize: 13, marginTop: spacing.md },
+  pillRow: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.xs, marginTop: spacing.xs },
+  pill: {
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: colors.border,
+    backgroundColor: colors.surfaceAlt,
+  },
+  pillOn: { borderColor: colors.primary, backgroundColor: 'rgba(255,90,31,0.15)' },
+  pillText: { color: colors.textMuted, fontWeight: '700', fontSize: 13 },
+  pillTextOn: { color: colors.primary },
+  flex: { flex: 1 },
+  emRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.md },
+  emTitle: { color: colors.text, fontWeight: '800' },
+  backdrop: { flex: 1, backgroundColor: 'rgba(0,0,0,0.55)', justifyContent: 'flex-end' },
+  usernameSheet: {
+    backgroundColor: colors.surface,
+    borderTopLeftRadius: radius.lg,
+    borderTopRightRadius: radius.lg,
+    padding: spacing.lg,
+    paddingBottom: spacing.xl,
+    gap: spacing.xs,
+  },
   statsRow: {
     flexDirection: 'row',
     alignSelf: 'stretch',
