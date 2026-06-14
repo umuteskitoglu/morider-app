@@ -1,5 +1,14 @@
 import React, { useState } from 'react';
-import { Alert, Pressable, StyleSheet, Text, View } from 'react-native';
+import {
+  Alert,
+  LayoutAnimation,
+  Platform,
+  Pressable,
+  StyleSheet,
+  Text,
+  UIManager,
+  View,
+} from 'react-native';
 import MapView, { MapPressEvent, Marker, Polyline } from 'react-native-maps';
 import Slider from '@react-native-community/slider';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
@@ -13,6 +22,11 @@ import { colors, radius, spacing } from '../theme';
 type Coord = { latitude: number; longitude: number };
 type PlanInfo = { distance: number; duration: number; steps: number; curviness: number };
 type Props = NativeStackScreenProps<ProfileStackParams, 'RouteCreate'>;
+
+// Old Android needs an explicit opt-in for LayoutAnimation.
+if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental) {
+  UIManager.setLayoutAnimationEnabledExperimental(true);
+}
 
 // Human label for the backend's deg/km curviness score.
 function curvinessText(score: number): string {
@@ -30,6 +44,14 @@ export default function RouteCreateScreen({ navigation }: Props) {
   const [saving, setSaving] = useState(false);
   const [visibility, setVisibility] = useState<'private' | 'friends' | 'public'>('private');
   const [curviness, setCurviness] = useState(0.5);
+  // Detail form (name/curviness/visibility) collapses so the map stays visible
+  // while placing waypoints. It springs open automatically when saving.
+  const [expanded, setExpanded] = useState(false);
+
+  function toggleExpanded(next?: boolean) {
+    LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
+    setExpanded((prev) => next ?? !prev);
+  }
 
   // Any change to the waypoints invalidates a previously computed preview.
   function setWaypoints(next: Coord[]) {
@@ -78,6 +100,7 @@ export default function RouteCreateScreen({ navigation }: Props) {
 
   async function save() {
     if (!name.trim()) {
+      toggleExpanded(true);
       Alert.alert('İsim gerekli', 'Rotaya bir isim ver.');
       return;
     }
@@ -122,50 +145,71 @@ export default function RouteCreateScreen({ navigation }: Props) {
       </MapView>
 
       <Card style={styles.panel}>
-        <Text style={styles.hint}>Haritaya dokunarak yol noktaları ekle.</Text>
-        {plan && (
-          <Text style={styles.stats}>
-            ≈ {plan.distance.toFixed(2)} km • {plan.duration.toFixed(0)} dk • {plan.steps} dönüş •{' '}
-            {curvinessText(plan.curviness)}
-          </Text>
-        )}
-        <TextField label="Rota adı" value={name} onChangeText={setName} placeholder="Sahil turu" />
-        <View style={styles.curvyRow}>
-          <MaterialCommunityIcons name="arrow-expand-horizontal" size={16} color={colors.textMuted} />
-          <Slider
-            style={styles.slider}
-            minimumValue={0}
-            maximumValue={1}
-            value={curviness}
-            onSlidingComplete={setCurviness}
-            minimumTrackTintColor={colors.primary}
-            maximumTrackTintColor={colors.border}
-            thumbTintColor={colors.primary}
+        <Pressable style={styles.header} onPress={() => toggleExpanded()} hitSlop={8}>
+          <View style={styles.headerText}>
+            {plan ? (
+              <Text style={styles.stats} numberOfLines={1}>
+                ≈ {plan.distance.toFixed(2)} km • {plan.duration.toFixed(0)} dk • {plan.steps} dönüş •{' '}
+                {curvinessText(plan.curviness)}
+              </Text>
+            ) : (
+              <Text style={styles.hint} numberOfLines={1}>
+                Haritaya dokunarak yol noktaları ekle.
+              </Text>
+            )}
+            <Text style={styles.subHint} numberOfLines={1}>
+              {name.trim() ? name.trim() : 'Rota adı yok'} • {expanded ? 'Ayarları gizle' : 'Ayarlar'}
+            </Text>
+          </View>
+          <MaterialCommunityIcons
+            name={expanded ? 'chevron-down' : 'chevron-up'}
+            size={24}
+            color={colors.textMuted}
           />
-          <MaterialCommunityIcons name="sine-wave" size={16} color={colors.primary} />
-        </View>
-        <Text style={styles.curvyHint}>
-          Virajlılık tercihi (2 nokta arasında alternatif rotalardan seçer)
-        </Text>
-        <View style={styles.segment}>
-          {([
-            { v: 'private', icon: 'lock', label: 'Gizli' },
-            { v: 'friends', icon: 'account-group', label: 'Arkadaşlar' },
-            { v: 'public', icon: 'earth', label: 'Herkese' },
-          ] as const).map((opt) => {
-            const active = visibility === opt.v;
-            return (
-              <Pressable
-                key={opt.v}
-                style={[styles.segmentBtn, active && styles.segmentActive]}
-                onPress={() => setVisibility(opt.v)}
-              >
-                <MaterialCommunityIcons name={opt.icon} size={15} color={active ? colors.text : colors.textMuted} />
-                <Text style={[styles.segmentText, active && styles.segmentTextActive]}>{opt.label}</Text>
-              </Pressable>
-            );
-          })}
-        </View>
+        </Pressable>
+
+        {expanded && (
+          <View style={styles.form}>
+            <TextField label="Rota adı" value={name} onChangeText={setName} placeholder="Sahil turu" />
+            <View style={styles.curvyRow}>
+              <MaterialCommunityIcons name="arrow-expand-horizontal" size={16} color={colors.textMuted} />
+              <Slider
+                style={styles.slider}
+                minimumValue={0}
+                maximumValue={1}
+                value={curviness}
+                onSlidingComplete={setCurviness}
+                minimumTrackTintColor={colors.primary}
+                maximumTrackTintColor={colors.border}
+                thumbTintColor={colors.primary}
+              />
+              <MaterialCommunityIcons name="sine-wave" size={16} color={colors.primary} />
+            </View>
+            <Text style={styles.curvyHint}>
+              Virajlılık tercihi (2 nokta arasında alternatif rotalardan seçer)
+            </Text>
+            <View style={styles.segment}>
+              {([
+                { v: 'private', icon: 'lock', label: 'Gizli' },
+                { v: 'friends', icon: 'account-group', label: 'Arkadaşlar' },
+                { v: 'public', icon: 'earth', label: 'Herkese' },
+              ] as const).map((opt) => {
+                const active = visibility === opt.v;
+                return (
+                  <Pressable
+                    key={opt.v}
+                    style={[styles.segmentBtn, active && styles.segmentActive]}
+                    onPress={() => setVisibility(opt.v)}
+                  >
+                    <MaterialCommunityIcons name={opt.icon} size={15} color={active ? colors.text : colors.textMuted} />
+                    <Text style={[styles.segmentText, active && styles.segmentTextActive]}>{opt.label}</Text>
+                  </Pressable>
+                );
+              })}
+            </View>
+          </View>
+        )}
+
         <View style={styles.row}>
           <View style={styles.flex}>
             <Button title="Geri al" variant="ghost" icon="undo-variant" onPress={undo} />
@@ -185,11 +229,15 @@ export default function RouteCreateScreen({ navigation }: Props) {
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: colors.bg },
   panel: { position: 'absolute', left: spacing.md, right: spacing.md, bottom: spacing.lg },
-  hint: { color: colors.textMuted, marginBottom: spacing.sm },
+  header: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, marginBottom: spacing.sm },
+  headerText: { flex: 1 },
+  subHint: { color: colors.textMuted, fontSize: 12, marginTop: 2 },
+  form: { marginBottom: spacing.xs },
+  hint: { color: colors.text, fontWeight: '600' },
   curvyRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.xs, marginTop: spacing.sm },
   slider: { flex: 1, height: 32 },
   curvyHint: { color: colors.textMuted, fontSize: 11, marginBottom: spacing.sm },
-  stats: { color: colors.primary, fontWeight: '700', marginBottom: spacing.sm },
+  stats: { color: colors.primary, fontWeight: '700' },
   row: { flexDirection: 'row' },
   flex: { flex: 1 },
   segment: {

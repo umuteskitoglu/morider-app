@@ -32,7 +32,16 @@ import { api, apiBaseURL, errorMessage } from '../api/client';
 import { colors, gradients, radius, shadow, spacing } from '../theme';
 
 type Reward = { id: number; type: string; description: string; showcased: boolean };
-type LeaderEntry = { user_id: number; name: string; total_distance: number; ride_count: number };
+type LeaderEntry = {
+  user_id: number;
+  name: string;
+  avatar_url?: string;
+  total_distance: number;
+  ride_count: number;
+  avg_speed?: number;
+};
+type RecapStat = { week_start: string; distance: number; duration_seconds: number; avg_speed: number; ride_count: number };
+type Recap = { week: RecapStat; prev_week: RecapStat };
 
 export default function ProfileScreen() {
   const { user, signOut, updateUser } = useAuth();
@@ -41,16 +50,16 @@ export default function ProfileScreen() {
   const [uploadingAvatar, setUploadingAvatar] = useState(false);
   const [rewards, setRewards] = useState<Reward[]>([]);
   const [leaders, setLeaders] = useState<LeaderEntry[]>([]);
+  const [following, setFollowing] = useState<LeaderEntry[]>([]);
+  const [lbScope, setLbScope] = useState<'following' | 'global'>('following');
+  const [recap, setRecap] = useState<Recap | null>(null);
   const [posts, setPosts] = useState<DetailPost[]>([]);
   const [viewer, setViewer] = useState<DetailPost | null>(null);
   const [refreshing, setRefreshing] = useState(false);
   const [manage, setManage] = useState(false);
   const [selected, setSelected] = useState<string[]>([]);
   const [saving, setSaving] = useState(false);
-  const [editUsername, setEditUsername] = useState(false);
-  const [usernameInput, setUsernameInput] = useState('');
-  const [usernameErr, setUsernameErr] = useState<string | null>(null);
-  const [savingUsername, setSavingUsername] = useState(false);
+  const [stats, setStats] = useState({ bio: '', postCount: 0, followerCount: 0, followingCount: 0 });
   const [zoomUri, setZoomUri] = useState<string | null>(null);
   const [editRider, setEditRider] = useState(false);
   const [riderLicense, setRiderLicense] = useState('');
@@ -66,25 +75,40 @@ export default function ProfileScreen() {
   const load = useCallback(async () => {
     getEmergencyContact().then(setEmergencyPhone).catch(() => {});
     try {
-      const reqs: Promise<any>[] = [
+      // allSettled (not all): one failing endpoint must never blank the rest of
+      // the profile. A missing optional section (e.g. recap) just renders empty.
+      const [r, l, p, fl, rc, u] = await Promise.allSettled([
         api.get('/api/rewards'),
         api.get('/api/leaderboard/top'),
         api.get('/api/posts/mine'),
-      ];
-      if (user) reqs.push(api.get(`/api/users/${user.id}`));
-      const [r, l, p, u] = await Promise.all(reqs);
-      setRewards(r.data.rewards ?? []);
-      setLeaders(l.data.leaderboard ?? []);
-      setPosts(p.data.posts ?? []);
-      // Keep the cached user fresh (e.g. sessions from before these fields
-      // shipped, or edits made on another device).
-      if (u?.data) {
-        // Store undefined (not '') for absent fields so the cache matches the
-        // User type and server truth — '' would falsely look like a real value.
+        api.get('/api/leaderboard/following'),
+        api.get('/api/rides/recap'),
+        user ? api.get(`/api/users/${user.id}`) : Promise.resolve(null),
+      ]);
+      const val = (s: PromiseSettledResult<any>) => (s.status === 'fulfilled' ? s.value : null);
+      const rv = val(r), lv = val(l), pv = val(p), flv = val(fl), rcv = val(rc), uv = val(u);
+      if (rv) setRewards(rv.data.rewards ?? []);
+      if (lv) setLeaders(lv.data.leaderboard ?? []);
+      if (pv) setPosts(pv.data.posts ?? []);
+      if (flv) setFollowing(flv.data.leaderboard ?? []);
+      if (rcv) setRecap(rcv.data ?? null);
+      if (uv?.data) {
+        const u = uv;
+        setStats({
+          bio: u.data.bio ?? '',
+          postCount: u.data.post_count ?? 0,
+          followerCount: u.data.follower_count ?? 0,
+          followingCount: u.data.following_count ?? 0,
+        });
+        // Keep the cached user fresh (e.g. sessions from before these fields
+        // shipped, or edits made on another device). Store undefined (not '')
+        // for absent fields so the cache matches the User type and server truth.
         const fresh: Partial<User> = {};
         if (u.data.username && u.data.username !== user?.username) fresh.username = u.data.username;
+        if ((u.data.bio ?? '') !== (user?.bio ?? '')) fresh.bio = u.data.bio || undefined;
         if ((u.data.license_type ?? '') !== (user?.license_type ?? '')) fresh.license_type = u.data.license_type || undefined;
         if ((u.data.bike_type ?? '') !== (user?.bike_type ?? '')) fresh.bike_type = u.data.bike_type || undefined;
+        if (typeof u.data.show_garage === 'boolean' && u.data.show_garage !== user?.show_garage) fresh.show_garage = u.data.show_garage;
         if (Object.keys(fresh).length > 0) updateUser(fresh);
       }
     } catch {
@@ -149,37 +173,6 @@ export default function ProfileScreen() {
       Alert.alert('Yüklenemedi', errorMessage(err));
     } finally {
       setUploadingAvatar(false);
-    }
-  }
-
-  function openUsernameEdit() {
-    setUsernameInput(user?.username ?? '');
-    setUsernameErr(null);
-    setEditUsername(true);
-  }
-
-  async function saveUsername() {
-    if (!user) return;
-    const next = usernameInput.trim();
-    if (!/^[a-zA-Z0-9_]{3,20}$/.test(next)) {
-      setUsernameErr('3-20 karakter olmalı: harf, rakam veya _');
-      return;
-    }
-    if (next === user.username) {
-      setEditUsername(false);
-      return;
-    }
-    try {
-      setSavingUsername(true);
-      setUsernameErr(null);
-      await api.put(`/api/users/${user.id}`, { username: next });
-      await updateUser({ username: next });
-      setEditUsername(false);
-    } catch (err) {
-      const status = (err as any)?.response?.status;
-      setUsernameErr(status === 409 ? 'Bu kullanıcı adı alınmış' : errorMessage(err));
-    } finally {
-      setSavingUsername(false);
     }
   }
 
@@ -264,11 +257,10 @@ export default function ProfileScreen() {
             </Pressable>
           </Pressable>
           <Text style={styles.name}>{user?.name}</Text>
-          <Pressable style={styles.usernameRow} onPress={openUsernameEdit} hitSlop={8}>
-            <Text style={styles.username}>@{user?.username || 'kullanıcı_adı'}</Text>
-            <MaterialCommunityIcons name="pencil" size={14} color={colors.textMuted} />
-          </Pressable>
+          <Text style={styles.username}>@{user?.username || 'kullanıcı_adı'}</Text>
           <Text style={styles.email}>{user?.email}</Text>
+          {stats.bio ? <Text style={styles.bio}>{stats.bio}</Text> : null}
+
           <Pressable style={styles.riderRow} onPress={openRiderEdit} hitSlop={8}>
             {licenseLabel(user?.license_type) || bikeLabel(user?.bike_type) ? (
               <>
@@ -279,6 +271,27 @@ export default function ProfileScreen() {
               <Text style={styles.riderHint}>Ehliyet ve motor türünü ekle →</Text>
             )}
           </Pressable>
+
+          <View style={styles.statsRow}>
+            <View style={styles.statItem}>
+              <Text style={styles.statNum}>{stats.postCount}</Text>
+              <Text style={styles.statLabel}>Gönderi</Text>
+            </View>
+            <Pressable style={styles.statItem} onPress={() => navigation.navigate('Follows')} hitSlop={8}>
+              <Text style={styles.statNum}>{stats.followerCount}</Text>
+              <Text style={styles.statLabel}>Takipçi</Text>
+            </Pressable>
+            <Pressable style={styles.statItem} onPress={() => navigation.navigate('Follows')} hitSlop={8}>
+              <Text style={styles.statNum}>{stats.followingCount}</Text>
+              <Text style={styles.statLabel}>Takip</Text>
+            </Pressable>
+          </View>
+
+          <Pressable style={styles.editBtn} onPress={() => navigation.navigate('EditProfile')} hitSlop={8}>
+            <MaterialCommunityIcons name="account-edit" size={16} color={colors.primary} />
+            <Text style={styles.editBtnText}>Profili Düzenle</Text>
+          </Pressable>
+
           {showcased.length > 0 && (
             <View style={styles.badges}>
               {showcased.map((r) => (
@@ -295,8 +308,16 @@ export default function ProfileScreen() {
           <QuickTile icon="history" label="Sürüşlerim" onPress={() => navigation.navigate('Rides')} />
           <QuickTile icon="map-marker-path" label="Rotalarım" onPress={() => navigation.navigate('RoutesList')} />
           <QuickTile icon="garage-variant" label="Garaj" onPress={() => navigation.navigate('Garage')} />
-          <QuickTile icon="account-multiple" label="Takip" onPress={() => navigation.navigate('Follows')} />
         </View>
+
+        <SectionTitle icon="chart-box" title="Haftalık Özet" />
+        <Card>
+          {recap && (recap.week.ride_count > 0 || recap.prev_week.ride_count > 0) ? (
+            <RecapBody recap={recap} />
+          ) : (
+            <Text style={styles.muted}>Bu hafta henüz sürüş kaydın yok. Hadi bir tura çık! 🏍️</Text>
+          )}
+        </Card>
 
         <SectionTitle icon="image-multiple" title="Paylaşımlarım" />
         {posts.length === 0 ? (
@@ -344,20 +365,20 @@ export default function ProfileScreen() {
         </Card>
 
         <SectionTitle icon="podium" title="Liderlik Tablosu" />
+        <View style={styles.segment}>
+          <SegBtn label="Takip Ettiklerim" active={lbScope === 'following'} onPress={() => setLbScope('following')} />
+          <SegBtn label="Global" active={lbScope === 'global'} onPress={() => setLbScope('global')} />
+        </View>
         <Card>
-          {leaders.length === 0 ? (
-            <Text style={styles.muted}>Veri yok.</Text>
-          ) : (
-            leaders.map((l, i) => (
-              <View key={l.user_id} style={[styles.leaderRow, i < leaders.length - 1 && styles.leaderDivider]}>
-                <View style={[styles.rankBadge, { backgroundColor: MEDALS[i] ?? colors.surfaceAlt }]}>
-                  <Text style={[styles.rankText, i > 2 && { color: colors.textMuted }]}>{i + 1}</Text>
-                </View>
-                <Text style={styles.leaderName} numberOfLines={1}>{l.name}</Text>
-                <Text style={styles.leaderDist}>{l.total_distance.toFixed(1)} km</Text>
-              </View>
-            ))
-          )}
+          {(() => {
+            const list = lbScope === 'following' ? following : leaders;
+            if (list.length === 0) {
+              return <Text style={styles.muted}>Veri yok.</Text>;
+            }
+            return list.map((l, i) => (
+              <LeaderRow key={l.user_id} entry={l} rank={i} isLast={i === list.length - 1} isMe={l.user_id === user?.id} />
+            ));
+          })()}
         </Card>
 
         <SectionTitle icon="shield-alert-outline" title="Güvenlik" />
@@ -381,31 +402,6 @@ export default function ProfileScreen() {
       <PostDetail post={viewer} onClose={() => setViewer(null)} />
 
       <AvatarViewer uri={zoomUri} onClose={() => setZoomUri(null)} />
-
-      {/* Edit @username */}
-      <Modal visible={editUsername} animationType="slide" transparent statusBarTranslucent onRequestClose={() => setEditUsername(false)}>
-        <KeyboardAvoidingView style={styles.flex} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
-          <Pressable style={styles.backdrop} onPress={() => setEditUsername(false)}>
-            <Pressable style={styles.usernameSheet} onPress={() => {}}>
-              <Text style={styles.sheetTitle}>Kullanıcı Adı</Text>
-              <Text style={styles.muted}>Benzersiz olmalı. Başkaları seni bununla bulabilir.</Text>
-              <TextField
-                icon="at"
-                placeholder="kullanici_adi"
-                value={usernameInput}
-                onChangeText={(t) => setUsernameInput(t)}
-                autoCapitalize="none"
-                autoCorrect={false}
-                autoFocus
-                maxLength={20}
-              />
-              {usernameErr ? <Text style={styles.errText}>{usernameErr}</Text> : null}
-              <View style={{ height: spacing.sm }} />
-              <Button title="Kaydet" icon="content-save" onPress={saveUsername} loading={savingUsername} />
-            </Pressable>
-          </Pressable>
-        </KeyboardAvoidingView>
-      </Modal>
 
       {/* Edit emergency contact (device-only; never sent to the backend) */}
       <Modal visible={editEmergency} animationType="slide" transparent statusBarTranslucent onRequestClose={() => setEditEmergency(false)}>
@@ -523,6 +519,76 @@ function QuickTile({ icon, label, onPress }: { icon: any; label: string; onPress
   );
 }
 
+// fmtDuration renders a second count as a compact Turkish "Xs Ydk" string.
+function fmtDuration(seconds: number): string {
+  const h = Math.floor(seconds / 3600);
+  const m = Math.round((seconds % 3600) / 60);
+  if (h > 0) return `${h}s ${m}dk`;
+  return `${m}dk`;
+}
+
+// RecapBody shows this week's four headline metrics plus a glance at last week.
+function RecapBody({ recap }: { recap: Recap }) {
+  const w = recap.week;
+  const p = recap.prev_week;
+  const tiles: { icon: any; label: string; value: string }[] = [
+    { icon: 'map-marker-distance', label: 'Mesafe', value: `${w.distance.toFixed(1)} km` },
+    { icon: 'clock-outline', label: 'Süre', value: fmtDuration(w.duration_seconds) },
+    { icon: 'speedometer', label: 'Ort. Hız', value: `${w.avg_speed.toFixed(0)} km/s` },
+    { icon: 'motorbike', label: 'Sürüş', value: String(w.ride_count) },
+  ];
+  return (
+    <>
+      <View style={styles.recapGrid}>
+        {tiles.map((t) => (
+          <View key={t.label} style={styles.recapTile}>
+            <MaterialCommunityIcons name={t.icon} size={20} color={colors.primary} />
+            <Text style={styles.recapValue}>{t.value}</Text>
+            <Text style={styles.recapLabel}>{t.label}</Text>
+          </View>
+        ))}
+      </View>
+      <Text style={styles.recapCompare}>
+        Geçen hafta: {p.distance.toFixed(1)} km • {p.ride_count} sürüş
+      </Text>
+    </>
+  );
+}
+
+// SegBtn is one option of the leaderboard scope segmented control.
+function SegBtn({ label, active, onPress }: { label: string; active: boolean; onPress: () => void }) {
+  return (
+    <Pressable style={[styles.segBtn, active && styles.segBtnOn]} onPress={onPress} hitSlop={4}>
+      <Text style={[styles.segText, active && styles.segTextOn]}>{label}</Text>
+    </Pressable>
+  );
+}
+
+// LeaderRow renders a single ranked rider; the caller's own row is highlighted.
+function LeaderRow({ entry, rank, isLast, isMe }: { entry: LeaderEntry; rank: number; isLast: boolean; isMe: boolean }) {
+  return (
+    <View style={[styles.leaderRow, !isLast && styles.leaderDivider, isMe && styles.leaderMe]}>
+      <View style={[styles.rankBadge, { backgroundColor: MEDALS[rank] ?? colors.surfaceAlt }]}>
+        <Text style={[styles.rankText, rank > 2 && { color: colors.textMuted }]}>{rank + 1}</Text>
+      </View>
+      {entry.avatar_url ? (
+        <Image source={{ uri: apiBaseURL() + entry.avatar_url }} style={styles.leaderAvatar} />
+      ) : (
+        <LinearGradient colors={gradients.primary} style={styles.leaderAvatar}>
+          <Text style={styles.leaderAvatarText}>{entry.name?.charAt(0).toUpperCase() ?? '?'}</Text>
+        </LinearGradient>
+      )}
+      <View style={styles.flex}>
+        <Text style={[styles.leaderName, isMe && styles.leaderNameMe]} numberOfLines={1}>
+          {entry.name}{isMe ? ' (Sen)' : ''}
+        </Text>
+        <Text style={styles.leaderSub}>{entry.ride_count} sürüş</Text>
+      </View>
+      <Text style={styles.leaderDist}>{entry.total_distance.toFixed(1)} km</Text>
+    </View>
+  );
+}
+
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: colors.bg },
   content: { padding: spacing.md, gap: spacing.sm, paddingBottom: spacing.xl },
@@ -563,9 +629,9 @@ const styles = StyleSheet.create({
   },
   quickTilePressed: { opacity: 0.7, transform: [{ scale: 0.98 }] },
   quickLabel: { color: colors.text, fontWeight: '700', fontSize: 13 },
-  usernameRow: { flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 2 },
-  username: { color: colors.primary, fontWeight: '700' },
+  username: { color: colors.primary, fontWeight: '700', marginTop: 2 },
   email: { color: colors.textMuted, marginTop: 2 },
+  bio: { color: colors.text, textAlign: 'center', marginTop: spacing.sm, paddingHorizontal: spacing.lg, lineHeight: 19 },
   riderRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.xs, marginTop: spacing.sm, flexWrap: 'wrap', justifyContent: 'center' },
   // The shared RiderChips row carries its own top margin; cancel it here since
   // the surrounding Pressable already provides the spacing.
@@ -596,7 +662,29 @@ const styles = StyleSheet.create({
     paddingBottom: spacing.xl,
     gap: spacing.xs,
   },
-  errText: { color: colors.danger, fontWeight: '600', fontSize: 13 },
+  statsRow: {
+    flexDirection: 'row',
+    alignSelf: 'stretch',
+    justifyContent: 'space-around',
+    marginTop: spacing.md,
+    paddingHorizontal: spacing.lg,
+  },
+  statItem: { alignItems: 'center', gap: 2, flex: 1 },
+  statNum: { color: colors.text, fontWeight: '900', fontSize: 18 },
+  statLabel: { color: colors.textMuted, fontSize: 12, fontWeight: '600' },
+  editBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.xs,
+    marginTop: spacing.md,
+    paddingVertical: spacing.sm,
+    paddingHorizontal: spacing.lg,
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: colors.border,
+    backgroundColor: colors.surface,
+  },
+  editBtnText: { color: colors.primary, fontWeight: '800', fontSize: 13 },
   badges: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.xs, justifyContent: 'center', marginTop: spacing.md, paddingHorizontal: spacing.md },
   sectionRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.xs, marginTop: spacing.md, marginBottom: spacing.xs },
   sectionRowBetween: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
@@ -623,10 +711,27 @@ const styles = StyleSheet.create({
   multi: { position: 'absolute', top: 4, right: 4 },
   leaderRow: { flexDirection: 'row', alignItems: 'center', paddingVertical: spacing.sm },
   leaderDivider: { borderBottomWidth: 1, borderBottomColor: colors.border },
-  rankBadge: { width: 26, height: 26, borderRadius: 13, alignItems: 'center', justifyContent: 'center', marginRight: spacing.md },
+  leaderMe: { backgroundColor: 'rgba(255,90,31,0.08)', borderRadius: radius.sm, marginHorizontal: -spacing.xs, paddingHorizontal: spacing.xs },
+  rankBadge: { width: 26, height: 26, borderRadius: 13, alignItems: 'center', justifyContent: 'center', marginRight: spacing.sm },
   rankText: { color: '#0A0E16', fontWeight: '900', fontSize: 13 },
-  leaderName: { color: colors.text, flex: 1, fontWeight: '600' },
-  leaderDist: { color: colors.primary, fontWeight: '800' },
+  leaderAvatar: { width: 32, height: 32, borderRadius: 16, alignItems: 'center', justifyContent: 'center', marginRight: spacing.sm },
+  leaderAvatarText: { color: '#fff', fontWeight: '900', fontSize: 14 },
+  leaderName: { color: colors.text, fontWeight: '600' },
+  leaderNameMe: { color: colors.primary, fontWeight: '800' },
+  leaderSub: { color: colors.textMuted, fontSize: 12 },
+  leaderDist: { color: colors.primary, fontWeight: '800', marginLeft: spacing.sm },
+  // Weekly recap card.
+  recapGrid: { flexDirection: 'row', flexWrap: 'wrap' },
+  recapTile: { width: '50%', alignItems: 'center', gap: 2, paddingVertical: spacing.sm },
+  recapValue: { color: colors.text, fontWeight: '900', fontSize: 18 },
+  recapLabel: { color: colors.textMuted, fontSize: 12, fontWeight: '600' },
+  recapCompare: { color: colors.textMuted, fontSize: 12, textAlign: 'center', marginTop: spacing.xs },
+  // Leaderboard scope toggle.
+  segment: { flexDirection: 'row', backgroundColor: colors.surfaceAlt, borderRadius: 999, padding: 3, borderWidth: 1, borderColor: colors.border },
+  segBtn: { flex: 1, paddingVertical: spacing.sm, alignItems: 'center', borderRadius: 999 },
+  segBtnOn: { backgroundColor: colors.primary },
+  segText: { color: colors.textMuted, fontWeight: '700', fontSize: 13 },
+  segTextOn: { color: '#fff' },
   sheetHeader: {
     flexDirection: 'row',
     alignItems: 'center',
