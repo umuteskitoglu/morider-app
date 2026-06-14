@@ -3,9 +3,10 @@ import { Alert, Pressable, ScrollView, Share, StyleSheet, Text, View } from 'rea
 import MapView, { Marker, Polyline, Region } from 'react-native-maps';
 import { useFocusEffect } from '@react-navigation/native';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
+import type { BottomTabNavigationProp } from '@react-navigation/bottom-tabs';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 
-import { EventsStackParams } from '../navigation/RootNavigator';
+import { AppTabParams, EventsStackParams } from '../navigation/RootNavigator';
 import { Card } from '../components/ui';
 import { useAuth } from '../store/auth';
 import { api, errorMessage } from '../api/client';
@@ -36,6 +37,8 @@ type EventData = {
   end_lon: number | null;
   end_name: string;
   participants: Participant[];
+  // Code of the live group ride, present only while the host's ride is active.
+  ride_session_code: string;
 };
 
 type Props = NativeStackScreenProps<EventsStackParams, 'EventDetail'>;
@@ -58,6 +61,7 @@ export default function EventDetailScreen({ navigation, route }: Props) {
   const [event, setEvent] = useState<EventData | null>(null);
   const [messages, setMessages] = useState<ChatMsg[]>([]);
   const [myRsvp, setMyRsvp] = useState<string | null>(null);
+  const [ridePending, setRidePending] = useState(false);
 
   const mapRef = useRef<MapView | null>(null);
 
@@ -146,6 +150,44 @@ export default function EventDetailScreen({ navigation, route }: Props) {
     }
   }
 
+  // The live group-ride map lives in the Ride tab, so we hop tabs via the parent.
+  function openRide(rideCode: string) {
+    navigation
+      .getParent<BottomTabNavigationProp<AppTabParams>>()
+      ?.navigate('Ride', { screen: 'GroupRide', params: { code: rideCode } });
+  }
+
+  // Single entry point used by both the CTA and tapping the map:
+  // host starts (or rejoins) the ride; "going" attendees join the host's; others
+  // get a nudge about what they need to do first.
+  async function handleRide() {
+    if (!event || ridePending) return;
+    const live = event.ride_session_code;
+    try {
+      setRidePending(true);
+      if (isHost) {
+        const { data } = await api.post(`/api/events/${code}/ride`);
+        openRide(data.code);
+        loadEvent();
+        return;
+      }
+      if (!live) {
+        Alert.alert('Sürüş başlamadı', 'Grup sürüşünü düzenleyen kişi başlatınca burada görünecek.');
+        return;
+      }
+      if (myRsvp !== 'going') {
+        Alert.alert('Önce katılım ver', "Sürüşe katılmak için katılım durumunu 'Geliyorum' olarak seç.");
+        return;
+      }
+      await api.post(`/api/sessions/${live}/join`);
+      openRide(live);
+    } catch (err) {
+      Alert.alert('Sürüşe bağlanılamadı', errorMessage(err));
+    } finally {
+      setRidePending(false);
+    }
+  }
+
   function confirmCancel() {
     Alert.alert('Etkinliği iptal et', 'Etkinlik tüm katılımcılar için iptal edilecek. Emin misin?', [
       { text: 'Vazgeç', style: 'cancel' },
@@ -189,6 +231,14 @@ export default function EventDetailScreen({ navigation, route }: Props) {
   };
 
   const cancelled = event.status === 'cancelled';
+  const liveRide = !!event.ride_session_code;
+  // Host can always start/rejoin; attendees only see the CTA once a ride is live.
+  const showRideCta = !cancelled && (isHost || liveRide);
+  const rideLabel = isHost
+    ? liveRide
+      ? 'Grup Sürüşüne Dön'
+      : 'Grup Sürüşünü Başlat'
+    : 'Sürüşe Katıl';
   // Last few messages, newest first for the preview.
   const preview = messages.slice(-PREVIEW_COUNT).reverse();
 
@@ -224,25 +274,44 @@ export default function EventDetailScreen({ navigation, route }: Props) {
         </Card>
 
         {(hasRoute || startCoord) && (
-          <View style={styles.mapWrap}>
-            <MapView ref={mapRef} style={styles.map} initialRegion={region} pointerEvents="none">
-              {hasRoute && (
-                <>
-                  <Polyline coordinates={routePath} strokeColor={colors.accent} strokeWidth={5} />
-                  <Marker coordinate={routePath[0]} pinColor={colors.success} />
-                  <Marker coordinate={routePath[routePath.length - 1]} pinColor={colors.danger} />
-                </>
-              )}
-              {!hasRoute && startCoord && <Marker coordinate={startCoord} title="Başlangıç" pinColor={colors.success} />}
-              {!hasRoute && endCoord && <Marker coordinate={endCoord} title="Bitiş" pinColor={colors.danger} />}
-            </MapView>
+          <Pressable style={styles.mapWrap} onPress={handleRide}>
+            <View style={styles.mapInner}>
+              <MapView ref={mapRef} style={styles.map} initialRegion={region} pointerEvents="none">
+                {hasRoute && (
+                  <>
+                    <Polyline coordinates={routePath} strokeColor={colors.accent} strokeWidth={5} />
+                    <Marker coordinate={routePath[0]} pinColor={colors.success} />
+                    <Marker coordinate={routePath[routePath.length - 1]} pinColor={colors.danger} />
+                  </>
+                )}
+                {!hasRoute && startCoord && <Marker coordinate={startCoord} title="Başlangıç" pinColor={colors.success} />}
+                {!hasRoute && endCoord && <Marker coordinate={endCoord} title="Bitiş" pinColor={colors.danger} />}
+              </MapView>
+              {liveRide ? (
+                <View style={styles.liveBadge}>
+                  <View style={styles.liveDot} />
+                  <Text style={styles.liveBadgeText}>CANLI SÜRÜŞ</Text>
+                </View>
+              ) : null}
+              <View style={styles.mapTapHint}>
+                <MaterialCommunityIcons name="map-marker-radius" size={14} color="#fff" />
+                <Text style={styles.mapTapHintText}>{liveRide ? 'Canlı haritayı aç' : 'Sürüş için dokun'}</Text>
+              </View>
+            </View>
             {!hasRoute && (event.start_name || event.end_name) ? (
               <View style={styles.locNames}>
                 {event.start_name ? <Text style={styles.locName}>🏁 {event.start_name}</Text> : null}
                 {event.end_name ? <Text style={styles.locName}>🎯 {event.end_name}</Text> : null}
               </View>
             ) : null}
-          </View>
+          </Pressable>
+        )}
+
+        {showRideCta && (
+          <Pressable style={[styles.rideCta, ridePending && styles.rideCtaDisabled]} onPress={handleRide} disabled={ridePending}>
+            <MaterialCommunityIcons name={liveRide ? 'motorbike' : 'flag-checkered'} size={20} color="#fff" />
+            <Text style={styles.rideCtaText}>{rideLabel}</Text>
+          </Pressable>
         )}
 
         {/* RSVP */}
@@ -381,7 +450,46 @@ const styles = StyleSheet.create({
   timeLabel: { color: colors.textMuted, fontSize: 10, fontWeight: '800', letterSpacing: 1 },
   timeValue: { color: colors.text, fontSize: 14, fontWeight: '700' },
   mapWrap: { borderRadius: radius.lg, overflow: 'hidden', borderWidth: 1, borderColor: colors.border },
+  mapInner: { position: 'relative' },
   map: { height: 180 },
+  liveBadge: {
+    position: 'absolute',
+    top: spacing.sm,
+    left: spacing.sm,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+    backgroundColor: colors.danger,
+    paddingHorizontal: 9,
+    paddingVertical: 4,
+    borderRadius: 999,
+  },
+  liveDot: { width: 7, height: 7, borderRadius: 4, backgroundColor: '#fff' },
+  liveBadgeText: { color: '#fff', fontSize: 10, fontWeight: '900', letterSpacing: 0.5 },
+  mapTapHint: {
+    position: 'absolute',
+    bottom: spacing.sm,
+    right: spacing.sm,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    backgroundColor: 'rgba(0,0,0,0.55)',
+    paddingHorizontal: 9,
+    paddingVertical: 5,
+    borderRadius: 999,
+  },
+  mapTapHintText: { color: '#fff', fontSize: 11, fontWeight: '700' },
+  rideCta: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: spacing.sm,
+    paddingVertical: spacing.md,
+    borderRadius: radius.md,
+    backgroundColor: colors.primary,
+  },
+  rideCtaDisabled: { opacity: 0.6 },
+  rideCtaText: { color: '#fff', fontWeight: '900', fontSize: 15 },
   locNames: { padding: spacing.sm, gap: 2, backgroundColor: colors.surface },
   locName: { color: colors.text, fontSize: 13 },
   rsvpCard: { gap: spacing.sm },

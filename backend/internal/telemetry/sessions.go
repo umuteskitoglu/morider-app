@@ -140,9 +140,23 @@ func (h *handler) joinSession(c *gin.Context) {
 			httpx.Internal(c, "could not verify follow")
 			return
 		}
+		// Attendees of the event this session was started from may join even
+		// without a mutual follow — RSVP "going" is the invite.
 		if !mutual {
-			httpx.Error(c, http.StatusForbidden, "you must follow each other with the host to join")
-			return
+			var invited bool
+			if err := h.d.DB.QueryRow(c,
+				`SELECT EXISTS(
+				    SELECT 1 FROM events e
+				    JOIN event_participants ep ON ep.event_id = e.id
+				    WHERE e.ride_session_id = $1 AND ep.user_id = $2 AND ep.rsvp = 'going')`,
+				sessionID, me).Scan(&invited); err != nil {
+				httpx.Internal(c, "could not verify invite")
+				return
+			}
+			if !invited {
+				httpx.Error(c, http.StatusForbidden, "you must follow each other with the host to join")
+				return
+			}
 		}
 	}
 
