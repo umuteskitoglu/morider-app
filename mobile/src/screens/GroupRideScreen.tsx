@@ -46,7 +46,7 @@ const INITIAL_REGION: Region = {
 };
 
 // Distinct marker colors assigned per participant (own dot is the native blue).
-const MARKER_COLORS = ['#FF5A1F', '#2FD27A', '#FFB020', '#4C8AFF', '#C264FF', '#FF5E8A'];
+const MARKER_COLORS = ['#E10600', '#2FD27A', '#FF2A2A', '#4C8AFF', '#C264FF', '#FF5E8A'];
 
 export default function GroupRideScreen({ route, navigation }: Props) {
   const { code } = route.params;
