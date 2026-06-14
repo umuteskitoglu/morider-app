@@ -14,7 +14,7 @@ Bu repo bir **monorepo**'dur:
 ## Özellikler
 
 - **Sürüş takibi** — GPS ile canlı kayıt, mesafe/hız/rota; sürüş geçmişi.
-- **Rotalar** — rota oluştur (yol-takipli snap), görünürlük seç (gizli / herkese açık / arkadaşlar), kaydedilen bir rotada sür (haritada rehber çizgi), **virajlılık tercihi** (düz ↔ virajlı sürgüsü, 2 nokta arasında alternatif rotalardan seçer), **yükseklik profili** (DEM'den tırmanış/iniş + rakım grafiği), **GPX ve KML içe/dışa aktarma**, **kaydırarak silme**.
+- **Rotalar** — rota oluştur (yol-takipli snap), görünürlük seç (gizli / herkese açık / arkadaşlar), kaydedilen bir rotada sür (haritada rehber çizgi), **virajlılık tercihi** (düz ↔ virajlı sürgüsü, 2 nokta arasında alternatif rotalardan seçer), **yükseklik profili** (DEM'den tırmanış/iniş + rakım grafiği), **GPX ve KML içe/dışa aktarma**, **kaydırarak silme**. İsteğe bağlı **motosiklete özel OSRM profili** (manzaralı yolları öne çıkarır, otoyolu caydırır — self-hosted; bkz. [`docs/routing.md`](docs/routing.md)).
 - **Keşfet & puanlama** — herkese açık rotaları keşfet, 5 yıldız üzerinden puanla.
 - **Mola noktaları (POI)** — haritaya uzun basarak motorcu dostu kafe / yakıt / tamirci / manzara / mola noktası ekle; rota detayında rotanın 1 km çevresindeki noktalar otomatik görünür (PostGIS `ST_DWithin`).
 - **Adım adım navigasyon** — rota takipli sürüşte Google Maps tarzı eğimli takip kamerası, üstte ok ikonlu Türkçe talimat banner'ı ("350 m • Sağa dön - Rıhtım Caddesi") ve **sesli yönlendirme** (250 m ve 50 m kala, kapatılabilir); grup sürüşünde rota varsa aynı banner. Rotadan 100 m+ sapınca **otomatik re-route** (rotaya ileriden katılan yeni plan).
