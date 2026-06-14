@@ -7,6 +7,16 @@ OSRM_REGION  ?= turkey
 OSRM_PBF_URL ?= https://download.geofabrik.de/europe/turkey-latest.osm.pbf
 OSRM_IMAGE   := ghcr.io/project-osrm/osrm-backend:v5.27.1
 
+# Routing profile used by osrm-extract. "car" uses the bundled /opt/car.lua;
+# "motorcycle" (or any other name) uses infra/osrm-profiles/<name>.lua, mounted
+# into the container at /profiles. Example: make osrm-data OSRM_PROFILE=motorcycle
+OSRM_PROFILE ?= car
+ifeq ($(OSRM_PROFILE),car)
+  OSRM_PROFILE_LUA := /opt/car.lua
+else
+  OSRM_PROFILE_LUA := /profiles/$(OSRM_PROFILE).lua
+endif
+
 .PHONY: help up down logs ps build restart migrate psql backend-tidy backend-test mobile-install mobile-start osrm-data osrm-up osrm-down
 
 help: ## Show this help
@@ -51,14 +61,15 @@ mobile-install: ## Install mobile dependencies
 mobile-start: ## Start the Expo dev server
 	cd mobile && npx expo start
 
-osrm-data: ## Download + preprocess OSRM routing data into infra/osrm (heavy, one-time)
+osrm-data: ## Download + preprocess OSRM routing data into infra/osrm (heavy, one-time). OSRM_PROFILE=car|motorcycle
 	@mkdir -p infra/osrm
 	@test -f infra/osrm/$(OSRM_REGION).osm.pbf || \
 		(echo "downloading $(OSRM_PBF_URL)"; curl -L -o infra/osrm/$(OSRM_REGION).osm.pbf "$(OSRM_PBF_URL)")
-	docker run --rm -v "$(PWD)/infra/osrm:/data" $(OSRM_IMAGE) osrm-extract -p /opt/car.lua /data/$(OSRM_REGION).osm.pbf
+	@echo "extracting with profile: $(OSRM_PROFILE) ($(OSRM_PROFILE_LUA))"
+	docker run --rm -v "$(PWD)/infra/osrm:/data" -v "$(PWD)/infra/osrm-profiles:/profiles:ro" $(OSRM_IMAGE) osrm-extract -p $(OSRM_PROFILE_LUA) /data/$(OSRM_REGION).osm.pbf
 	docker run --rm -v "$(PWD)/infra/osrm:/data" $(OSRM_IMAGE) osrm-partition /data/$(OSRM_REGION).osrm
 	docker run --rm -v "$(PWD)/infra/osrm:/data" $(OSRM_IMAGE) osrm-customize /data/$(OSRM_REGION).osrm
-	@echo "OSRM data ready. Start it with: make osrm-up OSRM_REGION=$(OSRM_REGION)"
+	@echo "OSRM data ready ($(OSRM_PROFILE) profili). Start it with: make osrm-up OSRM_REGION=$(OSRM_REGION)"
 
 osrm-up: ## Start the self-hosted OSRM service (run osrm-data first; set ROUTING_URL=http://osrm:5000)
 	OSRM_REGION=$(OSRM_REGION) $(COMPOSE) --profile routing up -d osrm
