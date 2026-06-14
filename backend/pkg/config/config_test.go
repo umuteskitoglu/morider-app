@@ -9,9 +9,10 @@ func TestValidate(t *testing.T) {
 		wantErr bool
 	}{
 		{"dev with default secret", Config{AppEnv: "development", JWTSecret: defaultJWTSecret}, false},
-		{"prod with strong secret", Config{AppEnv: "production", JWTSecret: "a-very-strong-secret"}, false},
+		{"prod with strong secret", Config{AppEnv: "production", JWTSecret: "a-very-strong-secret", LiveKitAPISecret: "a-very-strong-livekit-secret"}, false},
 		{"prod with default secret", Config{AppEnv: "production", JWTSecret: defaultJWTSecret}, true},
 		{"prod with empty secret", Config{AppEnv: "production", JWTSecret: ""}, true},
+		{"prod with default livekit secret", Config{AppEnv: "production", JWTSecret: "a-very-strong-secret", LiveKitAPISecret: defaultLiveKitSecret}, true},
 	}
 
 	for _, tc := range cases {

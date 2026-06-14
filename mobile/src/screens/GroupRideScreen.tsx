@@ -29,6 +29,7 @@ import {
   stopSpeaking,
 } from '../lib/navigation';
 import { useAuth } from '../store/auth';
+import { useGroupVoice } from '../lib/voice';
 import { api, apiBaseURL, errorMessage, TOKEN_KEY } from '../api/client';
 import { colors, radius, shadow, spacing } from '../theme';
 
@@ -88,6 +89,19 @@ export default function GroupRideScreen({ route, navigation }: Props) {
   const heartbeat = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const isHost = hostId != null && user?.id === hostId;
+
+  // Always-on group voice chat (LiveKit). Opt-in per rider; the mic stays live
+  // until they leave voice or the screen unmounts.
+  const voice = useGroupVoice(code);
+  const speakingSet = new Set(voice.speaking);
+
+  function toggleVoice() {
+    if (voice.status === 'off' || voice.status === 'error') {
+      voice.join().catch(() => {});
+    } else {
+      voice.leave().catch(() => {});
+    }
+  }
 
   useLayoutEffect(() => {
     navigation.setOptions({ title: `Grup · ${code}` });
@@ -615,7 +629,13 @@ export default function GroupRideScreen({ route, navigation }: Props) {
             description={`${m.speed.toFixed(0)} km/s`}
             pinColor={colorFor(m.userId)}
           >
-            <View style={[styles.marker, { backgroundColor: colorFor(m.userId) }]}>
+            <View
+              style={[
+                styles.marker,
+                { backgroundColor: colorFor(m.userId) },
+                speakingSet.has(m.userId) && styles.markerSpeaking,
+              ]}
+            >
               <Text style={styles.markerText}>{m.name?.charAt(0).toUpperCase() ?? '?'}</Text>
             </View>
           </Marker>
@@ -633,6 +653,49 @@ export default function GroupRideScreen({ route, navigation }: Props) {
           </View>
         </View>
       )}
+
+      {/* Always-on voice chat controls (float above the session panel). */}
+      <View style={styles.voiceControls}>
+        {voice.status === 'connected' && (
+          <Pressable
+            style={[styles.voiceBtn, voice.muted ? styles.voiceBtnMuted : styles.voiceBtnLive]}
+            onPress={() => voice.toggleMute()}
+            hitSlop={8}
+          >
+            <MaterialCommunityIcons
+              name={voice.muted ? 'microphone-off' : 'microphone'}
+              size={22}
+              color={voice.muted ? colors.textMuted : '#fff'}
+            />
+          </Pressable>
+        )}
+        <Pressable
+          style={[
+            styles.voiceBtn,
+            voice.status === 'connected' ? styles.voiceBtnOn : styles.voiceBtnOff,
+          ]}
+          onPress={toggleVoice}
+          disabled={voice.status === 'connecting'}
+          hitSlop={8}
+        >
+          <MaterialCommunityIcons
+            name={
+              voice.status === 'connected'
+                ? 'phone-in-talk'
+                : voice.status === 'connecting'
+                  ? 'phone-sync'
+                  : 'phone-plus'
+            }
+            size={22}
+            color={voice.status === 'connected' ? '#fff' : colors.text}
+          />
+          {voice.status === 'connected' && voice.peers > 0 && (
+            <View style={styles.voiceBadge}>
+              <Text style={styles.voiceBadgeText}>{voice.peers + 1}</Text>
+            </View>
+          )}
+        </Pressable>
+      </View>
 
       <Card style={styles.panel}>
         <View style={styles.panelHeader}>
@@ -708,6 +771,9 @@ export default function GroupRideScreen({ route, navigation }: Props) {
                       </Text>
                       {r.id === hostId ? <Text style={styles.pHost}>Host</Text> : null}
                     </View>
+                    {speakingSet.has(r.id) ? (
+                      <MaterialCommunityIcons name="microphone" size={18} color={colors.success} />
+                    ) : null}
                     <View style={[styles.pStatus, r.live ? styles.pStatusLive : styles.pStatusIdle]}>
                       <View style={[styles.pStatusDot, { backgroundColor: r.live ? colors.success : colors.textMuted }]} />
                       <Text style={styles.pStatusText}>{r.live ? 'Canlı' : 'Bekleniyor'}</Text>
@@ -743,6 +809,7 @@ const styles = StyleSheet.create({
     ...shadow.card,
   },
   markerText: { color: '#fff', fontWeight: '900', fontSize: 14 },
+  markerSpeaking: { borderColor: colors.success, borderWidth: 3 },
   routePin: {
     width: 32,
     height: 32,
@@ -768,6 +835,41 @@ const styles = StyleSheet.create({
   badgeIdle: { backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border },
   dot: { width: 8, height: 8, borderRadius: 4, marginRight: spacing.sm },
   badgeText: { color: colors.text, fontWeight: '800', fontSize: 12, letterSpacing: 1 },
+  voiceControls: {
+    position: 'absolute',
+    right: spacing.md,
+    bottom: 160,
+    gap: spacing.sm,
+    alignItems: 'center',
+  },
+  voiceBtn: {
+    width: 52,
+    height: 52,
+    borderRadius: 26,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1,
+    ...shadow.card,
+  },
+  voiceBtnOff: { backgroundColor: colors.surface, borderColor: colors.border },
+  voiceBtnOn: { backgroundColor: colors.success, borderColor: colors.success },
+  voiceBtnLive: { backgroundColor: colors.primary, borderColor: colors.primary },
+  voiceBtnMuted: { backgroundColor: colors.surface, borderColor: colors.border },
+  voiceBadge: {
+    position: 'absolute',
+    top: -2,
+    right: -2,
+    minWidth: 18,
+    height: 18,
+    borderRadius: 9,
+    paddingHorizontal: 4,
+    backgroundColor: colors.danger,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1.5,
+    borderColor: colors.bg,
+  },
+  voiceBadgeText: { color: '#fff', fontSize: 10, fontWeight: '900' },
   panel: { position: 'absolute', left: spacing.md, right: spacing.md, bottom: spacing.lg, gap: spacing.md },
   panelHeader: { flexDirection: 'row', alignItems: 'center', gap: spacing.md },
   codeLabel: { color: colors.textMuted, fontSize: 10, fontWeight: '700', letterSpacing: 1 },

@@ -59,6 +59,7 @@ func registerRoutes(d *server.Deps, h *handler) {
 	s.POST("/:code/kick", jwt, h.kickParticipant)
 	s.POST("/:code/ban", jwt, h.banParticipant)
 	s.POST("/:code/transfer", jwt, h.transferHost)
+	s.POST("/:code/voice-token", jwt, h.voiceToken)
 	s.GET("/:code/ws", h.sessionWS)
 }
 

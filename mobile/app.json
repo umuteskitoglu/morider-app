@@ -17,8 +17,11 @@
       "infoPlist": {
         "NSLocationWhenInUseUsageDescription": "Morider sürüşlerinizi kaydetmek için konumunuza erişir.",
         "NSLocationAlwaysAndWhenInUseUsageDescription": "Morider arka planda sürüşlerinizi kaydetmek için konumunuza erişir.",
+        "NSMicrophoneUsageDescription": "Morider, grup sürüşlerinde sesli sohbet için mikrofonunuza erişir.",
         "UIBackgroundModes": [
-          "location"
+          "location",
+          "audio",
+          "voip"
         ]
       }
     },
@@ -27,7 +30,11 @@
       "permissions": [
         "ACCESS_FINE_LOCATION",
         "ACCESS_COARSE_LOCATION",
-        "ACCESS_BACKGROUND_LOCATION"
+        "ACCESS_BACKGROUND_LOCATION",
+        "RECORD_AUDIO",
+        "MODIFY_AUDIO_SETTINGS",
+        "BLUETOOTH",
+        "BLUETOOTH_CONNECT"
       ]
     },
     "plugins": [
@@ -51,7 +58,9 @@
         }
       ],
       "@react-native-community/datetimepicker",
-      "expo-audio"
+      "expo-audio",
+      "@livekit/react-native-expo-plugin",
+      "@config-plugins/react-native-webrtc"
     ]
   }
 }

@@ -22,6 +22,7 @@ Bu repo bir **monorepo**'dur:
 - **Takip sistemi** — tek yönlü takip (profilden veya Keşfet'ten tek dokunuşla); `arkadaşlar` görünürlüğü = **karşılıklı takip**.
 - **Sürücü profili** — ehliyet sınıfı (A1 / A2 / A / B) ve motor türü (naked, sport, touring, adventure, chopper, enduro, scooter, custom); profil ve kullanıcı kartlarında rozet olarak görünür.
 - **Canlı grup sürüşü** — kod, **davet linki veya QR kod** ile oturuma katıl (deep link `morider://join/<kod>`, uygulama içi QR tarayıcı), katılımcıların konumunu gerçek zamanlı ortak haritada gör (WebSocket + NATS fan-out). Host **moderasyonu** (at / banla / host devret), tek aktif oturum kuralı, otomatik yeniden bağlanma ve devam eden sürüşe geri dönme.
+- **Sesli sohbet** — grup sürüşlerinde sürücüler arası **sürekli açık (push-to-talk değil)** sesli sohbet; eller serbest telsiz/intercom mantığı (self-hosted LiveKit SFU). Katıl/ayrıl + mute, konuşan kişi haritada ve katılımcı listesinde vurgulanır. Ayrıntı: [`docs/voice.md`](docs/voice.md). _(LiveKit native modül içerdiği için custom dev build gerekir — Expo Go ile çalışmaz.)_
 - **Ödüller** — sürüşlere göre rozetler ve liderlik tablosu.
 - **Kaza algılama (MVP)** — sürüşte ivmeölçerle darbe tespiti, 30 sn iptal edilebilir geri sayım; süre dolunca grup sürüşünde tüm katılımcılara **SOS uyarısı**, acil durum kişisine konumlu SMS taslağı, 112 arama kısayolu. Ayrıntı: [`docs/safety.md`](docs/safety.md).
 - **Garaj** — motosikletlerini ekle; **trafik sigortası / muayene / kasko** bitiş tarihlerine 7 gün ve 1 gün kala cihaz bildirimi (development build'de), renkli aciliyet rozetleri ve motor başına **servis defteri** (işlem, km, tutar, not).
@@ -114,6 +115,8 @@ npx expo start
 ```
 
 > Telefondan test ederken `mobile/.env` içindeki `EXPO_PUBLIC_API_URL` değerini bilgisayarınızın LAN IP'si ile değiştirin (örn. `http://192.168.1.20:8080`).
+
+> **Sesli sohbet** (LiveKit) native modül içerir ve **Expo Go ile çalışmaz**; bu özelliği denemek için bir kez **custom dev build** almanız gerekir (`eas build --profile development`). Kurulum: [`docs/voice.md`](docs/voice.md).
 
 ## Testler
 
