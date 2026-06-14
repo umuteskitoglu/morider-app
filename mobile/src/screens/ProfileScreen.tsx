@@ -3,9 +3,7 @@ import {
   ActivityIndicator,
   Alert,
   Image,
-  KeyboardAvoidingView,
   Modal,
-  Platform,
   Pressable,
   RefreshControl,
   ScrollView,
@@ -20,7 +18,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import * as ImagePicker from 'expo-image-picker';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 
-import { Button, Card, TextField } from '../components/ui';
+import { Button, Card } from '../components/ui';
 import { PostDetail, DetailPost } from '../components/PostDetail';
 import { AvatarViewer } from '../components/AvatarViewer';
 import { useAuth } from '../store/auth';
@@ -44,10 +42,7 @@ export default function ProfileScreen() {
   const [manage, setManage] = useState(false);
   const [selected, setSelected] = useState<string[]>([]);
   const [saving, setSaving] = useState(false);
-  const [editUsername, setEditUsername] = useState(false);
-  const [usernameInput, setUsernameInput] = useState('');
-  const [usernameErr, setUsernameErr] = useState<string | null>(null);
-  const [savingUsername, setSavingUsername] = useState(false);
+  const [stats, setStats] = useState({ bio: '', postCount: 0, followerCount: 0, followingCount: 0 });
   const [zoomUri, setZoomUri] = useState<string | null>(null);
 
   const thumb = (width - spacing.md * 2 - spacing.xs * 2) / 3;
@@ -65,10 +60,19 @@ export default function ProfileScreen() {
       setRewards(r.data.rewards ?? []);
       setLeaders(l.data.leaderboard ?? []);
       setPosts(p.data.posts ?? []);
-      // Keep the cached user's username fresh (e.g. sessions from before the
-      // username feature shipped, or edits made on another device).
-      if (u?.data?.username && u.data.username !== user?.username) {
-        updateUser({ username: u.data.username });
+      if (u?.data) {
+        setStats({
+          bio: u.data.bio ?? '',
+          postCount: u.data.post_count ?? 0,
+          followerCount: u.data.follower_count ?? 0,
+          followingCount: u.data.following_count ?? 0,
+        });
+        // Keep the cached user fresh (e.g. sessions from before these fields
+        // shipped, or edits made on another device).
+        const patch: { username?: string; bio?: string } = {};
+        if (u.data.username && u.data.username !== user?.username) patch.username = u.data.username;
+        if ((u.data.bio ?? '') !== (user?.bio ?? '')) patch.bio = u.data.bio ?? '';
+        if (Object.keys(patch).length > 0) updateUser(patch);
       }
     } catch {
       // Silently ignore; screen still renders profile info.
@@ -135,37 +139,6 @@ export default function ProfileScreen() {
     }
   }
 
-  function openUsernameEdit() {
-    setUsernameInput(user?.username ?? '');
-    setUsernameErr(null);
-    setEditUsername(true);
-  }
-
-  async function saveUsername() {
-    if (!user) return;
-    const next = usernameInput.trim();
-    if (!/^[a-zA-Z0-9_]{3,20}$/.test(next)) {
-      setUsernameErr('3-20 karakter olmalı: harf, rakam veya _');
-      return;
-    }
-    if (next === user.username) {
-      setEditUsername(false);
-      return;
-    }
-    try {
-      setSavingUsername(true);
-      setUsernameErr(null);
-      await api.put(`/api/users/${user.id}`, { username: next });
-      await updateUser({ username: next });
-      setEditUsername(false);
-    } catch (err) {
-      const status = (err as any)?.response?.status;
-      setUsernameErr(status === 409 ? 'Bu kullanıcı adı alınmış' : errorMessage(err));
-    } finally {
-      setSavingUsername(false);
-    }
-  }
-
   function openManage() {
     setSelected(showcased.map((r) => r.type));
     setManage(true);
@@ -216,11 +189,30 @@ export default function ProfileScreen() {
             </Pressable>
           </Pressable>
           <Text style={styles.name}>{user?.name}</Text>
-          <Pressable style={styles.usernameRow} onPress={openUsernameEdit} hitSlop={8}>
-            <Text style={styles.username}>@{user?.username || 'kullanıcı_adı'}</Text>
-            <MaterialCommunityIcons name="pencil" size={14} color={colors.textMuted} />
-          </Pressable>
+          <Text style={styles.username}>@{user?.username || 'kullanıcı_adı'}</Text>
           <Text style={styles.email}>{user?.email}</Text>
+          {stats.bio ? <Text style={styles.bio}>{stats.bio}</Text> : null}
+
+          <View style={styles.statsRow}>
+            <View style={styles.statItem}>
+              <Text style={styles.statNum}>{stats.postCount}</Text>
+              <Text style={styles.statLabel}>Gönderi</Text>
+            </View>
+            <Pressable style={styles.statItem} onPress={() => navigation.navigate('Follows')} hitSlop={8}>
+              <Text style={styles.statNum}>{stats.followerCount}</Text>
+              <Text style={styles.statLabel}>Takipçi</Text>
+            </Pressable>
+            <Pressable style={styles.statItem} onPress={() => navigation.navigate('Follows')} hitSlop={8}>
+              <Text style={styles.statNum}>{stats.followingCount}</Text>
+              <Text style={styles.statLabel}>Takip</Text>
+            </Pressable>
+          </View>
+
+          <Pressable style={styles.editBtn} onPress={() => navigation.navigate('EditProfile')} hitSlop={8}>
+            <MaterialCommunityIcons name="account-edit" size={16} color={colors.primary} />
+            <Text style={styles.editBtnText}>Profili Düzenle</Text>
+          </Pressable>
+
           {showcased.length > 0 && (
             <View style={styles.badges}>
               {showcased.map((r) => (
@@ -308,31 +300,6 @@ export default function ProfileScreen() {
       <PostDetail post={viewer} onClose={() => setViewer(null)} />
 
       <AvatarViewer uri={zoomUri} onClose={() => setZoomUri(null)} />
-
-      {/* Edit @username */}
-      <Modal visible={editUsername} animationType="slide" transparent statusBarTranslucent onRequestClose={() => setEditUsername(false)}>
-        <KeyboardAvoidingView style={styles.flex} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
-          <Pressable style={styles.backdrop} onPress={() => setEditUsername(false)}>
-            <Pressable style={styles.usernameSheet} onPress={() => {}}>
-              <Text style={styles.sheetTitle}>Kullanıcı Adı</Text>
-              <Text style={styles.muted}>Benzersiz olmalı. Başkaları seni bununla bulabilir.</Text>
-              <TextField
-                icon="at"
-                placeholder="kullanici_adi"
-                value={usernameInput}
-                onChangeText={(t) => setUsernameInput(t)}
-                autoCapitalize="none"
-                autoCorrect={false}
-                autoFocus
-                maxLength={20}
-              />
-              {usernameErr ? <Text style={styles.errText}>{usernameErr}</Text> : null}
-              <View style={{ height: spacing.sm }} />
-              <Button title="Kaydet" icon="content-save" onPress={saveUsername} loading={savingUsername} />
-            </Pressable>
-          </Pressable>
-        </KeyboardAvoidingView>
-      </Modal>
 
       {/* Manage showcased badges */}
       <Modal visible={manage} animationType="slide" onRequestClose={() => setManage(false)}>
@@ -427,20 +394,32 @@ const styles = StyleSheet.create({
   },
   quickTilePressed: { opacity: 0.7, transform: [{ scale: 0.98 }] },
   quickLabel: { color: colors.text, fontWeight: '700', fontSize: 13 },
-  usernameRow: { flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 2 },
-  username: { color: colors.primary, fontWeight: '700' },
+  username: { color: colors.primary, fontWeight: '700', marginTop: 2 },
   email: { color: colors.textMuted, marginTop: 2 },
-  flex: { flex: 1 },
-  backdrop: { flex: 1, backgroundColor: 'rgba(0,0,0,0.55)', justifyContent: 'flex-end' },
-  usernameSheet: {
-    backgroundColor: colors.surface,
-    borderTopLeftRadius: radius.lg,
-    borderTopRightRadius: radius.lg,
-    padding: spacing.lg,
-    paddingBottom: spacing.xl,
-    gap: spacing.xs,
+  bio: { color: colors.text, textAlign: 'center', marginTop: spacing.sm, paddingHorizontal: spacing.lg, lineHeight: 19 },
+  statsRow: {
+    flexDirection: 'row',
+    alignSelf: 'stretch',
+    justifyContent: 'space-around',
+    marginTop: spacing.md,
+    paddingHorizontal: spacing.lg,
   },
-  errText: { color: colors.danger, fontWeight: '600', fontSize: 13 },
+  statItem: { alignItems: 'center', gap: 2, flex: 1 },
+  statNum: { color: colors.text, fontWeight: '900', fontSize: 18 },
+  statLabel: { color: colors.textMuted, fontSize: 12, fontWeight: '600' },
+  editBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.xs,
+    marginTop: spacing.md,
+    paddingVertical: spacing.sm,
+    paddingHorizontal: spacing.lg,
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: colors.border,
+    backgroundColor: colors.surface,
+  },
+  editBtnText: { color: colors.primary, fontWeight: '800', fontSize: 13 },
   badges: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.xs, justifyContent: 'center', marginTop: spacing.md, paddingHorizontal: spacing.md },
   sectionRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.xs, marginTop: spacing.md, marginBottom: spacing.xs },
   sectionRowBetween: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },

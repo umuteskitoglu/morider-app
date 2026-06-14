@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"regexp"
 	"strconv"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 	"github.com/jackc/pgx/v5"
@@ -50,12 +51,16 @@ func registerRoutes(d *server.Deps) {
 type handler struct{ d *server.Deps }
 
 type profile struct {
-	ID        int64  `json:"id"`
-	Name      string `json:"name"`
-	Username  string `json:"username"`
-	Email     string `json:"email"`
-	Country   string `json:"country"`
-	AvatarURL string `json:"avatar_url"`
+	ID             int64  `json:"id"`
+	Name           string `json:"name"`
+	Username       string `json:"username"`
+	Email          string `json:"email"`
+	Country        string `json:"country"`
+	AvatarURL      string `json:"avatar_url"`
+	Bio            string `json:"bio"`
+	PostCount      int64  `json:"post_count"`
+	FollowerCount  int64  `json:"follower_count"`
+	FollowingCount int64  `json:"following_count"`
 }
 
 func (h *handler) get(c *gin.Context) {
@@ -66,8 +71,14 @@ func (h *handler) get(c *gin.Context) {
 	}
 	var p profile
 	err = h.d.DB.QueryRow(c,
-		`SELECT id, name, COALESCE(username, ''), email, COALESCE(country, ''), COALESCE(avatar_url, '') FROM users WHERE id = $1`, id,
-	).Scan(&p.ID, &p.Name, &p.Username, &p.Email, &p.Country, &p.AvatarURL)
+		`SELECT u.id, u.name, COALESCE(u.username, ''), u.email, COALESCE(u.country, ''),
+		        COALESCE(u.avatar_url, ''), COALESCE(u.bio, ''),
+		        (SELECT COUNT(*) FROM posts p WHERE p.user_id = u.id AND p.archived_at IS NULL),
+		        (SELECT COUNT(*) FROM follows f WHERE f.followee_id = u.id),
+		        (SELECT COUNT(*) FROM follows f WHERE f.follower_id = u.id)
+		 FROM users u WHERE u.id = $1`, id,
+	).Scan(&p.ID, &p.Name, &p.Username, &p.Email, &p.Country, &p.AvatarURL, &p.Bio,
+		&p.PostCount, &p.FollowerCount, &p.FollowingCount)
 	if errors.Is(err, pgx.ErrNoRows) {
 		httpx.Error(c, http.StatusNotFound, "user not found")
 		return
@@ -79,11 +90,15 @@ func (h *handler) get(c *gin.Context) {
 	c.JSON(http.StatusOK, p)
 }
 
+// updateReq uses pointers so we can tell "field omitted" (nil → keep) from
+// "field set to empty" (e.g. clearing the bio). COALESCE($n, col) keeps the
+// existing value only when the arg is NULL.
 type updateReq struct {
-	Name      string `json:"name"`
-	Username  string `json:"username"`
-	Country   string `json:"country"`
-	AvatarURL string `json:"avatar_url"`
+	Name      *string `json:"name"`
+	Username  *string `json:"username"`
+	Country   *string `json:"country"`
+	AvatarURL *string `json:"avatar_url"`
+	Bio       *string `json:"bio"`
 }
 
 func (h *handler) update(c *gin.Context) {
@@ -101,22 +116,34 @@ func (h *handler) update(c *gin.Context) {
 		httpx.BadRequest(c, err.Error())
 		return
 	}
-	if req.Username != "" && !usernamePattern.MatchString(req.Username) {
+	// Name and username are required fields: if supplied they must be non-empty.
+	if req.Name != nil && strings.TrimSpace(*req.Name) == "" {
+		httpx.BadRequest(c, "name cannot be empty")
+		return
+	}
+	if req.Username != nil && !usernamePattern.MatchString(*req.Username) {
 		httpx.BadRequest(c, "username must be 3-20 chars: letters, digits, underscore")
 		return
 	}
+
 	var p profile
 	err = h.d.DB.QueryRow(c,
 		`UPDATE users
-		 SET name = COALESCE(NULLIF($2, ''), name),
-		     username = COALESCE(NULLIF($3, ''), username),
-		     country = COALESCE(NULLIF($4, ''), country),
-		     avatar_url = COALESCE(NULLIF($5, ''), avatar_url),
+		 SET name = COALESCE($2, name),
+		     username = COALESCE($3, username),
+		     country = COALESCE($4, country),
+		     avatar_url = COALESCE($5, avatar_url),
+		     bio = COALESCE($6, bio),
 		     updated_at = now()
 		 WHERE id = $1
-		 RETURNING id, name, COALESCE(username, ''), email, COALESCE(country, ''), COALESCE(avatar_url, '')`,
-		id, req.Name, req.Username, req.Country, req.AvatarURL,
-	).Scan(&p.ID, &p.Name, &p.Username, &p.Email, &p.Country, &p.AvatarURL)
+		 RETURNING id, name, COALESCE(username, ''), email, COALESCE(country, ''),
+		           COALESCE(avatar_url, ''), COALESCE(bio, ''),
+		           (SELECT COUNT(*) FROM posts p WHERE p.user_id = users.id AND p.archived_at IS NULL),
+		           (SELECT COUNT(*) FROM follows f WHERE f.followee_id = users.id),
+		           (SELECT COUNT(*) FROM follows f WHERE f.follower_id = users.id)`,
+		id, req.Name, req.Username, req.Country, req.AvatarURL, req.Bio,
+	).Scan(&p.ID, &p.Name, &p.Username, &p.Email, &p.Country, &p.AvatarURL, &p.Bio,
+		&p.PostCount, &p.FollowerCount, &p.FollowingCount)
 	if errors.Is(err, pgx.ErrNoRows) {
 		httpx.Error(c, http.StatusNotFound, "user not found")
 		return

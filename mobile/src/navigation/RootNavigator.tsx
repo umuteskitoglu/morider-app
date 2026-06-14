@@ -25,6 +25,7 @@ import UserProfileScreen from '../screens/UserProfileScreen';
 import UserSearchScreen from '../screens/UserSearchScreen';
 import CommentsScreen from '../screens/CommentsScreen';
 import ProfileScreen from '../screens/ProfileScreen';
+import EditProfileScreen from '../screens/EditProfileScreen';
 import FollowsScreen from '../screens/FollowsScreen';
 import EventsScreen from '../screens/EventsScreen';
 import EventCreateScreen from '../screens/EventCreateScreen';
@@ -57,6 +58,7 @@ export type FeedStackParams = {
 // saved routes and follows all live here so the tab bar stays short.
 export type ProfileStackParams = {
   ProfileMain: undefined;
+  EditProfile: undefined;
   Follows: undefined;
   UserProfile: { userId: number; name: string };
   Rides: undefined;
@@ -144,6 +146,7 @@ function ProfileNavigator() {
       }}
     >
       <ProfileStack.Screen name="ProfileMain" component={ProfileScreen} options={{ title: 'Profil' }} />
+      <ProfileStack.Screen name="EditProfile" component={EditProfileScreen} options={{ title: 'Profili Düzenle' }} />
       <ProfileStack.Screen name="Rides" component={RidesScreen} options={{ title: 'Sürüşlerim' }} />
       <ProfileStack.Screen
         name="RoutesList"
