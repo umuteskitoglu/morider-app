@@ -90,6 +90,27 @@ services:
       - "${OSRM_HOST_PORT:-5000}:5000"
     restart: unless-stopped
 
+  # Self-hosted LiveKit SFU for always-on group ride voice chat. The telemetry
+  # service mints room-join tokens (LIVEKIT_API_KEY/SECRET must match keys.yaml).
+  # Clients connect to ws://<host>:7880; media flows over the UDP/TCP RTC ports.
+  # On mobile networks behind strict NAT you also need a TURN server — see
+  # docs/voice.md before deploying to production.
+  livekit:
+    image: livekit/livekit-server:v1.13
+    command: ["--config", "/etc/livekit.yaml"]
+    volumes:
+      - ./infra/livekit/livekit.yaml:/etc/livekit.yaml:ro
+    environment:
+      LIVEKIT_KEYS: "${LIVEKIT_API_KEY:-devkey}: ${LIVEKIT_API_SECRET:-devsecret_change_me_in_production_32b}"
+    ports:
+      - "7880:7880"
+      - "7881:7881"
+      - "7882:7882/udp"
+    restart: unless-stopped
+    depends_on:
+      redis:
+        condition: service_started
+
   auth:
     <<: *service-base
     command: ["-service=auth"]

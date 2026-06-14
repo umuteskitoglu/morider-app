@@ -1,0 +1,26 @@
+# LiveKit SFU configuration for Morider group ride voice chat.
+#
+# API keys are injected via the LIVEKIT_KEYS environment variable (see
+# docker-compose.yml) so secrets stay out of version control. For production,
+# generate a strong secret and set LIVEKIT_API_KEY / LIVEKIT_API_SECRET in .env
+# to match what the telemetry service signs tokens with.
+port: 7880
+
+rtc:
+  # Single TCP/UDP ports kept in sync with the published container ports. A UDP
+  # port range works too, but a single muxed port is simpler to map in Docker.
+  tcp_port: 7881
+  udp_port: 7882
+  port_range_start: 0
+  port_range_end: 0
+  # In local/dev Docker the advertised IP is the container's; set to true (and
+  # publish the node's public IP) when deploying to a reachable host.
+  use_external_ip: false
+
+# Shared room state across replicas. Reuses the project's Redis instance.
+redis:
+  address: redis:6379
+
+# Trim chattiness in normal operation; raise to debug for connection issues.
+logging:
+  level: info
