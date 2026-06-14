@@ -1,24 +1,24 @@
 export const colors = {
-  bg: '#0A0E16', // deep asphalt black
-  bgAlt: '#0F1521',
-  surface: '#161D2B',
-  surfaceAlt: '#1F2838',
-  primary: '#FF5A1F', // racing orange
-  primaryDark: '#E03E00',
-  accent: '#FFB020', // amber highlight
-  text: '#F5F7FB',
-  textMuted: '#8A96AD',
-  border: '#252F42',
+  bg: '#0A0A0B', // asphalt black
+  bgAlt: '#101012',
+  surface: '#16161A',
+  surfaceAlt: '#202026',
+  primary: '#E10600', // racing red
+  primaryDark: '#9E0400',
+  accent: '#FF2A2A', // hot red highlight
+  text: '#F5F5F7',
+  textMuted: '#8C8C94',
+  border: '#2A2A31',
   success: '#2FD27A',
-  danger: '#FF4D5E',
+  danger: '#FF3B47',
 };
 
 // Gradient stops (use with expo-linear-gradient).
 export const gradients = {
-  primary: ['#FF8A4C', '#FF5A1F', '#E03E00'] as const,
-  danger: ['#FF6B7A', '#FF4D5E', '#D32F3E'] as const,
-  hero: ['#1B2336', '#0F1521', '#0A0E16'] as const,
-  surface: ['#1C2433', '#141B27'] as const,
+  primary: ['#FF3B30', '#E10600', '#9E0400'] as const,
+  danger: ['#FF6B6B', '#FF3B47', '#C81E2A'] as const,
+  hero: ['#1A1416', '#120E10', '#0A0A0B'] as const,
+  surface: ['#1E1E24', '#141418'] as const,
 };
 
 export const spacing = {
@@ -42,14 +42,14 @@ export const radius = {
 export const shadow = {
   card: {
     shadowColor: '#000',
-    shadowOpacity: 0.35,
+    shadowOpacity: 0.45,
     shadowRadius: 12,
     shadowOffset: { width: 0, height: 6 },
     elevation: 6,
   },
   glow: {
-    shadowColor: '#FF5A1F',
-    shadowOpacity: 0.45,
+    shadowColor: '#E10600',
+    shadowOpacity: 0.5,
     shadowRadius: 16,
     shadowOffset: { width: 0, height: 4 },
     elevation: 10,
