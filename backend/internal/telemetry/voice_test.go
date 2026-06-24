@@ -1,6 +1,8 @@
 package telemetry
 
 import (
+	"net/http"
+	"net/http/httptest"
 	"testing"
 
 	lkauth "github.com/livekit/protocol/auth"
@@ -12,6 +14,38 @@ import (
 func TestVoiceRoomName(t *testing.T) {
 	if got := voiceRoomName(42); got != "ride-42" {
 		t.Fatalf("voiceRoomName(42) = %q, want ride-42", got)
+	}
+}
+
+// TestPublicLiveKitURL covers the deploy footgun this helper guards against: a
+// localhost LIVEKIT_URL must be rewritten to the public host the client reached,
+// while an explicitly public URL is handed back untouched.
+func TestPublicLiveKitURL(t *testing.T) {
+	cases := []struct {
+		name       string
+		configured string
+		host       string
+		tls        bool
+		want       string
+	}{
+		{"localhost derives public host", "ws://localhost:7880", "138.197.178.107:8080", false, "ws://138.197.178.107:7880"},
+		{"loopback ip derives host", "ws://127.0.0.1:7880", "api.morider.app:8080", false, "ws://api.morider.app:7880"},
+		{"preserves custom port", "ws://localhost:7999", "1.2.3.4:8080", false, "ws://1.2.3.4:7999"},
+		{"tls request yields wss", "ws://localhost:7880", "api.morider.app", true, "wss://api.morider.app:7880"},
+		{"explicit public url trusted", "wss://lk.morider.app", "1.2.3.4:8080", false, "wss://lk.morider.app"},
+		{"unparseable host falls back to config", "ws://localhost:7880", "", false, "ws://localhost:7880"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			r := httptest.NewRequest(http.MethodPost, "/api/sessions/ABC/voice-token", nil)
+			r.Host = tc.host
+			if tc.tls {
+				r.Header.Set("X-Forwarded-Proto", "https")
+			}
+			if got := publicLiveKitURL(tc.configured, r); got != tc.want {
+				t.Errorf("publicLiveKitURL(%q, host=%q) = %q, want %q", tc.configured, tc.host, got, tc.want)
+			}
+		})
 	}
 }
 

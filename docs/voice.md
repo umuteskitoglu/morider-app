@@ -65,16 +65,44 @@ Gerekli izinler/arka plan modları [app.json](../mobile/app.json)'da tanımlı:
 iOS `NSMicrophoneUsageDescription` + `UIBackgroundModes: [audio, voip]`, Android
 `RECORD_AUDIO` / `MODIFY_AUDIO_SETTINGS`.
 
-## Üretim notları (NAT / TURN)
+## Üretim dağıtımı (lean stack)
+
+> **En sık hata:** prod stack'i voice **profili olmadan** başlatmak. O zaman
+> LiveKit container'ı hiç ayağa kalkmaz (7880 kapalı) ve uygulama "Bağlanamadı"
+> der. Sesli sohbet için **mutlaka** voice profili ile başlat:
+
+```bash
+make prod-up-voice        # = docker compose -f docker-compose.prod.yml --profile voice up -d --build
+make prod-ps              # livekit container "Up" görünmeli
+```
+
+Firewall'da şu portları aç (DigitalOcean cloud firewall dahil):
+
+| Port | Protokol | Ne için |
+|------|----------|---------|
+| 7880 | TCP | LiveKit signalling (WebSocket) |
+| 7881 | TCP | WebRTC over TCP (NAT fallback) |
+| 7882 | UDP | WebRTC medya |
+
+`LIVEKIT_URL` hakkında: artık `.env`'de `localhost` kalsa bile token endpoint'i,
+client'ın API'ye ulaştığı public host'tan otomatik türetir (tek-kutu deploy'da
+LiveKit aynı host'ta, `ws://<public-host>:7880`). Yine de en temizi `.env`'de
+açıkça vermek:
+
+```bash
+LIVEKIT_URL=ws://138.197.178.107:7880   # TLS varsa wss://voice.morider.app
+```
+
+### NAT / TURN
 
 Self-hosted SFU mobil ağlarda (4G/5G, simetrik NAT) **TURN sunucusu olmadan**
-bağlanamayabilir. Üretim dağıtımında:
+bağlanamayabilir. Sıkı mobil NAT için:
 
 - LiveKit'in gömülü TURN'ünü etkinleştir (`turn:` bloğu, TLS sertifikası ile) **veya**
   ayrı bir `coturn` çalıştır.
-- `rtc.use_external_ip: true` yap ve düğümün public IP'sini yayınla; RTC UDP/TCP
-  portlarını (7881/7882) firewall'da aç.
-- `LIVEKIT_URL`'i `wss://` (TLS) olarak ver.
+- `rtc.use_external_ip: true` (zaten `livekit.prod.yaml`'de açık) ve düğümün public
+  IP'sini yayınlar; RTC UDP/TCP portlarını (7881/7882) firewall'da aç.
+- TLS arkasındaysan `LIVEKIT_URL`'i `wss://` olarak ver.
 
 ## Pil / veri
 

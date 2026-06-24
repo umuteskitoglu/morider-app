@@ -4,6 +4,8 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"net/url"
+	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -82,10 +84,48 @@ func (h *handler) voiceToken(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, voiceTokenResponse{
-		URL:   h.d.Cfg.LiveKitURL,
+		URL:   publicLiveKitURL(h.d.Cfg.LiveKitURL, c.Request),
 		Token: token,
 		Room:  room,
 	})
+}
+
+// publicLiveKitURL resolves the signalling URL handed to mobile clients. An
+// explicitly public LIVEKIT_URL is trusted as-is. But the default
+// (ws://localhost:7880) is unreachable from a phone, and is the single most
+// common deploy mistake — so when LIVEKIT_URL still points at the loopback we
+// derive a reachable URL from the host the client actually reached the API on.
+//
+// This works because the gateway is a single-host reverse proxy that forwards
+// the original Host header, and the lean prod stack runs the LiveKit SFU on that
+// same host. The configured signalling port (default 7880) is preserved.
+func publicLiveKitURL(configured string, r *http.Request) string {
+	u, err := url.Parse(configured)
+	if err == nil && u.Hostname() != "" && !isLoopback(u.Hostname()) {
+		return configured // operator set a real, reachable address — trust it
+	}
+
+	host := r.Host
+	if i := strings.IndexByte(host, ':'); i >= 0 {
+		host = host[:i]
+	}
+	if host == "" || isLoopback(host) {
+		return configured // nothing better to offer than what was configured
+	}
+
+	port := "7880"
+	if err == nil && u.Port() != "" {
+		port = u.Port()
+	}
+	scheme := "ws"
+	if r.TLS != nil || strings.EqualFold(r.Header.Get("X-Forwarded-Proto"), "https") {
+		scheme = "wss"
+	}
+	return fmt.Sprintf("%s://%s:%s", scheme, host, port)
+}
+
+func isLoopback(host string) bool {
+	return host == "localhost" || host == "127.0.0.1" || host == "0.0.0.0" || host == "::1"
 }
 
 // mintVoiceToken builds a signed LiveKit JWT granting the rider join, publish and

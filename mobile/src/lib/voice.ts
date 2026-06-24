@@ -102,7 +102,10 @@ export function useGroupVoice(code: string): GroupVoice {
       updatePeers(room);
       setMuted(false);
       setStatus('connected');
-    } catch {
+    } catch (err) {
+      // Surface the real reason (no SFU reachable, bad token, mic denied…) — it
+      // was silently swallowed before, making "bağlanamadı" impossible to debug.
+      console.warn('[voice] join failed:', err);
       roomRef.current = null;
       setStatus('error');
       await AudioSession.stopAudioSession().catch(() => {});
