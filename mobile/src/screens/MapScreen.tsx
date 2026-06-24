@@ -13,13 +13,13 @@ import { useCrashDetection } from '../lib/crashDetection';
 import { call112, composeEmergencySMS, getEmergencyContact } from '../lib/emergency';
 import {
   advanceStep,
-  fetchRouteSteps,
   distanceM,
   LatLon,
   maybeSpeak,
   NavStep,
   newRerouteState,
   offRouteTick,
+  planInitialRoute,
   rerouteFromPosition,
   speakRerouted,
   SpokenState,
@@ -294,17 +294,26 @@ export default function MapScreen({ route, navigation }: Props) {
     startedAt.current = new Date();
     setRecording(true);
 
-    // Following a saved route → fetch turn-by-turn steps for it (best effort;
-    // without them the dashed guide line still shows).
+    // Following a saved route → plan turn-by-turn from the rider's *current*
+    // position (best effort; without steps the dashed guide line still shows).
+    // Planning from here, not the route's stored start, means a rider who
+    // begins somewhere else gets a guide that leads them onto the route instead
+    // of pointing back at its original start point.
     navSteps.current = null;
     navIdx.current = 0;
     spoken.current = { idx: -1, far: false, near: false };
     reroute.current = newRerouteState();
     setNavStep(null);
     if (followPath.length > 1) {
-      fetchRouteSteps(followPath.map((p) => ({ lat: p.latitude, lon: p.longitude })))
-        .then((steps) => {
+      const routePts = followPath.map((p) => ({ lat: p.latitude, lon: p.longitude }));
+      Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced })
+        .then((loc) => planInitialRoute(routePts, { lat: loc.coords.latitude, lon: loc.coords.longitude }))
+        .then(({ steps, points }) => {
           if (steps.length > 0) navSteps.current = steps;
+          // Redraw the guide so the lead-in from the rider's position is visible.
+          if (points.length > 1) {
+            setFollowPath(points.map((p) => ({ latitude: p.lat, longitude: p.lon })));
+          }
         })
         .catch(() => {});
     }

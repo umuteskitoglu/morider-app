@@ -195,6 +195,28 @@ export function offRouteTick(state: RerouteState, routePoints: LatLon[], pos: La
 }
 
 /**
+ * Initial plan when a ride starts on a followed route. If the rider is already
+ * near the route it plans the route as-is. If they begin somewhere else, their
+ * current position is prepended as the first waypoint so the guide leads them
+ * onto the route from wherever they actually are (instead of pointing at the
+ * route's original start). Returns steps + geometry for the dashed guide line.
+ */
+export async function planInitialRoute(
+  routePoints: LatLon[],
+  pos: LatLon,
+): Promise<{ steps: NavStep[]; points: LatLon[] }> {
+  if (routePoints.length < 2) return { steps: [], points: [] };
+  const onRoute = distanceToRouteM(routePoints, pos) <= OFF_ROUTE_M;
+  const waypoints = onRoute
+    ? sampleWaypoints(routePoints)
+    : [pos, ...sampleWaypoints(routePoints, 24)];
+  const { data } = await api.post('/api/routes/plan', { waypoints });
+  const steps: NavStep[] = (data.steps ?? []).filter((s: NavStep) => s.lat !== 0 || s.lon !== 0);
+  const points: LatLon[] = data.points ?? [];
+  return { steps, points };
+}
+
+/**
  * Plans a fresh route from the current position that rejoins the original
  * route ~150 m ahead of the nearest point and follows it to the end. Returns
  * the new steps plus the new geometry (for redrawing the guide line).
