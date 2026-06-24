@@ -82,6 +82,9 @@ export default function GroupRideScreen({ route, navigation }: Props) {
   const leaving = useRef(false);
   const hasRoute = useRef(false); // when a route is set, fit to it instead of the user
   const centered = useRef(false); // auto-center on the user only once
+  // Chase-cam pitch/zoom set once at the first fix; later fixes only pan/rotate
+  // so the map doesn't jolt "up" on every position update.
+  const camPrimed = useRef(false);
   const closed = useRef(false); // screen torn down → stop reconnecting
   const reconnectTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const reconnectAttempts = useRef(0);
@@ -426,16 +429,21 @@ export default function GroupRideScreen({ route, navigation }: Props) {
       centered.current = true;
       updateNavigation({ lat, lon });
       // Google-Maps-style chase cam: tilted, zoomed-in, rotated to heading.
-      // (No-op while backgrounded; the map isn't drawing then.)
-      mapRef.current?.animateCamera(
-        {
-          center: { latitude: lat, longitude: lon },
-          pitch: 55,
-          zoom: 17.5,
-          ...(heading >= 0 ? { heading } : {}),
-        },
-        { duration: 700 },
-      );
+      // Pitch/zoom set once (camPrimed); later fixes only pan + rotate so the
+      // map doesn't jolt "up" each update. No-op while backgrounded.
+      const center = { latitude: lat, longitude: lon };
+      if (!camPrimed.current) {
+        camPrimed.current = true;
+        mapRef.current?.animateCamera(
+          { center, pitch: 55, zoom: 17.5, ...(heading >= 0 ? { heading } : {}) },
+          { duration: 700 },
+        );
+      } else {
+        mapRef.current?.animateCamera(
+          { center, ...(heading >= 0 ? { heading } : {}) },
+          { duration: 700 },
+        );
+      }
       sendPosition();
     });
     await startRideLocation();
@@ -456,6 +464,7 @@ export default function GroupRideScreen({ route, navigation }: Props) {
     // Reset per-ride state so switching sessions (code change) starts clean.
     closed.current = false;
     centered.current = false;
+    camPrimed.current = false;
     reconnectAttempts.current = 0;
     setPositions({});
     loadSession();

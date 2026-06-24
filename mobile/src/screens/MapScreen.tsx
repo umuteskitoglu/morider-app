@@ -26,6 +26,7 @@ import {
   stopSpeaking,
 } from '../lib/navigation';
 import { POI, POI_CATEGORIES, POI_LABELS, poiColor, poiIcon } from '../lib/poi';
+import { setRideLocationHandler, startRideLocation, stopRideLocation } from '../lib/backgroundLocation';
 import { api, errorMessage } from '../api/client';
 import { colors, radius, shadow, spacing } from '../theme';
 
@@ -71,11 +72,16 @@ export default function MapScreen({ route, navigation }: Props) {
   const [navDist, setNavDist] = useState(0);
   const [voiceOn, setVoiceOn] = useState(true);
 
-  const subscription = useRef<Location.LocationSubscription | null>(null);
   const samples = useRef<Sample[]>([]);
   const lastCoord = useRef<Coord | null>(null);
   const startedAt = useRef<Date | null>(null);
   const mapRef = useRef<MapView | null>(null);
+  // Chase-cam pitch/zoom are applied once at the first fix; later fixes only
+  // pan/rotate. Re-applying pitch every fix made the map jolt "up" each point.
+  const camPrimed = useRef(false);
+  // Cleared on unmount so a startRideLocation() that resolves after the screen
+  // is gone doesn't leave the foreground service (and its notification) running.
+  const alive = useRef(true);
   const navSteps = useRef<NavStep[] | null>(null);
   const navIdx = useRef(0);
   const spoken = useRef<SpokenState>({ idx: -1, far: false, near: false });
@@ -130,7 +136,11 @@ export default function MapScreen({ route, navigation }: Props) {
       }
     })();
     return () => {
-      subscription.current?.remove();
+      // Leaving the screen mid-ride must tear down the foreground service, or
+      // the GPS notification (and battery drain) would outlive the screen.
+      alive.current = false;
+      setRideLocationHandler(null);
+      void stopRideLocation();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -286,12 +296,24 @@ export default function MapScreen({ route, navigation }: Props) {
       Alert.alert('İzin gerekli', 'Sürüş kaydı için konum izni vermelisiniz.');
       return;
     }
+    // "Always" permission is what keeps the GPS recording alive when the app is
+    // backgrounded (screen locked or switched away). Without it the ride still
+    // records while the app is open, so we warn rather than block.
+    const bg = await Location.requestBackgroundPermissionsAsync().catch(() => null);
+    if (bg && bg.status !== 'granted') {
+      Alert.alert(
+        'Arka plan konumu kapalı',
+        'Başka bir uygulamaya geçince sürüş kaydı durabilir. Kesintisiz kayıt için konum iznini "Her zaman" yap.',
+      );
+    }
+
     setPath([]);
     setDistance(0);
     setSpeed(0);
     samples.current = [];
     lastCoord.current = null;
     startedAt.current = new Date();
+    camPrimed.current = false;
     setRecording(true);
 
     // Following a saved route → plan turn-by-turn from the rider's *current*
@@ -318,48 +340,58 @@ export default function MapScreen({ route, navigation }: Props) {
         .catch(() => {});
     }
 
-    subscription.current = await Location.watchPositionAsync(
-      { accuracy: Location.Accuracy.High, distanceInterval: 10, timeInterval: 3000 },
-      (loc) => {
-        const coord: Coord = {
-          latitude: loc.coords.latitude,
-          longitude: loc.coords.longitude,
-        };
-        if (lastCoord.current) {
-          setDistance((d) => d + haversineKm(lastCoord.current as Coord, coord));
-        }
-        lastCoord.current = coord;
-        setSpeed(Math.max(0, (loc.coords.speed ?? 0) * 3.6));
-        setPath((p) => [...p, coord]);
-        samples.current.push({
-          ...coord,
-          altitude: loc.coords.altitude ?? 0,
-          speed: loc.coords.speed ?? 0,
-          ts: new Date(loc.timestamp).toISOString(),
-        });
-        const navigating = updateNavigation({ lat: coord.latitude, lon: coord.longitude });
-        if (navigating) {
-          maybeReroute({ lat: coord.latitude, lon: coord.longitude });
-        }
-        // Google-Maps-style chase cam: tilted, zoomed-in, rotated to heading.
-        // Applies to every active ride, not just turn-by-turn navigation.
-        const heading = loc.coords.heading ?? -1;
+    // Stream GPS through the background-capable foreground service so the ride
+    // keeps recording when the rider locks the screen or switches apps (the
+    // service keeps the JS process alive, so these callbacks keep firing).
+    setRideLocationHandler(({ lat, lon, speed, heading, altitude, ts }) => {
+      const coord: Coord = { latitude: lat, longitude: lon };
+      if (lastCoord.current) {
+        setDistance((d) => d + haversineKm(lastCoord.current as Coord, coord));
+      }
+      lastCoord.current = coord;
+      setSpeed(speed);
+      setPath((p) => [...p, coord]);
+      samples.current.push({
+        ...coord,
+        altitude,
+        // RideFix speed is km/h; telemetry stores raw m/s like before.
+        speed: speed / 3.6,
+        ts,
+      });
+      const navigating = updateNavigation({ lat, lon });
+      if (navigating) {
+        maybeReroute({ lat, lon });
+      }
+      // Google-Maps-style chase cam: tilted, zoomed-in, rotated to heading.
+      // Pitch/zoom are set once (camPrimed); later fixes only pan + rotate so
+      // the map doesn't jolt "up" on every point. No-op while backgrounded.
+      if (!camPrimed.current) {
+        camPrimed.current = true;
         mapRef.current?.animateCamera(
-          {
-            center: coord,
-            pitch: 55,
-            zoom: 17.5,
-            ...(heading >= 0 ? { heading } : {}),
-          },
+          { center: coord, pitch: 55, zoom: 17.5, ...(heading >= 0 ? { heading } : {}) },
           { duration: 700 },
         );
-      },
-    );
+      } else {
+        mapRef.current?.animateCamera(
+          { center: coord, ...(heading >= 0 ? { heading } : {}) },
+          { duration: 700 },
+        );
+      }
+    });
+    await startRideLocation({
+      notificationTitle: 'Morider sürüş kaydı',
+      notificationBody: 'Sürüşün kaydediliyor — mesafe, hız ve rota.',
+    });
+    // Screen left while awaiting → don't leave the service running.
+    if (!alive.current) {
+      setRideLocationHandler(null);
+      void stopRideLocation();
+    }
   }
 
   async function stopRecording() {
-    subscription.current?.remove();
-    subscription.current = null;
+    setRideLocationHandler(null);
+    await stopRideLocation();
     setRecording(false);
     setSpeed(0);
     navSteps.current = null;

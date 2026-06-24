@@ -14,7 +14,15 @@ import * as TaskManager from 'expo-task-manager';
 
 export const RIDE_LOCATION_TASK = 'morider-ride-location';
 
-export type RideFix = { lat: number; lon: number; speed: number; heading: number };
+export type RideFix = {
+  lat: number;
+  lon: number;
+  // km/h, clamped to >= 0 (a -1 "unknown" GPS speed becomes 0).
+  speed: number;
+  heading: number;
+  altitude: number;
+  ts: string;
+};
 
 let handler: ((fix: RideFix) => void) | null = null;
 
@@ -34,13 +42,19 @@ TaskManager.defineTask(RIDE_LOCATION_TASK, async ({ data, error }) => {
     lon: loc.coords.longitude,
     speed: Math.max(0, (loc.coords.speed ?? 0) * 3.6),
     heading: loc.coords.heading ?? -1,
+    altitude: loc.coords.altitude ?? 0,
+    ts: new Date(loc.timestamp).toISOString(),
   });
 });
+
+// Persistent Android notification text for the location foreground service.
+// Defaults describe a group ride; solo recording passes its own copy.
+export type RideNotification = { notificationTitle?: string; notificationBody?: string };
 
 // Begin streaming fixes through the foreground-service task. Safe to call when
 // already started (stops the previous registration first). The persistent
 // Android notification is required by the OS for a location foreground service.
-export async function startRideLocation(): Promise<void> {
+export async function startRideLocation(notif?: RideNotification): Promise<void> {
   const already = await Location.hasStartedLocationUpdatesAsync(RIDE_LOCATION_TASK).catch(() => false);
   if (already) return;
   await Location.startLocationUpdatesAsync(RIDE_LOCATION_TASK, {
@@ -53,8 +67,8 @@ export async function startRideLocation(): Promise<void> {
     activityType: Location.ActivityType.AutomotiveNavigation,
     // Android: a foreground service is mandatory for background location.
     foregroundService: {
-      notificationTitle: 'Morider grup sürüşü',
-      notificationBody: 'Canlı konum paylaşımı ve sesli yönlendirme açık.',
+      notificationTitle: notif?.notificationTitle ?? 'Morider grup sürüşü',
+      notificationBody: notif?.notificationBody ?? 'Canlı konum paylaşımı ve sesli yönlendirme açık.',
       notificationColor: '#E10600',
     },
   });
