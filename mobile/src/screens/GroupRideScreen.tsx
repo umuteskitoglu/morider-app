@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
-import { Alert, Modal, Pressable, ScrollView, Share, StyleSheet, Text, Vibration, View } from 'react-native';
+import { Alert, Animated, Easing, Modal, Pressable, ScrollView, Share, StyleSheet, Text, Vibration, View } from 'react-native';
 import MapView, { Marker, Polyline, Region } from 'react-native-maps';
 import * as Location from 'expo-location';
 import * as Linking from 'expo-linking';
@@ -30,6 +30,7 @@ import {
 } from '../lib/navigation';
 import { useAuth } from '../store/auth';
 import { useGroupVoice } from '../lib/voice';
+import { setRideLocationHandler, startRideLocation, stopRideLocation } from '../lib/backgroundLocation';
 import { api, apiBaseURL, errorMessage, TOKEN_KEY } from '../api/client';
 import { colors, radius, shadow, spacing } from '../theme';
 
@@ -77,7 +78,6 @@ export default function GroupRideScreen({ route, navigation }: Props) {
   const reroute = useRef(newRerouteState());
 
   const ws = useRef<WebSocket | null>(null);
-  const locSub = useRef<Location.LocationSubscription | null>(null);
   const mapRef = useRef<MapView | null>(null);
   const leaving = useRef(false);
   const hasRoute = useRef(false); // when a route is set, fit to it instead of the user
@@ -102,6 +102,42 @@ export default function GroupRideScreen({ route, navigation }: Props) {
       voice.leave().catch(() => {});
     }
   }
+
+  // One glanceable line of status so the rider always knows where voice stands:
+  // connecting / live / muted / actively transmitting / failed.
+  const selfLive = voice.status === 'connected' && !voice.muted && voice.selfSpeaking;
+  const voiceLabel = (() => {
+    switch (voice.status) {
+      case 'connecting':
+        return 'Bağlanıyor…';
+      case 'error':
+        return 'Bağlanamadı, dokun';
+      case 'connected':
+        if (voice.muted) return 'Mikrofon kapalı';
+        return voice.selfSpeaking ? 'Konuşuyorsun' : 'Sesli sohbet açık';
+      default:
+        return 'Sesli sohbeti aç';
+    }
+  })();
+
+  // Pulse the mic button while the rider's own voice is going out, so they get
+  // live confirmation that the group can hear them.
+  const pulse = useRef(new Animated.Value(0)).current;
+  useEffect(() => {
+    if (!selfLive) {
+      pulse.stopAnimation();
+      pulse.setValue(0);
+      return;
+    }
+    const loop = Animated.loop(
+      Animated.sequence([
+        Animated.timing(pulse, { toValue: 1, duration: 600, easing: Easing.out(Easing.ease), useNativeDriver: true }),
+        Animated.timing(pulse, { toValue: 0, duration: 600, easing: Easing.in(Easing.ease), useNativeDriver: true }),
+      ]),
+    );
+    loop.start();
+    return () => loop.stop();
+  }, [selfLive, pulse]);
 
   useLayoutEffect(() => {
     navigation.setOptions({ title: `Grup · ${code}` });
@@ -341,12 +377,22 @@ export default function GroupRideScreen({ route, navigation }: Props) {
 
   // Ask for location permission once and stream our own GPS. We send on every
   // GPS update AND on a steady heartbeat, so a stationary rider still appears to
-  // the rest of the group (watchPositionAsync alone fires only when you move).
+  // the rest of the group (GPS fixes alone fire only when you move).
   const startLocationWatch = useCallback(async () => {
     const { status } = await Location.requestForegroundPermissionsAsync();
     if (status !== 'granted') {
       Alert.alert('İzin gerekli', 'Canlı konum paylaşımı için konum izni vermelisiniz.');
       return;
+    }
+    // "Always" permission is what lets location (and with it the WebSocket and
+    // turn-by-turn voice) keep running when the app is backgrounded. Foreground
+    // sharing still works without it, so we don't hard-block the ride.
+    const bg = await Location.requestBackgroundPermissionsAsync().catch(() => null);
+    if (bg && bg.status !== 'granted') {
+      Alert.alert(
+        'Arka plan konumu kapalı',
+        'Telefonu cebine koyunca konum paylaşımı ve sesli yönlendirme durabilir. Sürekli açık kalması için konum iznini "Her zaman" yap.',
+      );
     }
 
     if (closed.current) return;
@@ -373,37 +419,33 @@ export default function GroupRideScreen({ route, navigation }: Props) {
 
     if (closed.current) return;
 
-    const sub = await Location.watchPositionAsync(
-      { accuracy: Location.Accuracy.High, distanceInterval: 5, timeInterval: 3000 },
-      (loc) => {
-        lastCoord.current = {
-          lat: loc.coords.latitude,
-          lon: loc.coords.longitude,
-          speed: Math.max(0, (loc.coords.speed ?? 0) * 3.6),
-        };
-        centered.current = true;
-        updateNavigation({ lat: loc.coords.latitude, lon: loc.coords.longitude });
-        // Google-Maps-style chase cam: tilted, zoomed-in, rotated to heading.
-        const heading = loc.coords.heading ?? -1;
-        mapRef.current?.animateCamera(
-          {
-            center: { latitude: loc.coords.latitude, longitude: loc.coords.longitude },
-            pitch: 55,
-            zoom: 17.5,
-            ...(heading >= 0 ? { heading } : {}),
-          },
-          { duration: 700 },
-        );
-        sendPosition();
-      },
-    );
-    // If the screen was torn down while we awaited, drop the fresh subscription
-    // so the GPS watch doesn't leak past the screen's lifetime.
+    // Stream GPS through the background-capable foreground service so position
+    // sharing and voice guidance survive the app being backgrounded.
+    setRideLocationHandler(({ lat, lon, speed, heading }) => {
+      lastCoord.current = { lat, lon, speed };
+      centered.current = true;
+      updateNavigation({ lat, lon });
+      // Google-Maps-style chase cam: tilted, zoomed-in, rotated to heading.
+      // (No-op while backgrounded; the map isn't drawing then.)
+      mapRef.current?.animateCamera(
+        {
+          center: { latitude: lat, longitude: lon },
+          pitch: 55,
+          zoom: 17.5,
+          ...(heading >= 0 ? { heading } : {}),
+        },
+        { duration: 700 },
+      );
+      sendPosition();
+    });
+    await startRideLocation();
+    // If the screen was torn down while we awaited, stop again so the service
+    // doesn't outlive the ride screen.
     if (closed.current) {
-      sub.remove();
+      setRideLocationHandler(null);
+      void stopRideLocation();
       return;
     }
-    locSub.current = sub;
 
     // Heartbeat: re-broadcast the last position every 3s even when stationary.
     if (heartbeat.current) clearInterval(heartbeat.current);
@@ -423,8 +465,8 @@ export default function GroupRideScreen({ route, navigation }: Props) {
       closed.current = true;
       if (reconnectTimer.current) clearTimeout(reconnectTimer.current);
       if (heartbeat.current) clearInterval(heartbeat.current);
-      locSub.current?.remove();
-      locSub.current = null;
+      setRideLocationHandler(null);
+      void stopRideLocation();
       detachSocket();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -448,8 +490,8 @@ export default function GroupRideScreen({ route, navigation }: Props) {
     closed.current = true;
     if (reconnectTimer.current) clearTimeout(reconnectTimer.current);
     if (heartbeat.current) clearInterval(heartbeat.current);
-    locSub.current?.remove();
-    locSub.current = null;
+    setRideLocationHandler(null);
+    void stopRideLocation();
     navSteps.current = null;
     stopSpeaking();
     detachSocket();
@@ -656,45 +698,88 @@ export default function GroupRideScreen({ route, navigation }: Props) {
 
       {/* Always-on voice chat controls (float above the session panel). */}
       <View style={styles.voiceControls}>
-        {voice.status === 'connected' && (
+        {/* Status line — always present so the rider can tell at a glance whether
+            voice is connecting, live, muted, or failed. */}
+        <View
+          style={[
+            styles.voiceStatus,
+            voice.status === 'connected' && !voice.muted && styles.voiceStatusLive,
+            voice.status === 'error' && styles.voiceStatusError,
+            selfLive && styles.voiceStatusTalking,
+          ]}
+        >
+          {voice.status === 'connecting' ? (
+            <View style={[styles.voiceStatusDot, { backgroundColor: colors.textMuted }]} />
+          ) : selfLive ? (
+            <MaterialCommunityIcons name="waveform" size={14} color="#fff" />
+          ) : voice.status === 'connected' ? (
+            <View style={[styles.voiceStatusDot, { backgroundColor: voice.muted ? colors.textMuted : colors.success }]} />
+          ) : null}
+          <Text
+            style={[
+              styles.voiceStatusText,
+              (selfLive || (voice.status === 'connected' && !voice.muted) || voice.status === 'error') && { color: '#fff' },
+            ]}
+          >
+            {voiceLabel}
+            {voice.status === 'connected' && voice.peers > 0 ? ` · ${voice.peers + 1} kişi` : ''}
+          </Text>
+        </View>
+
+        <View style={styles.voiceBtnRow}>
+          {voice.status === 'connected' && (
+            <Pressable
+              style={[styles.voiceBtn, voice.muted ? styles.voiceBtnMuted : styles.voiceBtnLive]}
+              onPress={() => voice.toggleMute()}
+              hitSlop={8}
+            >
+              {/* Pulsing ring confirms the mic is actually transmitting. */}
+              {selfLive && (
+                <Animated.View
+                  pointerEvents="none"
+                  style={[
+                    styles.voicePulse,
+                    {
+                      opacity: pulse.interpolate({ inputRange: [0, 1], outputRange: [0.55, 0] }),
+                      transform: [{ scale: pulse.interpolate({ inputRange: [0, 1], outputRange: [1, 1.6] }) }],
+                    },
+                  ]}
+                />
+              )}
+              <MaterialCommunityIcons
+                name={voice.muted ? 'microphone-off' : 'microphone'}
+                size={22}
+                color={voice.muted ? colors.textMuted : '#fff'}
+              />
+            </Pressable>
+          )}
           <Pressable
-            style={[styles.voiceBtn, voice.muted ? styles.voiceBtnMuted : styles.voiceBtnLive]}
-            onPress={() => voice.toggleMute()}
+            style={[
+              styles.voiceBtn,
+              voice.status === 'connected' ? styles.voiceBtnOn : styles.voiceBtnOff,
+            ]}
+            onPress={toggleVoice}
+            disabled={voice.status === 'connecting'}
             hitSlop={8}
           >
             <MaterialCommunityIcons
-              name={voice.muted ? 'microphone-off' : 'microphone'}
+              name={
+                voice.status === 'connected'
+                  ? 'phone-in-talk'
+                  : voice.status === 'connecting'
+                    ? 'phone-sync'
+                    : 'phone-plus'
+              }
               size={22}
-              color={voice.muted ? colors.textMuted : '#fff'}
+              color={voice.status === 'connected' ? '#fff' : colors.text}
             />
+            {voice.status === 'connected' && voice.peers > 0 && (
+              <View style={styles.voiceBadge}>
+                <Text style={styles.voiceBadgeText}>{voice.peers + 1}</Text>
+              </View>
+            )}
           </Pressable>
-        )}
-        <Pressable
-          style={[
-            styles.voiceBtn,
-            voice.status === 'connected' ? styles.voiceBtnOn : styles.voiceBtnOff,
-          ]}
-          onPress={toggleVoice}
-          disabled={voice.status === 'connecting'}
-          hitSlop={8}
-        >
-          <MaterialCommunityIcons
-            name={
-              voice.status === 'connected'
-                ? 'phone-in-talk'
-                : voice.status === 'connecting'
-                  ? 'phone-sync'
-                  : 'phone-plus'
-            }
-            size={22}
-            color={voice.status === 'connected' ? '#fff' : colors.text}
-          />
-          {voice.status === 'connected' && voice.peers > 0 && (
-            <View style={styles.voiceBadge}>
-              <Text style={styles.voiceBadgeText}>{voice.peers + 1}</Text>
-            </View>
-          )}
-        </Pressable>
+        </View>
       </View>
 
       <Card style={styles.panel}>
@@ -840,7 +925,32 @@ const styles = StyleSheet.create({
     right: spacing.md,
     bottom: 160,
     gap: spacing.sm,
+    alignItems: 'flex-end',
+  },
+  voiceStatus: {
+    flexDirection: 'row',
     alignItems: 'center',
+    gap: 6,
+    paddingHorizontal: spacing.sm,
+    paddingVertical: 6,
+    borderRadius: radius.pill,
+    backgroundColor: colors.surface,
+    borderWidth: 1,
+    borderColor: colors.border,
+    ...shadow.card,
+  },
+  voiceStatusLive: { backgroundColor: colors.success, borderColor: colors.success },
+  voiceStatusTalking: { backgroundColor: colors.primary, borderColor: colors.primary },
+  voiceStatusError: { backgroundColor: colors.danger, borderColor: colors.danger },
+  voiceStatusDot: { width: 8, height: 8, borderRadius: 4 },
+  voiceStatusText: { color: colors.text, fontSize: 12, fontWeight: '800' },
+  voiceBtnRow: { flexDirection: 'row', gap: spacing.sm, alignItems: 'center' },
+  voicePulse: {
+    position: 'absolute',
+    width: 52,
+    height: 52,
+    borderRadius: 26,
+    backgroundColor: colors.primary,
   },
   voiceBtn: {
     width: 52,

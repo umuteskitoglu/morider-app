@@ -23,14 +23,7 @@
         "NSLocationWhenInUseUsageDescription": "Morider sürüşlerinizi kaydetmek için konumunuza erişir.",
         "NSLocationAlwaysAndWhenInUseUsageDescription": "Morider arka planda sürüşlerinizi kaydetmek için konumunuza erişir.",
         "NSMicrophoneUsageDescription": "Morider, grup sürüşlerinde sesli sohbet için mikrofonunuza erişir.",
-        "UIBackgroundModes": [
-          "location",
-          "audio",
-          "voip",
-          "location",
-          "audio",
-          "voip"
-        ],
+        "UIBackgroundModes": ["location", "audio", "voip"],
         "ITSAppUsesNonExemptEncryption": false
       },
       "bitcode": false
@@ -49,14 +42,20 @@
         "android.permission.ACCESS_NETWORK_STATE",
         "android.permission.INTERNET",
         "android.permission.SYSTEM_ALERT_WINDOW",
-        "android.permission.WAKE_LOCK"
+        "android.permission.WAKE_LOCK",
+        "android.permission.FOREGROUND_SERVICE",
+        "android.permission.FOREGROUND_SERVICE_LOCATION",
+        "android.permission.FOREGROUND_SERVICE_MICROPHONE"
       ]
     },
     "plugins": [
       [
         "expo-location",
         {
-          "locationAlwaysAndWhenInUsePermission": "Morider sürüşlerinizi kaydetmek için konumunuza erişir."
+          "locationAlwaysAndWhenInUsePermission": "Morider arka planda canlı konumunuzu grup sürüşündeki arkadaşlarınızla paylaşır.",
+          "isIosBackgroundLocationEnabled": true,
+          "isAndroidBackgroundLocationEnabled": true,
+          "isAndroidForegroundServiceEnabled": true
         }
       ],
       [

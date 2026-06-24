@@ -2,6 +2,9 @@ import { registerRootComponent } from 'expo';
 import { registerGlobals } from '@livekit/react-native';
 
 import App from './App';
+// Registers the background ride-location TaskManager task at startup, before any
+// ride starts it. The import side-effect is the registration.
+import './src/lib/backgroundLocation';
 
 // LiveKit needs its WebRTC globals installed before any room is created. Do it
 // once at startup, before the app renders.

@@ -4,7 +4,7 @@
 // room-join token per session (see telemetry/voice.go); the room is shared with
 // the live-position WebSocket only by convention (same session code).
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { AudioSession } from '@livekit/react-native';
+import { AudioSession, AndroidAudioTypePresets } from '@livekit/react-native';
 import {
   Room,
   RoomEvent,
@@ -30,6 +30,9 @@ export type GroupVoice = {
   muted: boolean;
   /** Numeric user ids currently transmitting (active speakers). */
   speaking: number[];
+  /** True while the local rider's own voice is being transmitted (lets the UI
+   *  reassure the rider that they're actually being heard). */
+  selfSpeaking: boolean;
   /** Count of remote riders connected to the voice room (excludes self). */
   peers: number;
   join: () => Promise<void>;
@@ -44,6 +47,7 @@ export function useGroupVoice(code: string): GroupVoice {
   const [status, setStatus] = useState<VoiceStatus>('off');
   const [muted, setMuted] = useState(false);
   const [speaking, setSpeaking] = useState<number[]>([]);
+  const [selfSpeaking, setSelfSpeaking] = useState(false);
   const [peers, setPeers] = useState(0);
   const roomRef = useRef<Room | null>(null);
 
@@ -55,6 +59,13 @@ export function useGroupVoice(code: string): GroupVoice {
     if (roomRef.current) return; // already connected/connecting
     setStatus('connecting');
     try {
+      // Configure for hands-free comms before the session starts: route to the
+      // speaker by default, prefer a connected helmet intercom (bluetooth), and
+      // keep the call-style audio mode so it stays alive in the background.
+      await AudioSession.configureAudio({
+        android: { preferredOutputList: ['bluetooth', 'speaker'], audioTypeOptions: AndroidAudioTypePresets.communication },
+        ios: { defaultOutput: 'speaker' },
+      });
       await AudioSession.startAudioSession();
       const { data } = await api.post<VoiceTokenResponse>(`/api/sessions/${code}/voice-token`);
 
@@ -63,6 +74,8 @@ export function useGroupVoice(code: string): GroupVoice {
 
       room
         .on(RoomEvent.ActiveSpeakersChanged, (speakers: Participant[]) => {
+          const selfId = room.localParticipant.identity;
+          setSelfSpeaking(speakers.some((s) => s.identity === selfId));
           setSpeaking(
             speakers
               .map((s) => userIdFromIdentity(s.identity))
@@ -77,6 +90,7 @@ export function useGroupVoice(code: string): GroupVoice {
             roomRef.current = null;
             setStatus('off');
             setSpeaking([]);
+            setSelfSpeaking(false);
             setPeers(0);
             void AudioSession.stopAudioSession();
           }
@@ -99,6 +113,7 @@ export function useGroupVoice(code: string): GroupVoice {
     const room = roomRef.current;
     roomRef.current = null;
     setSpeaking([]);
+    setSelfSpeaking(false);
     setPeers(0);
     setStatus('off');
     if (room) await room.disconnect().catch(() => {});
@@ -111,6 +126,7 @@ export function useGroupVoice(code: string): GroupVoice {
     const next = !muted;
     await room.localParticipant.setMicrophoneEnabled(!next);
     setMuted(next);
+    if (next) setSelfSpeaking(false); // muting kills the mic; reflect it at once
   }, [muted]);
 
   // Never leave the mic publishing past the screen's life.
@@ -121,5 +137,5 @@ export function useGroupVoice(code: string): GroupVoice {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  return { status, muted, speaking, peers, join, leave, toggleMute };
+  return { status, muted, speaking, selfSpeaking, peers, join, leave, toggleMute };
 }
