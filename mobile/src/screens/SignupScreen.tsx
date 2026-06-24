@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Alert, KeyboardAvoidingView, Platform, StyleSheet, Text, View } from 'react-native';
+import { Alert, KeyboardAvoidingView, Platform, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -39,9 +39,14 @@ export default function SignupScreen({ navigation }: Props) {
   return (
     <LinearGradient colors={gradients.hero} style={styles.container}>
       <KeyboardAvoidingView
-        style={[styles.flex, { paddingTop: insets.top, paddingBottom: insets.bottom }]}
+        style={styles.flex}
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
       >
+        <ScrollView
+          contentContainerStyle={[styles.scroll, { paddingTop: insets.top, paddingBottom: insets.bottom }]}
+          keyboardShouldPersistTaps="handled"
+          showsVerticalScrollIndicator={false}
+        >
         <View style={styles.header}>
           <LinearGradient colors={gradients.primary} style={styles.logoBadge}>
             <MaterialCommunityIcons name="account-plus" size={36} color="#fff" />
@@ -74,6 +79,7 @@ export default function SignupScreen({ navigation }: Props) {
           <View style={{ height: spacing.md }} />
           <Button title="Zaten hesabım var" variant="ghost" icon="login" onPress={() => navigation.goBack()} />
         </View>
+        </ScrollView>
       </KeyboardAvoidingView>
     </LinearGradient>
   );
@@ -81,7 +87,8 @@ export default function SignupScreen({ navigation }: Props) {
 
 const styles = StyleSheet.create({
   container: { flex: 1 },
-  flex: { flex: 1, padding: spacing.lg, justifyContent: 'center' },
+  flex: { flex: 1 },
+  scroll: { flexGrow: 1, justifyContent: 'center', padding: spacing.lg },
   header: { alignItems: 'center', marginBottom: spacing.lg },
   logoBadge: {
     width: 80,
