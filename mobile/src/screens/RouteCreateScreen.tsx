@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import {
   Alert,
   LayoutAnimation,
@@ -13,6 +13,7 @@ import MapView, { MapPressEvent, Marker, Polyline } from 'react-native-maps';
 import Slider from '@react-native-community/slider';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
+import * as Location from 'expo-location';
 
 import { ProfileStackParams } from '../navigation/RootNavigator';
 import { Button, Card, TextField } from '../components/ui';
@@ -47,6 +48,24 @@ export default function RouteCreateScreen({ navigation }: Props) {
   // Detail form (name/curviness/visibility) collapses so the map stays visible
   // while placing waypoints. It springs open automatically when saving.
   const [expanded, setExpanded] = useState(false);
+  const mapRef = useRef<MapView | null>(null);
+
+  // Center on the rider's current location when available.
+  useEffect(() => {
+    (async () => {
+      try {
+        const { status } = await Location.requestForegroundPermissionsAsync();
+        if (status !== 'granted') return;
+        const loc = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
+        mapRef.current?.animateToRegion(
+          { latitude: loc.coords.latitude, longitude: loc.coords.longitude, latitudeDelta: 0.05, longitudeDelta: 0.05 },
+          600,
+        );
+      } catch {
+        // keep default region
+      }
+    })();
+  }, []);
 
   function toggleExpanded(next?: boolean) {
     LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
@@ -134,9 +153,12 @@ export default function RouteCreateScreen({ navigation }: Props) {
   return (
     <View style={styles.container}>
       <MapView
+        ref={mapRef}
         style={StyleSheet.absoluteFill}
         initialRegion={{ latitude: 41.0082, longitude: 28.9784, latitudeDelta: 0.1, longitudeDelta: 0.1 }}
         onPress={onMapPress}
+        showsUserLocation
+        showsMyLocationButton
       >
         {points.map((p, i) => (
           <Marker key={i} coordinate={p} title={`${i + 1}`} />

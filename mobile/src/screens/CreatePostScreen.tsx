@@ -42,6 +42,10 @@ export default function CreatePostScreen({ navigation, route }: Props) {
     }
   }
 
+  function removePhoto(index: number) {
+    setPhotos((prev) => prev.filter((_, i) => i !== index));
+  }
+
   async function attachLocation() {
     try {
       const { status } = await Location.requestForegroundPermissionsAsync();
@@ -108,7 +112,12 @@ export default function CreatePostScreen({ navigation, route }: Props) {
         <View>
           <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.thumbs}>
             {photos.map((p, i) => (
-              <Image key={i} source={{ uri: p.uri }} style={styles.thumb} />
+              <View key={i} style={styles.thumbWrap}>
+                <Image source={{ uri: p.uri }} style={styles.thumb} />
+                <Pressable style={styles.removeBtn} onPress={() => removePhoto(i)} hitSlop={8}>
+                  <MaterialCommunityIcons name="close" size={16} color="#fff" />
+                </Pressable>
+              </View>
             ))}
           </ScrollView>
           <Pressable onPress={pickPhotos} style={styles.changeRow}>
@@ -167,7 +176,19 @@ const styles = StyleSheet.create({
   },
   pickerText: { color: colors.textMuted, fontWeight: '700' },
   thumbs: { gap: spacing.sm },
+  thumbWrap: { position: 'relative' },
   thumb: { width: 120, height: 120, borderRadius: radius.md },
+  removeBtn: {
+    position: 'absolute',
+    top: 4,
+    right: 4,
+    width: 24,
+    height: 24,
+    borderRadius: 12,
+    backgroundColor: 'rgba(0,0,0,0.6)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
   changeRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.xs, marginTop: spacing.sm },
   changeText: { color: colors.primary, fontWeight: '700' },
   card: { gap: spacing.xs },
