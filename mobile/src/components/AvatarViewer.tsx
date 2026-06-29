@@ -22,7 +22,7 @@ export function AvatarViewer({ uri, onClose }: { uri: string | null; onClose: ()
               uri={uri}
               width={size}
               height={size}
-              resizeMode="cover"
+              contentFit="cover"
               style={[styles.img, { width: size, height: size }]}
             />
           ) : null}

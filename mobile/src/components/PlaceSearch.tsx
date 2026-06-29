@@ -4,6 +4,7 @@ import {
   Keyboard,
   Pressable,
   ScrollView,
+  StyleProp,
   StyleSheet,
   Text,
   TextInput,
@@ -30,7 +31,7 @@ export function PlaceSearch({
   onPick: (place: Place) => void;
   near?: { lat: number; lon: number };
   placeholder?: string;
-  style?: ViewStyle;
+  style?: StyleProp<ViewStyle>;
 }) {
   const [query, setQuery] = useState('');
   const [results, setResults] = useState<Place[]>([]);

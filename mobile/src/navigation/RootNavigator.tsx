@@ -1,13 +1,14 @@
-import React from 'react';
-import { ActivityIndicator, Pressable, Text, View, StyleSheet } from 'react-native';
+import React, { useEffect, useRef } from 'react';
+import { ActivityIndicator, Animated, Pressable, Text, View, StyleSheet } from 'react-native';
 import { NavigationContainer, DefaultTheme, LinkingOptions, NavigatorScreenParams, getFocusedRouteNameFromRoute } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
-import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
+import { createBottomTabNavigator, BottomTabBarProps } from '@react-navigation/bottom-tabs';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { LinearGradient } from 'expo-linear-gradient';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 
 import { useAuth } from '../store/auth';
-import { colors, spacing } from '../theme';
+import { colors, gradients, radius, shadow, spacing } from '../theme';
 import LoginScreen from '../screens/LoginScreen';
 import SignupScreen from '../screens/SignupScreen';
 import MapScreen from '../screens/MapScreen';
@@ -56,6 +57,9 @@ export type FeedStackParams = {
   UserProfile: { userId: number; name: string };
   UserSearch: undefined;
   Comments: { postId: number };
+  // Without params: the caller's own follows. With userId: that user's lists
+  // (subject to the connection-based visibility rule), opened on `tab`.
+  Follows: { userId?: number; name?: string; tab?: 'following' | 'followers' } | undefined;
 };
 
 // "You" hub: account plus everything that belongs to the rider — ride history,
@@ -63,7 +67,9 @@ export type FeedStackParams = {
 export type ProfileStackParams = {
   ProfileMain: undefined;
   EditProfile: undefined;
-  Follows: undefined;
+  // Without params: the caller's own follows. With userId: that user's lists
+  // (subject to the connection-based visibility rule), opened on `tab`.
+  Follows: { userId?: number; name?: string; tab?: 'following' | 'followers' } | undefined;
   UserProfile: { userId: number; name: string };
   Rides: undefined;
   RideDetail: { id: number };
@@ -126,15 +132,9 @@ function RideNavigator() {
       <RideStack.Screen
         name="RideMain"
         component={MapScreen}
-        options={({ navigation }) => ({
-          title: 'Sürüş',
-          headerRight: () => (
-            <Pressable onPress={() => navigation.navigate('GroupJoin')} hitSlop={8} style={styles.headerGroupBtn}>
-              <MaterialCommunityIcons name="account-group" size={16} color="#fff" />
-              <Text style={styles.headerGroupText}>Grup</Text>
-            </Pressable>
-          ),
-        })}
+        // Full-screen immersive map (Google-Maps style); the in-map search bar
+        // and bottom panel carry the chrome, and Grup is reachable from there.
+        options={{ headerShown: false }}
       />
       <RideStack.Screen name="GroupJoin" component={GroupJoinScreen} options={{ title: 'Grup Sürüşü' }} />
       <RideStack.Screen name="GroupRide" component={GroupRideScreen} options={{ title: 'Grup Sürüşü' }} />
@@ -213,6 +213,7 @@ function FeedNavigator() {
       <FeedStack.Screen name="LocationPicker" component={LocationPickerScreen} options={{ title: 'Konum Seç' }} />
       <FeedStack.Screen name="UserProfile" component={UserProfileScreen} options={{ title: 'Profil' }} />
       <FeedStack.Screen name="UserSearch" component={UserSearchScreen} options={{ title: 'Kişi Bul' }} />
+      <FeedStack.Screen name="Follows" component={FollowsScreen} options={{ title: 'Takip' }} />
       <FeedStack.Screen name="Comments" component={CommentsScreen} options={{ title: 'Yorumlar' }} />
     </FeedStack.Navigator>
   );
@@ -251,59 +252,75 @@ const linking: LinkingOptions<AppTabParams> = {
   },
 };
 
-function tabIcon(name: IconName) {
-  return ({ color, size }: { color: string; size: number }) => (
-    <MaterialCommunityIcons name={name} color={color} size={size} />
+// Per-tab presentation for the custom bar. Keeping it here keeps AppTabs lean.
+const TAB_META: Record<keyof AppTabParams, { icon: IconName; label: string }> = {
+  Ride: { icon: 'motorbike', label: 'Sürüş' },
+  Feed: { icon: 'image-multiple', label: 'Akış' },
+  Events: { icon: 'calendar-clock', label: 'Etkinlik' },
+  Profile: { icon: 'account', label: 'Profil' },
+};
+
+// A single tab cell. The active cell lifts its icon and fades in an ember glow
+// + label, giving the bar a lively, premium feel without extra dependencies.
+function TabCell({ focused, icon, label, onPress }: { focused: boolean; icon: IconName; label: string; onPress: () => void }) {
+  const anim = useRef(new Animated.Value(focused ? 1 : 0)).current;
+  useEffect(() => {
+    Animated.spring(anim, { toValue: focused ? 1 : 0, useNativeDriver: true, speed: 18, bounciness: 8 }).start();
+  }, [focused, anim]);
+
+  const lift = anim.interpolate({ inputRange: [0, 1], outputRange: [0, -3] });
+  const scale = anim.interpolate({ inputRange: [0, 1], outputRange: [1, 1.12] });
+
+  return (
+    <Pressable style={styles.tabCell} onPress={onPress} hitSlop={6}>
+      <Animated.View style={[styles.tabIconWrap, focused && styles.tabIconWrapOn, { transform: [{ translateY: lift }, { scale }] }]}>
+        {focused && <Animated.View style={[styles.tabGlow, { opacity: anim }]} />}
+        <MaterialCommunityIcons name={icon} size={24} color={focused ? colors.primary : colors.textMuted} />
+      </Animated.View>
+      <Text style={[styles.tabLabel, focused && styles.tabLabelOn]}>{label}</Text>
+    </Pressable>
+  );
+}
+
+function CustomTabBar({ state, navigation }: BottomTabBarProps) {
+  const insets = useSafeAreaInsets();
+
+  // Hide on immersive screens that opt out (e.g. the live group-ride map).
+  const focused = state.routes[state.index];
+  const nested = getFocusedRouteNameFromRoute(focused);
+  if (nested === 'GroupRide') return null;
+
+  return (
+    <View style={[styles.tabBarWrap, { paddingBottom: Math.max(insets.bottom, spacing.sm) }]} pointerEvents="box-none">
+      <LinearGradient colors={gradients.glass} start={{ x: 0, y: 0 }} end={{ x: 0, y: 1 }} style={styles.tabBar}>
+        {state.routes.map((route, index) => {
+          const meta = TAB_META[route.name as keyof AppTabParams];
+          const isFocused = state.index === index;
+          const onPress = () => {
+            const event = navigation.emit({ type: 'tabPress', target: route.key, canPreventDefault: true });
+            if (!isFocused && !event.defaultPrevented) navigation.navigate(route.name);
+          };
+          return <TabCell key={route.key} focused={isFocused} icon={meta.icon} label={meta.label} onPress={onPress} />;
+        })}
+      </LinearGradient>
+    </View>
   );
 }
 
 function AppTabs() {
-  const insets = useSafeAreaInsets();
-  const tabBarStyle = {
-    backgroundColor: colors.surface,
-    borderTopColor: colors.border,
-    height: 58 + insets.bottom,
-    paddingTop: 8,
-    paddingBottom: Math.max(insets.bottom, 8),
-  };
   return (
     <Tabs.Navigator
+      tabBar={(props) => <CustomTabBar {...props} />}
       screenOptions={{
         headerStyle: { backgroundColor: colors.surface, shadowColor: 'transparent', elevation: 0 },
         headerTitleStyle: { color: colors.text, fontWeight: '800', letterSpacing: 0.5 },
         headerTintColor: colors.primary,
-        tabBarStyle,
-        tabBarLabelStyle: { fontSize: 11, fontWeight: '700', marginBottom: 2 },
-        tabBarActiveTintColor: colors.primary,
-        tabBarInactiveTintColor: colors.textMuted,
       }}
     >
-      <Tabs.Screen
-        name="Ride"
-        component={RideNavigator}
-        options={({ route }) => ({
-          title: 'Sürüş',
-          headerShown: false,
-          tabBarIcon: tabIcon('motorbike'),
-          // Hide the tab bar on the immersive live group-ride map.
-          tabBarStyle: getFocusedRouteNameFromRoute(route) === 'GroupRide' ? { display: 'none' } : tabBarStyle,
-        })}
-      />
-      <Tabs.Screen
-        name="Feed"
-        component={FeedNavigator}
-        options={{ title: 'Akış', headerShown: false, tabBarIcon: tabIcon('image-multiple') }}
-      />
-      <Tabs.Screen
-        name="Events"
-        component={EventsNavigator}
-        options={{ title: 'Etkinlik', headerShown: false, tabBarIcon: tabIcon('calendar-clock') }}
-      />
-      <Tabs.Screen
-        name="Profile"
-        component={ProfileNavigator}
-        options={{ title: 'Profil', headerShown: false, tabBarIcon: tabIcon('account') }}
-      />
+      <Tabs.Screen name="Ride" component={RideNavigator} options={{ headerShown: false }} />
+      <Tabs.Screen name="Feed" component={FeedNavigator} options={{ headerShown: false }} />
+      <Tabs.Screen name="Events" component={EventsNavigator} options={{ headerShown: false }} />
+      <Tabs.Screen name="Profile" component={ProfileNavigator} options={{ headerShown: false }} />
     </Tabs.Navigator>
   );
 }
@@ -337,6 +354,30 @@ export default function RootNavigator() {
 
 const styles = StyleSheet.create({
   center: { flex: 1, backgroundColor: colors.bg, alignItems: 'center', justifyContent: 'center' },
+  tabBarWrap: { backgroundColor: colors.bg, paddingTop: spacing.sm, paddingHorizontal: spacing.md },
+  tabBar: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-around',
+    borderRadius: radius.xl,
+    borderWidth: 1,
+    borderColor: colors.glassBorder,
+    backgroundColor: colors.surface,
+    paddingVertical: spacing.sm,
+    ...shadow.card,
+  },
+  tabCell: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: 3, paddingVertical: 2 },
+  tabIconWrap: { width: 44, height: 30, alignItems: 'center', justifyContent: 'center', borderRadius: radius.pill },
+  tabIconWrapOn: { backgroundColor: 'rgba(255,106,26,0.12)' },
+  tabGlow: {
+    position: 'absolute',
+    width: 44,
+    height: 30,
+    borderRadius: radius.pill,
+    backgroundColor: 'rgba(255,106,26,0.18)',
+  },
+  tabLabel: { fontSize: 10.5, fontWeight: '700', color: colors.textMuted, letterSpacing: 0.2 },
+  tabLabelOn: { color: colors.primary, fontWeight: '900' },
   headerRow: { flexDirection: 'row', alignItems: 'center', paddingRight: spacing.xs },
   headerBtn: { paddingHorizontal: spacing.xs, paddingVertical: spacing.xs, alignItems: 'center', justifyContent: 'center' },
   headerGroupBtn: {

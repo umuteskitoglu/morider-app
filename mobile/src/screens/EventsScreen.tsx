@@ -5,7 +5,7 @@ import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 
 import { EventsStackParams } from '../navigation/RootNavigator';
-import { Button, Card, TextField } from '../components/ui';
+import { Button, Card, EmptyState, TextField, TouchCard } from '../components/ui';
 import { api, errorMessage } from '../api/client';
 import { eventDraft } from '../lib/eventDraft';
 import { formatDateTime } from '../lib/datetime';
@@ -99,15 +99,11 @@ export default function EventsScreen({ navigation }: Props) {
         }
         ListEmptyComponent={
           !loading ? (
-            <View style={styles.emptyWrap}>
-              <MaterialCommunityIcons name="calendar-blank" size={48} color={colors.border} />
-              <Text style={styles.empty}>Henüz etkinlik yok.{'\n'}Bir sürüş planla!</Text>
-            </View>
+            <EmptyState icon="calendar-blank" title="Henüz etkinlik yok" hint="Bir sürüş planla ve arkadaşlarını davet et!" />
           ) : null
         }
         renderItem={({ item }) => (
-          <Pressable onPress={() => navigation.navigate('EventDetail', { code: item.code })}>
-            <Card style={styles.card}>
+          <TouchCard onPress={() => navigation.navigate('EventDetail', { code: item.code })} style={styles.card}>
               <View style={styles.iconBadge}>
                 <MaterialCommunityIcons name="calendar-clock" size={22} color={colors.primary} />
               </View>
@@ -134,8 +130,7 @@ export default function EventsScreen({ navigation }: Props) {
                 </View>
               </View>
               <MaterialCommunityIcons name="chevron-right" size={24} color={colors.textMuted} />
-            </Card>
-          </Pressable>
+          </TouchCard>
         )}
       />
     </View>
@@ -164,7 +159,7 @@ const styles = StyleSheet.create({
     width: 44,
     height: 44,
     borderRadius: 14,
-    backgroundColor: 'rgba(255,90,31,0.12)',
+    backgroundColor: 'rgba(255,106,26,0.12)',
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -174,7 +169,7 @@ const styles = StyleSheet.create({
   badges: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, marginTop: 2 },
   goingBadge: { flexDirection: 'row', alignItems: 'center', gap: 4 },
   goingText: { color: colors.success, fontSize: 12, fontWeight: '700' },
-  hostBadge: { backgroundColor: 'rgba(255,90,31,0.14)', paddingHorizontal: 8, paddingVertical: 2, borderRadius: radius.pill },
+  hostBadge: { backgroundColor: 'rgba(255,106,26,0.14)', paddingHorizontal: 8, paddingVertical: 2, borderRadius: radius.pill },
   hostText: { color: colors.primary, fontSize: 11, fontWeight: '800' },
   rsvpBadge: { borderWidth: 1, paddingHorizontal: 8, paddingVertical: 2, borderRadius: radius.pill },
   rsvpText: { fontSize: 11, fontWeight: '800' },

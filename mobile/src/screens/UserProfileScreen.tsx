@@ -1,6 +1,8 @@
 import React, { useCallback, useLayoutEffect, useState } from 'react';
-import { Image, Pressable, RefreshControl, ScrollView, StyleSheet, Text, useWindowDimensions, View } from 'react-native';
-import { RouteProp, useFocusEffect } from '@react-navigation/native';
+import { Pressable, RefreshControl, ScrollView, StyleSheet, Text, useWindowDimensions, View } from 'react-native';
+import { Image } from 'expo-image';
+import { RouteProp, useFocusEffect, useNavigation } from '@react-navigation/native';
+import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { LinearGradient } from 'expo-linear-gradient';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 
@@ -9,6 +11,7 @@ import { AvatarViewer } from '../components/AvatarViewer';
 import FollowButton from '../components/FollowButton';
 import { useAuth } from '../store/auth';
 import { RiderChips } from '../components/RiderChips';
+import { ProfileStackParams } from '../navigation/RootNavigator';
 import { api, apiBaseURL } from '../api/client';
 import { colors, gradients, radius, shadow, spacing } from '../theme';
 
@@ -27,6 +30,10 @@ type Props = {
 export default function UserProfileScreen({ route, navigation }: Props) {
   const { userId, name } = route.params;
   const { user } = useAuth();
+  // Separate, fully-typed nav handle for pushing onto the stack (the screen's
+  // own `navigation` prop is narrowed to setOptions). Both stacks that host this
+  // screen declare an identical `Follows` route, so this typing holds at runtime.
+  const stackNav = useNavigation<NativeStackNavigationProp<ProfileStackParams>>();
   const { width } = useWindowDimensions();
   const [posts, setPosts] = useState<DetailPost[]>([]);
   const [badges, setBadges] = useState<Badge[]>([]);
@@ -35,6 +42,7 @@ export default function UserProfileScreen({ route, navigation }: Props) {
   const [viewer, setViewer] = useState<DetailPost | null>(null);
   const [refreshing, setRefreshing] = useState(false);
   const [following, setFollowing] = useState(false);
+  const [followedBy, setFollowedBy] = useState(false);
   const [avatarUrl, setAvatarUrl] = useState('');
   const [username, setUsername] = useState('');
   const [bio, setBio] = useState('');
@@ -44,6 +52,15 @@ export default function UserProfileScreen({ route, navigation }: Props) {
   const [zoomUri, setZoomUri] = useState<string | null>(null);
 
   const isSelf = user?.id === userId;
+  // Instagram-style: follow lists open only when there's a connection — you
+  // follow them, or they follow you (your own profile is always open). The
+  // backend enforces the same rule; this just gates the tap affordance.
+  const canViewFollows = isSelf || following || followedBy;
+
+  function openFollows(tab: 'following' | 'followers') {
+    if (!canViewFollows) return;
+    stackNav.navigate('Follows', { userId, name, tab });
+  }
 
   const thumb = (width - spacing.md * 2 - spacing.xs * 2) / 3;
 
@@ -76,7 +93,10 @@ export default function UserProfileScreen({ route, navigation }: Props) {
       setBadges(b.data.rewards ?? []);
       setGarage(g.data.motorcycles ?? []);
       setRoutes(r.data.routes ?? []);
-      if (s) setFollowing(s.data.following ?? false);
+      if (s) {
+        setFollowing(s.data.following ?? false);
+        setFollowedBy(s.data.followed_by ?? false);
+      }
     } catch {
       // ignore
     }
@@ -121,14 +141,24 @@ export default function UserProfileScreen({ route, navigation }: Props) {
               <Text style={styles.statNum}>{stats.postCount}</Text>
               <Text style={styles.statLabel}>Gönderi</Text>
             </View>
-            <View style={styles.statItem}>
+            <Pressable
+              style={styles.statItem}
+              onPress={() => openFollows('followers')}
+              disabled={!canViewFollows}
+              hitSlop={8}
+            >
               <Text style={styles.statNum}>{stats.followerCount}</Text>
               <Text style={styles.statLabel}>Takipçi</Text>
-            </View>
-            <View style={styles.statItem}>
+            </Pressable>
+            <Pressable
+              style={styles.statItem}
+              onPress={() => openFollows('following')}
+              disabled={!canViewFollows}
+              hitSlop={8}
+            >
               <Text style={styles.statNum}>{stats.followingCount}</Text>
               <Text style={styles.statLabel}>Takip</Text>
-            </View>
+            </Pressable>
           </View>
           {badges.length > 0 && (
             <View style={styles.badges}>

@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import {
+  Alert,
   Animated,
   FlatList,
   Modal,
@@ -17,7 +18,8 @@ import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 
-import { api, apiBaseURL } from '../api/client';
+import { api, apiBaseURL, errorMessage } from '../api/client';
+import { useAuth } from '../store/auth';
 import { ZoomableImage } from './ZoomableImage';
 import { CommentsView } from './CommentsView';
 import { LikersSheet } from './LikersSheet';
@@ -37,15 +39,29 @@ export type DetailPost = {
 
 // PostDetail is a full-screen, swipe-to-dismiss post viewer with like/comment
 // actions, a likers list and inline comments. Used from the profile grids.
-export function PostDetail({ post, onClose }: { post: DetailPost | null; onClose: () => void }) {
+export function PostDetail({
+  post,
+  onClose,
+  onDeleted,
+}: {
+  post: DetailPost | null;
+  onClose: () => void;
+  // Called after the post is deleted on the server, so the parent can drop it
+  // from its list. Only own posts expose a delete action.
+  onDeleted?: (postId: number) => void;
+}) {
   const { width, height } = useWindowDimensions();
   const insets = useSafeAreaInsets();
+  const { user } = useAuth();
   const [idx, setIdx] = useState(0);
   const [liked, setLiked] = useState(false);
   const [likeCount, setLikeCount] = useState(0);
   const [commentCount, setCommentCount] = useState(0);
   const [showComments, setShowComments] = useState(false);
   const [showLikers, setShowLikers] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+
+  const isOwn = !!post && !!user && post.user_id === user.id;
 
   const translateY = useRef(new Animated.Value(0)).current;
   const lastTap = useRef(0);
@@ -89,6 +105,28 @@ export function PostDetail({ post, onClose }: { post: DetailPost | null; onClose
     } catch {
       setLiked(!next);
       setLikeCount((n) => n + (next ? -1 : 1));
+    }
+  }
+
+  function confirmDelete() {
+    if (!post) return;
+    Alert.alert('Gönderiyi sil', 'Bu gönderi ve fotoğrafları kalıcı olarak silinecek. Emin misin?', [
+      { text: 'Vazgeç', style: 'cancel' },
+      { text: 'Sil', style: 'destructive', onPress: deletePost },
+    ]);
+  }
+
+  async function deletePost() {
+    if (!post) return;
+    try {
+      setDeleting(true);
+      await api.delete(`/api/posts/${post.id}`);
+      onDeleted?.(post.id);
+      onClose();
+    } catch (err) {
+      Alert.alert('Silinemedi', errorMessage(err));
+    } finally {
+      setDeleting(false);
     }
   }
 
@@ -172,6 +210,17 @@ export function PostDetail({ post, onClose }: { post: DetailPost | null; onClose
               <MaterialCommunityIcons name="chevron-down" size={28} color="#fff" />
             </Pressable>
 
+            {/* Delete is only offered on the viewer's own posts. */}
+            {isOwn && (
+              <Pressable style={styles.delete} onPress={confirmDelete} disabled={deleting} hitSlop={12}>
+                <MaterialCommunityIcons
+                  name={deleting ? 'loading' : 'trash-can-outline'}
+                  size={22}
+                  color="#fff"
+                />
+              </Pressable>
+            )}
+
             {/* Right action rail — icons carry a soft shadow so they stay visible
                 on light photos (Instagram-style). */}
             <View style={styles.rail}>
@@ -245,6 +294,17 @@ const styles = StyleSheet.create({
     position: 'absolute',
     top: 50,
     left: spacing.md,
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: 'rgba(0,0,0,0.45)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  delete: {
+    position: 'absolute',
+    top: 50,
+    right: spacing.md,
     width: 40,
     height: 40,
     borderRadius: 20,

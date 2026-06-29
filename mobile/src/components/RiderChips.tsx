@@ -45,7 +45,7 @@ export const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 4,
-    backgroundColor: 'rgba(255,90,31,0.12)',
+    backgroundColor: 'rgba(255,106,26,0.12)',
     borderWidth: 1,
     borderColor: colors.primary,
     paddingHorizontal: spacing.sm,

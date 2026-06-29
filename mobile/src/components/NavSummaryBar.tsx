@@ -4,19 +4,23 @@ import { MaterialCommunityIcons } from '@expo/vector-icons';
 
 import { colors, radius, shadow, spacing } from '../theme';
 
+const ETA_GREEN = '#34C759';
+
 /**
- * Google-Maps-style bottom summary while navigating: estimated arrival time,
- * remaining duration and remaining distance, plus the "end ride" button. The
- * arrival clock ticks every second so it stays current even between GPS fixes.
+ * Google-Maps-style bottom sheet while navigating: a big remaining-time figure,
+ * the remaining distance and the arrival clock, plus a round exit button. The
+ * arrival clock ticks every second so it stays current between GPS fixes.
  */
 export function NavSummaryBar({
   remainingKm,
   remainingMin,
   onStop,
+  bottomInset = 0,
 }: {
   remainingKm: number;
   remainingMin: number;
   onStop: () => void;
+  bottomInset?: number;
 }) {
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
@@ -30,49 +34,74 @@ export function NavSummaryBar({
   const minText = remainingMin >= 1 ? `${Math.round(remainingMin)} dk` : '<1 dk';
 
   return (
-    <View style={styles.bar}>
-      <View style={styles.info}>
-        <Text style={styles.eta}>{etaText}</Text>
-        <Text style={styles.sub}>
-          {minText} • {distText}
-        </Text>
+    <View style={[styles.sheet, { paddingBottom: bottomInset + spacing.md }]}>
+      <View style={styles.handle} />
+      <View style={styles.row}>
+        <View style={styles.info}>
+          <Text style={styles.min}>{minText}</Text>
+          <Text style={styles.sub}>
+            {distText} • varış {etaText}
+          </Text>
+        </View>
+        <Pressable style={styles.stopBtn} onPress={onStop} hitSlop={8}>
+          <MaterialCommunityIcons name="close" size={26} color="#fff" />
+        </Pressable>
       </View>
-      <Pressable style={styles.stopBtn} onPress={onStop} hitSlop={8}>
-        <MaterialCommunityIcons name="stop-circle" size={20} color="#fff" />
-        <Text style={styles.stopText}>Bitir</Text>
-      </Pressable>
+    </View>
+  );
+}
+
+/**
+ * Current-speed indicator (Google's bottom-left speed circle): a white pill with
+ * the speed and unit. `limit`, when known, could later drive a red ring.
+ */
+export function SpeedPill({ speed, bottomInset = 0 }: { speed: number; bottomInset?: number }) {
+  return (
+    <View style={[styles.speedPill, { bottom: bottomInset + 150 }]}>
+      <Text style={styles.speedValue}>{Math.max(0, Math.round(speed))}</Text>
+      <Text style={styles.speedUnit}>km/s</Text>
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  bar: {
+  sheet: {
     position: 'absolute',
-    left: spacing.md,
-    right: spacing.md,
-    bottom: spacing.lg,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    backgroundColor: 'rgba(18,24,38,0.96)',
-    borderWidth: 1,
-    borderColor: colors.border,
-    borderRadius: radius.lg,
-    paddingVertical: spacing.md,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: '#1B1B1F',
+    borderTopLeftRadius: radius.xl,
+    borderTopRightRadius: radius.xl,
     paddingHorizontal: spacing.lg,
+    paddingTop: spacing.sm,
     ...shadow.card,
   },
+  handle: { alignSelf: 'center', width: 40, height: 4, borderRadius: 2, backgroundColor: '#3A3A40', marginBottom: spacing.sm },
+  row: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
   info: { flex: 1 },
-  eta: { color: colors.text, fontSize: 22, fontWeight: '900' },
-  sub: { color: colors.textMuted, fontSize: 14, fontWeight: '700', marginTop: 2 },
+  min: { color: ETA_GREEN, fontSize: 26, fontWeight: '900', letterSpacing: -0.5 },
+  sub: { color: colors.text, fontSize: 15, fontWeight: '600', marginTop: 2 },
   stopBtn: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacing.xs,
+    width: 48,
+    height: 48,
+    borderRadius: 24,
     backgroundColor: colors.danger,
-    paddingVertical: spacing.sm,
-    paddingHorizontal: spacing.md,
-    borderRadius: radius.pill,
+    alignItems: 'center',
+    justifyContent: 'center',
+    ...shadow.card,
   },
-  stopText: { color: '#fff', fontWeight: '800', fontSize: 14 },
+  speedPill: {
+    position: 'absolute',
+    left: spacing.md,
+    width: 60,
+    height: 60,
+    borderRadius: 30,
+    backgroundColor: '#fff',
+    alignItems: 'center',
+    justifyContent: 'center',
+    ...shadow.card,
+  },
+  speedValue: { color: '#1a1a1a', fontSize: 22, fontWeight: '900', lineHeight: 24 },
+  speedUnit: { color: '#666', fontSize: 9, fontWeight: '700', letterSpacing: 0.3 },
 });

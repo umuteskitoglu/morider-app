@@ -5,7 +5,7 @@ import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 
 import { ProfileStackParams } from '../navigation/RootNavigator';
-import { Button, Card } from '../components/ui';
+import { Button, EmptyState, TouchCard } from '../components/ui';
 import { BikeFormModal, BikeFormValues } from '../components/BikeFormModal';
 import { DOC_KEYS, DOC_LABELS, expiryStatus, Motorcycle } from '../lib/garage';
 import { syncGarageReminders } from '../lib/garageReminders';
@@ -71,17 +71,15 @@ export default function GarageScreen({ navigation }: Props) {
         ListHeaderComponent={<Button title="Motor Ekle" icon="plus" onPress={() => setAdding(true)} />}
         ListEmptyComponent={
           !loading ? (
-            <View style={styles.emptyWrap}>
-              <MaterialCommunityIcons name="garage-variant" size={48} color={colors.border} />
-              <Text style={styles.empty}>
-                Garajın boş.{'\n'}Motorunu ekle; sigorta, muayene ve kasko bitişlerini hatırlatalım.
-              </Text>
-            </View>
+            <EmptyState
+              icon="garage-variant"
+              title="Garajın boş"
+              hint="Motorunu ekle; sigorta, muayene ve kasko bitişlerini sana hatırlatalım."
+            />
           ) : null
         }
         renderItem={({ item }) => (
-          <Pressable onPress={() => navigation.navigate('BikeDetail', { id: item.id, name: item.name })}>
-            <Card style={styles.card}>
+          <TouchCard onPress={() => navigation.navigate('BikeDetail', { id: item.id, name: item.name })} style={styles.card}>
               <View style={styles.headRow}>
                 <View style={styles.iconBadge}>
                   <MaterialCommunityIcons name="motorbike" size={22} color={colors.primary} />
@@ -108,8 +106,7 @@ export default function GarageScreen({ navigation }: Props) {
                   );
                 })}
               </View>
-            </Card>
-          </Pressable>
+          </TouchCard>
         )}
       />
 
@@ -127,7 +124,7 @@ const styles = StyleSheet.create({
     width: 44,
     height: 44,
     borderRadius: 14,
-    backgroundColor: 'rgba(255,90,31,0.12)',
+    backgroundColor: 'rgba(255,106,26,0.12)',
     alignItems: 'center',
     justifyContent: 'center',
   },

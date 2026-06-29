@@ -48,9 +48,11 @@ export default function SignupScreen({ navigation }: Props) {
           showsVerticalScrollIndicator={false}
         >
         <View style={styles.header}>
-          <LinearGradient colors={gradients.primary} style={styles.logoBadge}>
-            <MaterialCommunityIcons name="account-plus" size={36} color="#fff" />
-          </LinearGradient>
+          <View style={styles.logoHalo}>
+            <LinearGradient colors={gradients.primary} style={styles.logoBadge}>
+              <MaterialCommunityIcons name="account-plus" size={36} color="#fff" />
+            </LinearGradient>
+          </View>
           <Text style={styles.title}>Aramıza Katıl</Text>
           <Text style={styles.subtitle}>Motor topluluğuna ilk vitesi tak</Text>
         </View>
@@ -90,23 +92,33 @@ const styles = StyleSheet.create({
   flex: { flex: 1 },
   scroll: { flexGrow: 1, justifyContent: 'center', padding: spacing.lg },
   header: { alignItems: 'center', marginBottom: spacing.lg },
+  logoHalo: {
+    width: 110,
+    height: 110,
+    borderRadius: 36,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: spacing.md,
+    backgroundColor: 'rgba(255,106,26,0.10)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,106,26,0.22)',
+  },
   logoBadge: {
     width: 80,
     height: 80,
     borderRadius: 24,
     alignItems: 'center',
     justifyContent: 'center',
-    marginBottom: spacing.md,
     transform: [{ rotate: '-6deg' }],
     ...shadow.glow,
   },
   title: { color: colors.text, fontSize: 28, fontWeight: '900', letterSpacing: 1 },
   subtitle: { color: colors.textMuted, marginTop: spacing.xs },
   form: {
-    backgroundColor: colors.surface,
-    borderRadius: 22,
+    backgroundColor: colors.glass,
+    borderRadius: 24,
     borderWidth: 1,
-    borderColor: colors.border,
+    borderColor: colors.glassBorder,
     padding: spacing.lg,
     ...shadow.card,
   },

@@ -5,7 +5,7 @@ import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 
 import { ProfileStackParams } from '../navigation/RootNavigator';
-import { Card, Stars } from '../components/ui';
+import { EmptyState, Stars, TouchCard } from '../components/ui';
 import FollowButton from '../components/FollowButton';
 import { api, errorMessage } from '../api/client';
 import { colors, spacing } from '../theme';
@@ -56,15 +56,11 @@ export default function ExploreScreen({ navigation }: Props) {
         refreshControl={<RefreshControl refreshing={loading} onRefresh={load} tintColor={colors.primary} />}
         ListEmptyComponent={
           !loading ? (
-            <View style={styles.emptyWrap}>
-              <MaterialCommunityIcons name="compass-outline" size={48} color={colors.border} />
-              <Text style={styles.empty}>{error ?? 'Henüz herkese açık rota yok.\nİlk paylaşan sen ol!'}</Text>
-            </View>
+            <EmptyState icon="compass-outline" title={error ?? 'Henüz herkese açık rota yok'} hint={error ? undefined : 'İlk paylaşan sen ol — rotanı herkese aç!'} />
           ) : null
         }
         renderItem={({ item }) => (
-          <Pressable onPress={() => navigation.navigate('RouteDetail', { id: item.id, name: item.name })}>
-            <Card style={styles.card}>
+          <TouchCard onPress={() => navigation.navigate('RouteDetail', { id: item.id, name: item.name })} style={styles.card}>
               <View style={styles.iconBadge}>
                 <MaterialCommunityIcons name="earth" size={22} color={colors.primary} />
               </View>
@@ -90,8 +86,7 @@ export default function ExploreScreen({ navigation }: Props) {
                 </View>
               </View>
               <MaterialCommunityIcons name="chevron-right" size={24} color={colors.textMuted} />
-            </Card>
-          </Pressable>
+          </TouchCard>
         )}
       />
     </View>
@@ -106,7 +101,7 @@ const styles = StyleSheet.create({
     width: 44,
     height: 44,
     borderRadius: 14,
-    backgroundColor: 'rgba(255,90,31,0.12)',
+    backgroundColor: 'rgba(255,106,26,0.12)',
     alignItems: 'center',
     justifyContent: 'center',
   },

@@ -4,10 +4,12 @@ import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 
 import { FeedStackParams } from '../navigation/RootNavigator';
-import { Card, TextField } from '../components/ui';
+import { LinearGradient } from 'expo-linear-gradient';
+
+import { Card, EmptyState, TextField, TouchCard } from '../components/ui';
 import FollowButton from '../components/FollowButton';
 import { api, apiBaseURL } from '../api/client';
-import { colors, spacing } from '../theme';
+import { colors, gradients, spacing } from '../theme';
 
 type Result = { id: number; name: string; avatar_url: string; following: boolean };
 type Props = NativeStackScreenProps<FeedStackParams, 'UserSearch'>;
@@ -85,17 +87,16 @@ export default function UserSearchScreen({ navigation }: Props) {
         contentContainerStyle={styles.content}
         keyboardShouldPersistTaps="handled"
         ListEmptyComponent={
-          empty ? (
-            <Card>
-              <Text style={styles.muted}>{empty}</Text>
-            </Card>
-          ) : loading ? (
+          loading ? (
             <ActivityIndicator color={colors.primary} style={styles.spinner} />
+          ) : q.trim().length < 2 ? (
+            <EmptyState icon="account-search" title="Kişi bul" hint="En az 2 harf yazarak motorcu arkadaşlarını ara." />
+          ) : empty ? (
+            <EmptyState icon="account-question-outline" title="Eşleşen kullanıcı bulunamadı" />
           ) : null
         }
         renderItem={({ item }) => (
-          <Pressable onPress={() => navigation.navigate('UserProfile', { userId: item.id, name: item.name })}>
-            <Card style={styles.row}>
+          <TouchCard onPress={() => navigation.navigate('UserProfile', { userId: item.id, name: item.name })} style={styles.row}>
               <Avatar name={item.name} url={item.avatar_url} />
               <View style={styles.info}>
                 <Text style={styles.name}>{item.name}</Text>
@@ -106,8 +107,7 @@ export default function UserSearchScreen({ navigation }: Props) {
                 onChange={(f) => onToggle(item.id, f)}
                 compact
               />
-            </Card>
-          </Pressable>
+          </TouchCard>
         )}
       />
     </View>
@@ -119,9 +119,9 @@ function Avatar({ name, url }: { name: string; url: string }) {
     return <Image source={{ uri: `${apiBaseURL()}${url}` }} style={styles.avatar} />;
   }
   return (
-    <View style={styles.avatar}>
+    <LinearGradient colors={gradients.primary} style={styles.avatar}>
       <Text style={styles.avatarText}>{name?.charAt(0).toUpperCase() ?? 'M'}</Text>
-    </View>
+    </LinearGradient>
   );
 }
 

@@ -2,7 +2,6 @@ import React, { useCallback, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
-  Image,
   KeyboardAvoidingView,
   Modal,
   Platform,
@@ -14,6 +13,7 @@ import {
   useWindowDimensions,
   View,
 } from 'react-native';
+import { Image } from 'expo-image';
 import { useFocusEffect, useNavigation } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -24,6 +24,7 @@ import { Button, Card, TextField } from '../components/ui';
 import { BIKE_LABELS, BIKE_TYPES, bikeLabel, LICENSE_LABELS, LICENSE_TYPES, licenseLabel } from '../lib/rider';
 import { getEmergencyContact, setEmergencyContact } from '../lib/emergency';
 import { PostDetail, DetailPost } from '../components/PostDetail';
+import { removeFromFeedCache } from './FeedScreen';
 import { AvatarViewer } from '../components/AvatarViewer';
 import { RiderChips } from '../components/RiderChips';
 import { useAuth, User } from '../store/auth';
@@ -399,7 +400,15 @@ export default function ProfileScreen() {
         <Button title="Çıkış Yap" variant="ghost" icon="logout" onPress={signOut} />
       </ScrollView>
 
-      <PostDetail post={viewer} onClose={() => setViewer(null)} />
+      <PostDetail
+        post={viewer}
+        onClose={() => setViewer(null)}
+        onDeleted={(id) => {
+          setPosts((ps) => ps.filter((p) => p.id !== id));
+          setStats((s) => ({ ...s, postCount: Math.max(0, s.postCount - 1) }));
+          removeFromFeedCache(id);
+        }}
+      />
 
       <AvatarViewer uri={zoomUri} onClose={() => setZoomUri(null)} />
 
@@ -647,7 +656,7 @@ const styles = StyleSheet.create({
     borderColor: colors.border,
     backgroundColor: colors.surfaceAlt,
   },
-  pillOn: { borderColor: colors.primary, backgroundColor: 'rgba(255,90,31,0.15)' },
+  pillOn: { borderColor: colors.primary, backgroundColor: 'rgba(255,106,26,0.15)' },
   pillText: { color: colors.textMuted, fontWeight: '700', fontSize: 13 },
   pillTextOn: { color: colors.primary },
   flex: { flex: 1 },
@@ -711,7 +720,7 @@ const styles = StyleSheet.create({
   multi: { position: 'absolute', top: 4, right: 4 },
   leaderRow: { flexDirection: 'row', alignItems: 'center', paddingVertical: spacing.sm },
   leaderDivider: { borderBottomWidth: 1, borderBottomColor: colors.border },
-  leaderMe: { backgroundColor: 'rgba(255,90,31,0.08)', borderRadius: radius.sm, marginHorizontal: -spacing.xs, paddingHorizontal: spacing.xs },
+  leaderMe: { backgroundColor: 'rgba(255,106,26,0.08)', borderRadius: radius.sm, marginHorizontal: -spacing.xs, paddingHorizontal: spacing.xs },
   rankBadge: { width: 26, height: 26, borderRadius: 13, alignItems: 'center', justifyContent: 'center', marginRight: spacing.sm },
   rankText: { color: '#0A0E16', fontWeight: '900', fontSize: 13 },
   leaderAvatar: { width: 32, height: 32, borderRadius: 16, alignItems: 'center', justifyContent: 'center', marginRight: spacing.sm },

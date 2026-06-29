@@ -5,7 +5,7 @@ import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 
 import { ProfileStackParams } from '../navigation/RootNavigator';
-import { Card } from '../components/ui';
+import { EmptyState, TouchCard } from '../components/ui';
 import { api, errorMessage } from '../api/client';
 import { colors, spacing } from '../theme';
 
@@ -51,15 +51,11 @@ export default function RidesScreen() {
         refreshControl={<RefreshControl refreshing={loading} onRefresh={load} tintColor={colors.primary} />}
         ListEmptyComponent={
           !loading ? (
-            <View style={styles.emptyWrap}>
-              <MaterialCommunityIcons name="motorbike" size={48} color={colors.border} />
-              <Text style={styles.empty}>{error ?? 'Henüz sürüş yok.\nİlk sürüşünü kaydet!'}</Text>
-            </View>
+            <EmptyState icon="motorbike" title={error ?? 'Henüz sürüş yok'} hint={error ? undefined : 'İlk sürüşünü kaydet ve istatistiklerini gör!'} />
           ) : null
         }
         renderItem={({ item }) => (
-          <Pressable onPress={() => navigation.navigate('RideDetail', { id: item.id })}>
-            <Card style={styles.card}>
+          <TouchCard onPress={() => navigation.navigate('RideDetail', { id: item.id })} style={styles.card}>
               <View style={styles.cardHead}>
               <View style={styles.distanceWrap}>
                 <MaterialCommunityIcons name="motorbike" size={20} color={colors.primary} />
@@ -71,8 +67,7 @@ export default function RidesScreen() {
                 <Meta icon="speedometer" label="Ort. hız" value={`${item.avg_speed.toFixed(0)} km/s`} />
                 <Meta icon="image-filter-hdr" label="Yükseklik" value={`${item.elevation_gain.toFixed(0)} m`} />
               </View>
-            </Card>
-          </Pressable>
+          </TouchCard>
         )}
       />
     </View>

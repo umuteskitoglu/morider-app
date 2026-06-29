@@ -53,6 +53,7 @@ func registerRoutes(d *server.Deps, h *handler) {
 	g.POST("/feed/avatar", h.uploadAvatar)
 	g.GET("/posts/mine", h.mine)
 	g.POST("/posts", h.create)
+	g.DELETE("/posts/:id", h.deletePost)
 	g.POST("/posts/:id/like", h.like)
 	g.DELETE("/posts/:id/like", h.unlike)
 	g.GET("/posts/:id/likes", h.likes)
@@ -171,6 +172,56 @@ func (h *handler) create(c *gin.Context) {
 	post.Photos = urls
 	post.Author = authpkg.Email(c) // best-effort; list endpoint returns the real name
 	c.JSON(http.StatusCreated, post)
+}
+
+// deletePost removes one of the caller's own posts. The post_photos, post_likes
+// and post_comments rows cascade away with the posts row; we additionally unlink
+// the stored media files from disk on a best-effort basis.
+func (h *handler) deletePost(c *gin.Context) {
+	id, ok := postID(c)
+	if !ok {
+		return
+	}
+	uid := authpkg.UserID(c)
+
+	var ownerID int64
+	if err := h.d.DB.QueryRow(c, `SELECT user_id FROM posts WHERE id = $1`, id).Scan(&ownerID); err != nil {
+		// pgx returns ErrNoRows when the post is gone; treat any scan miss as 404.
+		httpx.Error(c, http.StatusNotFound, "post not found")
+		return
+	}
+	if ownerID != uid {
+		httpx.Error(c, http.StatusForbidden, "you can only delete your own posts")
+		return
+	}
+
+	// Collect media file names before the cascade removes the photo rows.
+	var urls []string
+	if rows, err := h.d.DB.Query(c, `SELECT url FROM post_photos WHERE post_id = $1`, id); err == nil {
+		for rows.Next() {
+			var u string
+			if rows.Scan(&u) == nil {
+				urls = append(urls, u)
+			}
+		}
+		rows.Close()
+	}
+
+	if _, err := h.d.DB.Exec(c, `DELETE FROM posts WHERE id = $1`, id); err != nil {
+		httpx.Internal(c, "could not delete post")
+		return
+	}
+
+	// Best-effort disk cleanup; failures here must not fail the request since the
+	// row (the source of truth) is already gone.
+	for _, u := range urls {
+		name := strings.TrimPrefix(u, mediaURLPrefix)
+		if name != "" && name != u {
+			_ = os.Remove(filepath.Join(h.uploadDir, filepath.Base(name)))
+		}
+	}
+
+	c.Status(http.StatusNoContent)
 }
 
 // uploadAvatar stores a single (already client-cropped) profile photo and returns

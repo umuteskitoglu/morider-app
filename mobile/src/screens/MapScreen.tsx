@@ -4,13 +4,14 @@ import MapView, { LongPressEvent, Marker, Polyline, Region } from 'react-native-
 import * as Location from 'expo-location';
 import { activateKeepAwakeAsync, deactivateKeepAwake } from 'expo-keep-awake';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 
 import { RideStackParams } from '../navigation/RootNavigator';
-import { Button, Card, TextField } from '../components/ui';
+import { Button, TextField } from '../components/ui';
 import { CrashCountdown } from '../components/CrashCountdown';
 import { NavBanner } from '../components/NavBanner';
-import { NavSummaryBar } from '../components/NavSummaryBar';
+import { NavSummaryBar, SpeedPill } from '../components/NavSummaryBar';
 import { PlaceSearch } from '../components/PlaceSearch';
 import { Place } from '../lib/geocode';
 import { darkMapStyle } from '../lib/mapStyle';
@@ -48,6 +49,11 @@ const INITIAL_REGION: Region = {
   longitudeDelta: 0.05,
 };
 
+// Google-Maps navigation route colors: a bright blue fill with a darker blue
+// casing/outline drawn underneath it.
+const navRouteFill = '#4E9BFF';
+const navRouteCasing = '#1A6CD4';
+
 // Distance (km) still to drive: from the rider to the nearest guide vertex,
 // then along the remaining geometry to the end. Self-correcting (recomputed each
 // fix) so it stays right across reroutes without baseline bookkeeping.
@@ -78,11 +84,14 @@ function haversineKm(a: Coord, b: Coord): number {
 }
 
 export default function MapScreen({ route, navigation }: Props) {
+  const insets = useSafeAreaInsets();
   const followRouteId = route.params?.followRouteId;
   const [hasPermission, setHasPermission] = useState(false);
   const [recording, setRecording] = useState(false);
   const [path, setPath] = useState<Coord[]>([]);
   const [followPath, setFollowPath] = useState<Coord[]>([]);
+  // Live position for the Google-Maps-style heading arrow (puck) while riding.
+  const [userCoord, setUserCoord] = useState<Coord | null>(null);
   const [distance, setDistance] = useState(0);
   const [speed, setSpeed] = useState(0);
   const [heading, setHeading] = useState(-1);
@@ -271,10 +280,28 @@ export default function MapScreen({ route, navigation }: Props) {
     const c = lastCoord.current;
     if (c) {
       mapRef.current?.animateCamera(
-        { center: c, pitch: 55, zoom: 17.5, ...(heading >= 0 ? { heading } : {}) },
+        { center: c, pitch: 55, zoom: 17.5, altitude: 300, ...(heading >= 0 ? { heading } : {}) },
         { duration: 500 },
       );
     }
+  }
+
+  // Zoom/tilt straight into the chase view the instant a ride starts, like
+  // Google Maps — instead of waiting for the first background GPS fix (which can
+  // be a few seconds out, making the map look like it never zooms in). Uses the
+  // last known position immediately, then refines with a fresh fix.
+  function primeChaseCam() {
+    const apply = (latitude: number, longitude: number, hd: number) => {
+      camPrimed.current = true;
+      mapRef.current?.animateCamera(
+        { center: { latitude, longitude }, pitch: 55, zoom: 17.5, altitude: 300, ...(hd >= 0 ? { heading: hd } : {}) },
+        { duration: 600 },
+      );
+    };
+    if (near) apply(near.lat, near.lon, -1);
+    Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.High })
+      .then((loc) => apply(loc.coords.latitude, loc.coords.longitude, loc.coords.heading ?? -1))
+      .catch(() => {});
   }
 
   // POIs (mola noktaları) for the visible map area. Refreshed as the viewport
@@ -440,6 +467,8 @@ export default function MapScreen({ route, navigation }: Props) {
     maxLeanLeft.current = 0;
     camPrimed.current = false;
     setRecording(true);
+    // Zoom/tilt in right away so the start feels like Google Maps navigation.
+    primeChaseCam();
 
     // Following a saved route → plan turn-by-turn from the rider's *current*
     // position (best effort; without steps the dashed guide line still shows).
@@ -481,6 +510,7 @@ export default function MapScreen({ route, navigation }: Props) {
         setDistance((d) => d + haversineKm(lastCoord.current as Coord, coord));
       }
       lastCoord.current = coord;
+      setUserCoord(coord);
       setSpeed(speed);
       setHeading(heading);
       setAltitude(altitude);
@@ -505,7 +535,7 @@ export default function MapScreen({ route, navigation }: Props) {
         if (!camPrimed.current) {
           camPrimed.current = true;
           mapRef.current?.animateCamera(
-            { center: coord, pitch: 55, zoom: 17.5, ...(heading >= 0 ? { heading } : {}) },
+            { center: coord, pitch: 55, zoom: 17.5, altitude: 300, ...(heading >= 0 ? { heading } : {}) },
             { duration: 700 },
           );
         } else {
@@ -580,6 +610,16 @@ export default function MapScreen({ route, navigation }: Props) {
     }
   }
 
+  const navigating = recording && navStep != null;
+  // Keep the floating controls clear of the bottom panel/sheet, whose height
+  // depends on the mode: ETA sheet (nav) < one-button panel (recording) <
+  // two-button panel (idle).
+  const controlsBottom = navigating
+    ? insets.bottom + 130
+    : recording
+      ? insets.bottom + 200
+      : insets.bottom + 256;
+
   return (
     <View style={styles.container}>
       <MapView
@@ -589,7 +629,7 @@ export default function MapScreen({ route, navigation }: Props) {
         customMapStyle={darkMapStyle}
         userInterfaceStyle="dark"
         showsBuildings
-        showsUserLocation
+        showsUserLocation={!recording}
         showsMyLocationButton={false}
         followsUserLocation={false}
         onLongPress={onMapLongPress}
@@ -599,10 +639,35 @@ export default function MapScreen({ route, navigation }: Props) {
           if (recording) setFollowCam(false);
         }}
       >
+        {/* Google-Maps-style route guide: a bright blue fill over a darker
+            casing, solid with rounded caps/joins (no thin dashes). The casing is
+            drawn first (wider) so the fill sits centered on top of it. */}
         {followPath.length > 1 && (
-          <Polyline coordinates={followPath} strokeColor={colors.accent} strokeWidth={5} lineDashPattern={[2, 8]} />
+          <>
+            <Polyline coordinates={followPath} strokeColor={navRouteCasing} strokeWidth={12} lineCap="round" lineJoin="round" zIndex={1} />
+            <Polyline coordinates={followPath} strokeColor={navRouteFill} strokeWidth={8} lineCap="round" lineJoin="round" zIndex={2} />
+          </>
         )}
-        {path.length > 1 && <Polyline coordinates={path} strokeColor={colors.primary} strokeWidth={6} />}
+        {/* The actually-ridden track on top, in the brand red. */}
+        {path.length > 1 && (
+          <Polyline coordinates={path} strokeColor={colors.primary} strokeWidth={6} lineCap="round" lineJoin="round" zIndex={3} />
+        )}
+        {/* Google-Maps-style heading arrow (puck) instead of the round dot while
+            riding. `flat` makes the rotation map-relative, so the arrow points
+            in the true travel direction even as the chase cam rotates the map. */}
+        {recording && userCoord && (
+          <Marker
+            coordinate={userCoord}
+            anchor={{ x: 0.5, y: 0.5 }}
+            flat
+            rotation={heading >= 0 ? heading : 0}
+            tracksViewChanges={false}
+          >
+            <View style={styles.navPuck}>
+              <MaterialCommunityIcons name="navigation" size={20} color="#fff" />
+            </View>
+          </Marker>
+        )}
         {destination && <Marker coordinate={destination} pinColor={colors.primary} title="Hedef" />}
         {pois.map((p) => (
           <Marker
@@ -619,39 +684,45 @@ export default function MapScreen({ route, navigation }: Props) {
         ))}
       </MapView>
 
-      {/* Turn-by-turn banner replaces the status chrome while navigating */}
-      {recording && navStep ? (
+      {/* Google-Maps-style maneuver header while navigating */}
+      {navigating ? (
         <NavBanner
           step={navStep}
           distM={navDist}
           nextStep={navNext}
           voiceOn={voiceOn}
           onToggleVoice={() => setVoiceOn((v) => !v)}
+          topInset={insets.top}
         />
       ) : (
         <>
           {/* Destination search (idle): pick a target to navigate to */}
           {!recording && (
-            <PlaceSearch onPick={onPickDestination} near={near} placeholder="Nereye? Hedef ara…" style={styles.search} />
+            <PlaceSearch
+              onPick={onPickDestination}
+              near={near}
+              placeholder="Nereye? Hedef ara…"
+              style={[styles.search, { top: insets.top + spacing.sm }]}
+            />
           )}
 
           {destination ? (
-            <Pressable style={styles.followChip} onPress={clearDestination}>
+            <Pressable style={[styles.followChip, { top: insets.top + (recording ? spacing.md : 64) }]} onPress={clearDestination}>
               <MaterialCommunityIcons name="flag-checkered" size={16} color={colors.accent} />
               <Text style={styles.followChipText}>Hedefe gidiliyor</Text>
               <MaterialCommunityIcons name="close" size={16} color={colors.textMuted} />
             </Pressable>
           ) : followPath.length > 1 ? (
-            <Pressable style={styles.followChip} onPress={clearFollow}>
+            <Pressable style={[styles.followChip, { top: insets.top + (recording ? spacing.md : 64) }]} onPress={clearFollow}>
               <MaterialCommunityIcons name="map-marker-path" size={16} color={colors.accent} />
               <Text style={styles.followChipText}>Rota takipte</Text>
               <MaterialCommunityIcons name="close" size={16} color={colors.textMuted} />
             </Pressable>
           ) : null}
 
-          {/* Recording badge — only mid-ride; idle uses the search bar instead */}
+          {/* Recording badge — only mid free-ride; idle uses the search bar */}
           {recording && (
-            <View style={styles.badgeWrap} pointerEvents="none">
+            <View style={[styles.badgeWrap, { top: insets.top + spacing.sm }]} pointerEvents="none">
               <View style={[styles.badge, styles.badgeLive]}>
                 <View style={[styles.dot, { backgroundColor: colors.danger }]} />
                 <Text style={styles.badgeText}>KAYITTA</Text>
@@ -661,39 +732,39 @@ export default function MapScreen({ route, navigation }: Props) {
         </>
       )}
 
+      {/* Current-speed circle (Google bottom-left) while navigating */}
+      {navigating && <SpeedPill speed={speed} bottomInset={insets.bottom} />}
+
       {/* Resume the chase cam after panning the map by hand (navigation only) */}
-      {recording && navStep && !followCam && (
-        <Pressable style={styles.recenterBtn} onPress={recenterChase}>
+      {navigating && !followCam && (
+        <Pressable style={[styles.recenterBtn, { bottom: insets.bottom + 110 }]} onPress={recenterChase}>
           <MaterialCommunityIcons name="navigation" size={18} color="#fff" />
           <Text style={styles.recenterText}>Ortala</Text>
         </Pressable>
       )}
 
-      {/* Toggle to the full-screen ride dashboard — hidden during active nav to
-          keep the navigation view clean. */}
-      {!(recording && navStep) && (
-        <Pressable style={styles.dashBtn} onPress={() => setViewMode('dash')}>
-          <MaterialCommunityIcons name="gauge" size={22} color={colors.text} />
+      {/* Floating controls (right): dashboard gauges + recenter */}
+      <View style={[styles.controls, { bottom: controlsBottom }]} pointerEvents="box-none">
+        <Pressable style={styles.fab} onPress={() => setViewMode('dash')}>
+          <MaterialCommunityIcons name="gauge" size={24} color={colors.primary} />
         </Pressable>
-      )}
+        {!navigating && (
+          <Pressable style={styles.fab} onPress={() => (recording ? recenterChase() : centerOnUser(false))}>
+            <MaterialCommunityIcons name="crosshairs-gps" size={24} color={colors.text} />
+          </Pressable>
+        )}
+      </View>
 
-      {/* Recenter button (idle / free ride). Mid-ride it also resumes the chase
-          cam if the rider had panned the map away. */}
-      {!(recording && navStep) && (
-        <Pressable style={styles.locateBtn} onPress={() => (recording ? recenterChase() : centerOnUser(false))}>
-          <MaterialCommunityIcons name="crosshairs-gps" size={22} color={colors.text} />
-        </Pressable>
-      )}
-
-      {/* While navigating, a compact ETA bar replaces the big stats panel */}
-      {recording && navStep ? (
+      {/* While navigating, the Google-style ETA sheet replaces the stats panel */}
+      {navigating ? (
         <NavSummaryBar
           remainingKm={remainingKm}
           remainingMin={routeKm > 0 ? routeMin * (remainingKm / routeKm) : 0}
           onStop={stopRecording}
+          bottomInset={insets.bottom}
         />
       ) : (
-        <Card style={styles.panel}>
+        <View style={[styles.panel, { paddingBottom: insets.bottom + spacing.md }]}>
           <View style={styles.stats}>
             <Stat icon="map-marker-distance" label="Mesafe" value={distance.toFixed(2)} unit="km" />
             <Stat icon="speedometer" label="Hız" value={speed.toFixed(0)} unit="km/s" />
@@ -708,7 +779,7 @@ export default function MapScreen({ route, navigation }: Props) {
               <Button title="Grup Sürüşü" variant="ghost" icon="account-group" onPress={() => navigation.navigate('GroupJoin')} />
             </>
           )}
-        </Card>
+        </View>
       )}
 
       {/* Full-screen gauge dashboard overlay; the map stays mounted underneath
@@ -788,7 +859,7 @@ function Stat({ icon, label, value, unit }: { icon: any; label: string; value: s
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: colors.bg },
-  badgeWrap: { position: 'absolute', top: spacing.lg, left: 0, right: 0, alignItems: 'center' },
+  badgeWrap: { position: 'absolute', left: 0, right: 0, alignItems: 'center' },
   badge: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -801,11 +872,10 @@ const styles = StyleSheet.create({
   badgeIdle: { backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border },
   dot: { width: 8, height: 8, borderRadius: 4, marginRight: spacing.sm },
   badgeText: { color: colors.text, fontWeight: '800', fontSize: 12, letterSpacing: 1 },
-  search: { position: 'absolute', top: spacing.md, left: spacing.md, right: spacing.md },
+  search: { position: 'absolute', left: spacing.md, right: spacing.md },
   recenterBtn: {
     position: 'absolute',
     alignSelf: 'center',
-    bottom: 120,
     flexDirection: 'row',
     alignItems: 'center',
     gap: spacing.xs,
@@ -818,7 +888,6 @@ const styles = StyleSheet.create({
   recenterText: { color: '#fff', fontWeight: '800', fontSize: 13 },
   followChip: {
     position: 'absolute',
-    top: 76,
     alignSelf: 'center',
     flexDirection: 'row',
     alignItems: 'center',
@@ -832,35 +901,43 @@ const styles = StyleSheet.create({
     ...shadow.card,
   },
   followChipText: { color: colors.text, fontWeight: '700', fontSize: 12 },
-  locateBtn: {
-    position: 'absolute',
-    right: spacing.md,
-    bottom: 180,
-    width: 46,
-    height: 46,
-    borderRadius: 23,
-    backgroundColor: colors.surface,
-    borderWidth: 1,
-    borderColor: colors.border,
+  navPuck: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: '#1A73E8',
+    borderWidth: 2.5,
+    borderColor: '#fff',
     alignItems: 'center',
     justifyContent: 'center',
     ...shadow.card,
   },
-  dashBtn: {
-    position: 'absolute',
-    right: spacing.md,
-    bottom: 236,
-    width: 46,
-    height: 46,
-    borderRadius: 23,
+  controls: { position: 'absolute', right: spacing.md, alignItems: 'center', gap: spacing.sm },
+  fab: {
+    width: 52,
+    height: 52,
+    borderRadius: 26,
     backgroundColor: colors.surface,
     borderWidth: 1,
-    borderColor: colors.border,
+    borderColor: colors.glassBorder,
     alignItems: 'center',
     justifyContent: 'center',
     ...shadow.card,
   },
-  panel: { position: 'absolute', left: spacing.md, right: spacing.md, bottom: spacing.lg },
+  panel: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: colors.surface,
+    borderTopLeftRadius: radius.xl,
+    borderTopRightRadius: radius.xl,
+    borderTopWidth: 1,
+    borderColor: colors.border,
+    paddingHorizontal: spacing.lg,
+    paddingTop: spacing.lg,
+    ...shadow.card,
+  },
   poiPin: {
     width: 30,
     height: 30,

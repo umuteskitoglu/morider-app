@@ -472,7 +472,7 @@ const styles = StyleSheet.create({
   fieldLabel: { color: colors.textMuted, fontSize: 12, fontWeight: '700', textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: spacing.xs },
   motoRow: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm },
   motoPill: { paddingHorizontal: spacing.md, paddingVertical: spacing.sm, borderRadius: radius.pill, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.bgAlt },
-  motoPillActive: { borderColor: colors.primary, backgroundColor: 'rgba(225,6,0,0.12)' },
+  motoPillActive: { borderColor: colors.primary, backgroundColor: 'rgba(255,106,26,0.12)' },
   motoText: { color: colors.textMuted, fontWeight: '700', fontSize: 13 },
   endDot: {
     width: 16,

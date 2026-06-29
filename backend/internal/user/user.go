@@ -52,6 +52,8 @@ func registerRoutes(d *server.Deps) {
 	f := d.Engine.Group("/api/follows", d.JWT.Middleware())
 	f.GET("/following", h.listFollowing)
 	f.GET("/followers", h.listFollowers)
+	f.GET("/:userId/following", h.listUserFollowing)
+	f.GET("/:userId/followers", h.listUserFollowers)
 	f.GET("/status/:userId", h.followStatus)
 	f.PUT("/:userId", h.follow)
 	f.DELETE("/:userId", h.unfollow)

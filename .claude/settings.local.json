@@ -33,7 +33,10 @@
       "Bash(python3 -)",
       "Bash(afconvert -f m4af -d aac /tmp/synth_eng.wav /tmp/synth_eng.m4a)",
       "Read(//tmp/**)",
-      "Bash(afinfo /tmp/synth_eng.m4a)"
+      "Bash(afinfo /tmp/synth_eng.m4a)",
+      "PowerShell(git add mobile/src/screens/CreatePostScreen.tsx mobile/src/screens/RouteCreateScreen.tsx)",
+      "Bash(git pull *)",
+      "Bash(node -e \"console.log\\(Object.keys\\(require\\('expo-keep-awake'\\)\\)\\)\")"
     ]
   }
 }

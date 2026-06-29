@@ -1,17 +1,20 @@
-import React, { useCallback, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
+  ActivityIndicator,
   Animated,
   FlatList,
-  Image,
   LayoutChangeEvent,
   NativeScrollEvent,
   NativeSyntheticEvent,
   Pressable,
+  RefreshControl,
   StyleSheet,
   Text,
   useWindowDimensions,
   View,
 } from 'react-native';
+import { Image } from 'expo-image';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useFocusEffect } from '@react-navigation/native';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -20,8 +23,9 @@ import { MaterialCommunityIcons } from '@expo/vector-icons';
 
 import { FeedStackParams } from '../navigation/RootNavigator';
 import { LikersSheet } from '../components/LikersSheet';
+import { EmptyState } from '../components/ui';
 import { api, apiBaseURL, errorMessage } from '../api/client';
-import { colors, spacing } from '../theme';
+import { colors, gradients, spacing } from '../theme';
 
 type Post = {
   id: number;
@@ -37,29 +41,86 @@ type Post = {
 };
 type Props = NativeStackScreenProps<FeedStackParams, 'FeedList'>;
 
+// Feed cache. The list is kept across navigation (memory) and across app
+// restarts (disk) so returning to the tab shows posts instantly — Instagram
+// style — instead of blanking out and refetching on every focus. The network
+// is only hit when the cache is stale or the user pulls to refresh.
+const FEED_CACHE_KEY = 'morider.feedCache';
+const FRESH_MS = 30_000;
+let feedMemCache: Post[] | null = null;
+let feedFetchedAt = 0;
+
+// Marks the cache stale so the next focus refetches — e.g. after creating a
+// post, which must appear at the top of the feed.
+export function invalidateFeedCache() {
+  feedFetchedAt = 0;
+}
+
+// Lets other screens (e.g. deleting a post) drop an item from the cache so it
+// never flashes back from a stale list before the next network refresh.
+export function removeFromFeedCache(postId: number) {
+  if (feedMemCache) {
+    feedMemCache = feedMemCache.filter((p) => p.id !== postId);
+    AsyncStorage.setItem(FEED_CACHE_KEY, JSON.stringify(feedMemCache)).catch(() => {});
+  }
+}
+
 export default function FeedScreen({ navigation }: Props) {
   const { width } = useWindowDimensions();
   const insets = useSafeAreaInsets();
-  const [posts, setPosts] = useState<Post[]>([]);
+  const [posts, setPosts] = useState<Post[]>(() => feedMemCache ?? []);
   const [error, setError] = useState<string | null>(null);
+  const [loading, setLoading] = useState(feedMemCache === null);
+  const [refreshing, setRefreshing] = useState(false);
   const [height, setHeight] = useState(0);
   const [likersPostId, setLikersPostId] = useState<number | null>(null);
 
   const load = useCallback(async () => {
     try {
-      setError(null);
       const { data } = await api.get('/api/feed');
-      setPosts(data.posts ?? []);
+      const next: Post[] = data.posts ?? [];
+      feedMemCache = next;
+      feedFetchedAt = Date.now();
+      setPosts(next);
+      setError(null);
+      AsyncStorage.setItem(FEED_CACHE_KEY, JSON.stringify(next)).catch(() => {});
     } catch (err) {
-      setError(errorMessage(err));
+      // Keep showing cached posts on failure; only surface the error when there
+      // is nothing to show.
+      if (!feedMemCache || feedMemCache.length === 0) setError(errorMessage(err));
+    } finally {
+      setLoading(false);
     }
+  }, []);
+
+  // Cold-start hydration: paint the last feed from disk before the first fetch.
+  useEffect(() => {
+    if (feedMemCache !== null) return;
+    AsyncStorage.getItem(FEED_CACHE_KEY)
+      .then((raw) => {
+        if (raw && feedMemCache === null) {
+          const cached = JSON.parse(raw) as Post[];
+          feedMemCache = cached;
+          setPosts(cached);
+        }
+      })
+      .catch(() => {});
   }, []);
 
   useFocusEffect(
     useCallback(() => {
-      load();
+      // Show cache instantly; only refresh in the background when it is stale.
+      if (Date.now() - feedFetchedAt > FRESH_MS) {
+        load();
+      }
     }, [load]),
   );
+
+  const onRefresh = useCallback(async () => {
+    setRefreshing(true);
+    await load();
+    setRefreshing(false);
+  }, [load]);
 
   function onLayout(e: LayoutChangeEvent) {
     setHeight(e.nativeEvent.layout.height);
@@ -73,10 +134,20 @@ export default function FeedScreen({ navigation }: Props) {
           keyExtractor={(item) => String(item.id)}
           pagingEnabled
           showsVerticalScrollIndicator={false}
+          refreshControl={
+            <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.primary} />
+          }
           ListEmptyComponent={
             <View style={[styles.empty, { height }]}>
-              <MaterialCommunityIcons name="image-multiple-outline" size={48} color={colors.border} />
-              <Text style={styles.emptyText}>{error ?? 'Henüz paylaşım yok.\nİlk fotoğrafı sen paylaş!'}</Text>
+              {loading ? (
+                <ActivityIndicator color={colors.primary} />
+              ) : (
+                <EmptyState
+                  icon="image-multiple-outline"
+                  title={error ?? 'Henüz paylaşım yok'}
+                  hint={error ? undefined : 'İlk fotoğrafını sen paylaş — yoldaki anlarını topluluğa göster!'}
+                />
+              )}
             </View>
           }
           renderItem={({ item }) => (
@@ -191,7 +262,13 @@ function PostItem({
         onMomentumScrollEnd={onScroll}
         renderItem={({ item }) => (
           <Pressable onPress={onPhotoTap}>
-            <Image source={{ uri: apiBaseURL() + item }} style={{ width, height }} resizeMode="contain" />
+            <Image
+              source={apiBaseURL() + item}
+              style={{ width, height }}
+              contentFit="contain"
+              cachePolicy="memory-disk"
+              transition={150}
+            />
           </Pressable>
         )}
       />
@@ -216,9 +293,9 @@ function PostItem({
 
       <LinearGradient colors={['transparent', 'rgba(0,0,0,0.92)']} style={styles.overlay}>
         <Pressable style={styles.authorRow} onPress={() => onOpenProfile(post.user_id, post.author)}>
-          <View style={styles.avatar}>
+          <LinearGradient colors={gradients.primary} style={styles.avatar}>
             <Text style={styles.avatarText}>{post.author?.charAt(0).toUpperCase() ?? 'M'}</Text>
-          </View>
+          </LinearGradient>
           <Text style={styles.author}>{post.author}</Text>
         </Pressable>
         {post.caption ? <Text style={styles.caption}>{post.caption}</Text> : null}

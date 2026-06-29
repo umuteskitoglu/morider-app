@@ -7,6 +7,7 @@ import * as Location from 'expo-location';
 
 import { FeedStackParams } from '../navigation/RootNavigator';
 import { Button, Card, TextField } from '../components/ui';
+import { invalidateFeedCache } from './FeedScreen';
 import { api, errorMessage } from '../api/client';
 import { colors, radius, spacing } from '../theme';
 
@@ -93,6 +94,7 @@ export default function CreatePostScreen({ navigation, route }: Props) {
         form.append('lon', String(coords.lon));
       }
       await api.post('/api/posts', form, { headers: { 'Content-Type': 'multipart/form-data' } });
+      invalidateFeedCache(); // surface the new post on the next feed focus
       navigation.goBack();
     } catch (err) {
       Alert.alert('Paylaşılamadı', errorMessage(err));

@@ -15,6 +15,7 @@ import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 
 import { EventsStackParams } from '../navigation/RootNavigator';
+import { EmptyState } from '../components/ui';
 import { useAuth } from '../store/auth';
 import { api, apiBaseURL, TOKEN_KEY } from '../api/client';
 import { formatTime } from '../lib/datetime';
@@ -133,8 +134,7 @@ export default function EventChatScreen({ navigation, route }: Props) {
         keyboardShouldPersistTaps="handled"
         ListEmptyComponent={
           <View style={styles.empty}>
-            <MaterialCommunityIcons name="chat-outline" size={44} color={colors.border} />
-            <Text style={styles.emptyText}>Henüz mesaj yok.{'\n'}İlk mesajı sen yaz!</Text>
+            <EmptyState icon="chat-outline" title="Henüz mesaj yok" hint="İlk mesajı sen yaz ve grubu hareketlendir!" />
           </View>
         }
         renderItem={({ item: m }) => {

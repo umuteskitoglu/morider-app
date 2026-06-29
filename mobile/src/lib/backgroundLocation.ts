@@ -69,7 +69,7 @@ export async function startRideLocation(notif?: RideNotification): Promise<void>
     foregroundService: {
       notificationTitle: notif?.notificationTitle ?? 'Morider grup sürüşü',
       notificationBody: notif?.notificationBody ?? 'Canlı konum paylaşımı ve sesli yönlendirme açık.',
-      notificationColor: '#E10600',
+      notificationColor: '#FF6A1A',
     },
   });
 }

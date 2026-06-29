@@ -8,7 +8,7 @@ import * as DocumentPicker from 'expo-document-picker';
 import * as FileSystem from 'expo-file-system/legacy';
 
 import { ProfileStackParams } from '../navigation/RootNavigator';
-import { Button, Card } from '../components/ui';
+import { Button, Card, EmptyState } from '../components/ui';
 import { api, errorMessage } from '../api/client';
 import { colors, radius, spacing } from '../theme';
 
@@ -98,10 +98,7 @@ export default function RoutesScreen({ navigation }: Props) {
         }
         ListEmptyComponent={
           !loading ? (
-            <View style={styles.emptyWrap}>
-              <MaterialCommunityIcons name="map-marker-path" size={48} color={colors.border} />
-              <Text style={styles.empty}>{error ?? 'Henüz rota yok.\nYeni bir rota oluştur!'}</Text>
-            </View>
+            <EmptyState icon="map-marker-path" title={error ?? 'Henüz rota yok'} hint={error ? undefined : 'Yeni bir rota oluştur veya GPX/KML içe aktar!'} />
           ) : null
         }
         renderItem={({ item }) => (
@@ -164,7 +161,7 @@ const styles = StyleSheet.create({
     width: 44,
     height: 44,
     borderRadius: 14,
-    backgroundColor: 'rgba(255,90,31,0.12)',
+    backgroundColor: 'rgba(255,106,26,0.12)',
     alignItems: 'center',
     justifyContent: 'center',
   },

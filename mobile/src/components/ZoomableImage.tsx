@@ -1,10 +1,15 @@
 import React, { useRef } from 'react';
-import { Animated, ImageResizeMode, StyleProp, ImageStyle } from 'react-native';
+import { Animated, StyleProp } from 'react-native';
+import { Image, ImageStyle } from 'expo-image';
 import {
   PinchGestureHandler,
   PinchGestureHandlerStateChangeEvent,
   State,
 } from 'react-native-gesture-handler';
+
+// expo-image gives us disk caching and flicker-free loading; wrap it so it can
+// still drive the pinch transform via the Animated API.
+const AnimatedImage = Animated.createAnimatedComponent(Image);
 
 // ZoomableImage adds Instagram-style pinch-to-zoom: zoom in around the pinch
 // focal point while two fingers are down, then spring back to fit on release.
@@ -15,13 +20,13 @@ export function ZoomableImage({
   width,
   height,
   style,
-  resizeMode = 'contain',
+  contentFit = 'contain',
 }: {
   uri: string;
   width: number;
   height: number;
   style?: StyleProp<ImageStyle>;
-  resizeMode?: ImageResizeMode;
+  contentFit?: 'contain' | 'cover' | 'fill';
 }) {
   const scale = useRef(new Animated.Value(1)).current;
   const focalX = useRef(new Animated.Value(0)).current;
@@ -48,9 +53,11 @@ export function ZoomableImage({
 
   return (
     <PinchGestureHandler onGestureEvent={onGestureEvent} onHandlerStateChange={onStateChange}>
-      <Animated.Image
-        source={{ uri }}
-        resizeMode={resizeMode}
+      <AnimatedImage
+        source={uri}
+        contentFit={contentFit}
+        cachePolicy="memory-disk"
+        transition={150}
         style={[
           style,
           {

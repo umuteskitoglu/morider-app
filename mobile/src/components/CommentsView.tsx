@@ -11,9 +11,11 @@ import {
 } from 'react-native';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { LinearGradient } from 'expo-linear-gradient';
 
+import { EmptyState } from './ui';
 import { api, errorMessage } from '../api/client';
-import { colors, radius, spacing } from '../theme';
+import { colors, gradients, radius, spacing } from '../theme';
 
 type Comment = {
   id: number;
@@ -142,7 +144,7 @@ export function CommentsView({
         data={roots}
         keyExtractor={(item) => String(item.id)}
         contentContainerStyle={styles.list}
-        ListEmptyComponent={!loading ? <Text style={styles.empty}>İlk yorumu sen yaz!</Text> : null}
+        ListEmptyComponent={!loading ? <EmptyState icon="comment-text-outline" title="Henüz yorum yok" hint="İlk yorumu sen yaz!" /> : null}
         renderItem={({ item }) => (
           <CommentNode
             comment={item}
@@ -205,9 +207,9 @@ function CommentNode({
   return (
     <View style={{ marginLeft }}>
       <View style={[styles.row, depth > 0 && styles.replyRow]}>
-        <View style={styles.avatar}>
+        <LinearGradient colors={gradients.primary} style={styles.avatar}>
           <Text style={styles.avatarText}>{comment.author?.charAt(0).toUpperCase() ?? 'M'}</Text>
-        </View>
+        </LinearGradient>
         <View style={styles.bubbleWrap}>
           <View style={styles.bubble}>
             <Text style={styles.author}>{comment.author}</Text>
