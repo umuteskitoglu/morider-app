@@ -10,6 +10,7 @@
 package main
 
 import (
+	"context"
 	"flag"
 	"fmt"
 	"log"
@@ -24,7 +25,10 @@ import (
 	"github.com/morider/backend/internal/route"
 	"github.com/morider/backend/internal/telemetry"
 	"github.com/morider/backend/internal/user"
+	"github.com/morider/backend/migrations"
 	"github.com/morider/backend/pkg/config"
+	"github.com/morider/backend/pkg/db"
+	"github.com/morider/backend/pkg/migrate"
 )
 
 func main() {
@@ -41,6 +45,15 @@ func main() {
 	if err := cfg.Validate(); err != nil {
 		log.Fatalf("invalid configuration: %v", err)
 	}
+
+	pool, err := db.Connect(context.Background(), cfg.DatabaseURL)
+	if err != nil {
+		log.Fatalf("database connection failed: %v", err)
+	}
+	if err := migrate.Run(context.Background(), pool, migrations.FS); err != nil {
+		log.Fatalf("migrations failed: %v", err)
+	}
+	pool.Close()
 
 	runners := map[string]func(config.Config) error{
 		"gateway":   gateway.Run,
