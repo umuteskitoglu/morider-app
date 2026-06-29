@@ -1,8 +1,10 @@
 import React, { useCallback, useState } from 'react';
-import { FlatList, RefreshControl, StyleSheet, Text, View } from 'react-native';
-import { useFocusEffect } from '@react-navigation/native';
+import { FlatList, Pressable, RefreshControl, StyleSheet, Text, View } from 'react-native';
+import { useFocusEffect, useNavigation } from '@react-navigation/native';
+import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 
+import { ProfileStackParams } from '../navigation/RootNavigator';
 import { Card } from '../components/ui';
 import { api, errorMessage } from '../api/client';
 import { colors, spacing } from '../theme';
@@ -16,6 +18,7 @@ type Ride = {
 };
 
 export default function RidesScreen() {
+  const navigation = useNavigation<NativeStackNavigationProp<ProfileStackParams>>();
   const [rides, setRides] = useState<Ride[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -55,19 +58,21 @@ export default function RidesScreen() {
           ) : null
         }
         renderItem={({ item }) => (
-          <Card style={styles.card}>
-            <View style={styles.cardHead}>
+          <Pressable onPress={() => navigation.navigate('RideDetail', { id: item.id })}>
+            <Card style={styles.card}>
+              <View style={styles.cardHead}>
               <View style={styles.distanceWrap}>
                 <MaterialCommunityIcons name="motorbike" size={20} color={colors.primary} />
                 <Text style={styles.distance}>{item.distance.toFixed(2)} km</Text>
               </View>
               <Text style={styles.date}>{item.start_time ? item.start_time.slice(0, 10) : '-'}</Text>
             </View>
-            <View style={styles.row}>
-              <Meta icon="speedometer" label="Ort. hız" value={`${item.avg_speed.toFixed(0)} km/s`} />
-              <Meta icon="image-filter-hdr" label="Yükseklik" value={`${item.elevation_gain.toFixed(0)} m`} />
-            </View>
-          </Card>
+              <View style={styles.row}>
+                <Meta icon="speedometer" label="Ort. hız" value={`${item.avg_speed.toFixed(0)} km/s`} />
+                <Meta icon="image-filter-hdr" label="Yükseklik" value={`${item.elevation_gain.toFixed(0)} m`} />
+              </View>
+            </Card>
+          </Pressable>
         )}
       />
     </View>

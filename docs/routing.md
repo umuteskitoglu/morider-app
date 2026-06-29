@@ -129,6 +129,40 @@ make osrm-up
 - **Tırmanış/iniş:** SRTM sınıfı DEM'lerde birkaç metrelik gürültü olduğundan toplam tırmanış/iniş **5 m histerezis** ile hesaplanır (`ascentDescent`): referans rakım yalnız eşiği aşan değişimlerde kayar, böylece kademeli okunan uzun bir tırmanış tam yüksekliğiyle sayılır ama gürültü salınımları sayılmaz.
 - **Mobil:** Rota detayında istatistik satırı (↗ toplam tırmanış, ↘ iniş, min–max rakım) + `react-native-svg` ile kompakt alan grafiği; uç erişilemezse bölüm gizli kalır.
 
+## Geocoding (adres arama)
+
+Kullanıcı haritaya dokunmadan, bir yer/adres adı **yazarak** nokta buldurabilir
+(etkinlik başlangıç/bitiş, rota noktası, gönderi konumu, sürüş hedefi). İleri geocoding
+(metin → koordinat) OSRM/elevation ile aynı takılabilir-sağlayıcı desenini izler.
+
+### GET /api/routes/geocode *(korumalı)*
+
+Sorgu parametreleri: `q` (zorunlu, aranan metin), opsiyonel `lat`/`lon` (sürücünün
+konumu — yakın sonuçlar öne alınır).
+
+```
+GET /api/routes/geocode?q=Taksim&lat=41.01&lon=28.97
+```
+Yanıt `200`:
+```json
+{ "places": [ { "name": "Taksim Meydanı, İstanbul, Marmara Bölgesi", "lat": 41.0369, "lon": 28.985 } ] }
+```
+Sağlayıcı erişilemezse `502`, boş `q` ise `400`.
+
+### Sağlayıcı
+
+İlk sürücü **Nominatim** (OpenStreetMap): `GEOCODE_URL` ile ayarlanır
+(varsayılan `https://nominatim.openstreetmap.org`). Parser (`parseNominatimSearch`)
+saf bir fonksiyondur, ağ olmadan birim test edilir ([`geocode.go`](../backend/internal/route/geocode.go)).
+
+| Ortam | `GEOCODE_URL` | Not |
+|-------|---------------|-----|
+| Geliştirme | `https://nominatim.openstreetmap.org` (genel) | Katı kullanım politikası (saniyede 1 istek, zorunlu `User-Agent`), üretimde kullanılmaz |
+| Üretim | Kendi Nominatim sunucunuz | Türkiye/bölge extract'ı ile self-host önerilir |
+
+İstemci sonuçları kullanıcı konumuna göre önceliklendirmek için `viewbox` (≈0.7°,
+`bounded=0`) ekler; uzak eşleşmeler dışlanmaz, yalnız yakınlar üste çıkar.
+
 ## Sonraki adımlar
 
 - Motosiklete özel profilin çarpanlarını gerçek rotalarla ince ayarı; arazi (adventure) için ayrı profil.

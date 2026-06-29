@@ -14,37 +14,50 @@ export function NavBanner({
   distM,
   voiceOn,
   onToggleVoice,
+  nextStep,
 }: {
   step: NavStep;
   distM: number;
   voiceOn: boolean;
   onToggleVoice: () => void;
+  nextStep?: NavStep | null;
 }) {
   // "Sağa dön - Rıhtım Caddesi" → main text + road line.
   const [main, road] = step.instruction.split(' - ');
+  const nextMain = nextStep ? nextStep.instruction.split(' - ')[0] : '';
   return (
     <View style={styles.banner}>
-      <View style={styles.arrowBox}>
-        <MaterialCommunityIcons name={stepIcon(step.type, step.modifier) as any} size={34} color="#fff" />
-      </View>
-      <View style={styles.flex}>
-        <Text style={styles.distance}>{formatDistanceM(distM)}</Text>
-        <Text style={styles.instruction} numberOfLines={1}>
-          {main}
-        </Text>
-        {road ? (
-          <Text style={styles.road} numberOfLines={1}>
-            {road}
+      <View style={styles.topRow}>
+        <View style={styles.arrowBox}>
+          <MaterialCommunityIcons name={stepIcon(step.type, step.modifier) as any} size={34} color="#fff" />
+        </View>
+        <View style={styles.flex}>
+          <Text style={styles.distance}>{formatDistanceM(distM)}</Text>
+          <Text style={styles.instruction} numberOfLines={1}>
+            {main}
           </Text>
-        ) : null}
+          {road ? (
+            <Text style={styles.road} numberOfLines={1}>
+              {road}
+            </Text>
+          ) : null}
+        </View>
+        <Pressable onPress={onToggleVoice} hitSlop={10} style={styles.voiceBtn}>
+          <MaterialCommunityIcons
+            name={voiceOn ? 'volume-high' : 'volume-off'}
+            size={22}
+            color={voiceOn ? colors.primary : colors.textMuted}
+          />
+        </Pressable>
       </View>
-      <Pressable onPress={onToggleVoice} hitSlop={10} style={styles.voiceBtn}>
-        <MaterialCommunityIcons
-          name={voiceOn ? 'volume-high' : 'volume-off'}
-          size={22}
-          color={voiceOn ? colors.primary : colors.textMuted}
-        />
-      </Pressable>
+      {nextStep ? (
+        <View style={styles.nextRow}>
+          <MaterialCommunityIcons name={stepIcon(nextStep.type, nextStep.modifier) as any} size={16} color={colors.textMuted} />
+          <Text style={styles.nextText} numberOfLines={1}>
+            Sonra: {nextMain}
+          </Text>
+        </View>
+      ) : null}
     </View>
   );
 }
@@ -55,9 +68,6 @@ const styles = StyleSheet.create({
     top: spacing.md,
     left: spacing.md,
     right: spacing.md,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacing.md,
     backgroundColor: 'rgba(18,24,38,0.96)',
     borderWidth: 1,
     borderColor: colors.border,
@@ -65,6 +75,17 @@ const styles = StyleSheet.create({
     padding: spacing.md,
     ...shadow.card,
   },
+  topRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.md },
+  nextRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.xs,
+    marginTop: spacing.sm,
+    paddingTop: spacing.sm,
+    borderTopWidth: 1,
+    borderTopColor: colors.border,
+  },
+  nextText: { color: colors.textMuted, fontSize: 13, fontWeight: '600', flex: 1 },
   arrowBox: {
     width: 54,
     height: 54,

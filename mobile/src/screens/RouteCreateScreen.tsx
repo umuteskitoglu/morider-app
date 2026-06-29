@@ -17,6 +17,8 @@ import * as Location from 'expo-location';
 
 import { ProfileStackParams } from '../navigation/RootNavigator';
 import { Button, Card, TextField } from '../components/ui';
+import { PlaceSearch } from '../components/PlaceSearch';
+import { Place } from '../lib/geocode';
 import { api, errorMessage } from '../api/client';
 import { colors, radius, spacing } from '../theme';
 
@@ -48,6 +50,7 @@ export default function RouteCreateScreen({ navigation }: Props) {
   // Detail form (name/curviness/visibility) collapses so the map stays visible
   // while placing waypoints. It springs open automatically when saving.
   const [expanded, setExpanded] = useState(false);
+  const [near, setNear] = useState<{ lat: number; lon: number } | undefined>();
   const mapRef = useRef<MapView | null>(null);
 
   // Center on the rider's current location when available.
@@ -57,6 +60,7 @@ export default function RouteCreateScreen({ navigation }: Props) {
         const { status } = await Location.requestForegroundPermissionsAsync();
         if (status !== 'granted') return;
         const loc = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
+        setNear({ lat: loc.coords.latitude, lon: loc.coords.longitude });
         mapRef.current?.animateToRegion(
           { latitude: loc.coords.latitude, longitude: loc.coords.longitude, latitudeDelta: 0.05, longitudeDelta: 0.05 },
           600,
@@ -81,6 +85,13 @@ export default function RouteCreateScreen({ navigation }: Props) {
 
   function onMapPress(e: MapPressEvent) {
     setWaypoints([...points, e.nativeEvent.coordinate]);
+  }
+
+  // A searched place is appended as the next waypoint and the map recenters on it.
+  function onPickPlace(place: Place) {
+    const coord = { latitude: place.lat, longitude: place.lon };
+    setWaypoints([...points, coord]);
+    mapRef.current?.animateToRegion({ ...coord, latitudeDelta: 0.05, longitudeDelta: 0.05 }, 600);
   }
 
   function undo() {
@@ -166,6 +177,8 @@ export default function RouteCreateScreen({ navigation }: Props) {
         {line.length > 1 && <Polyline coordinates={line} strokeColor={colors.primary} strokeWidth={4} />}
       </MapView>
 
+      <PlaceSearch onPick={onPickPlace} near={near} placeholder="Yer ara ve nokta ekle…" style={styles.search} />
+
       <Card style={styles.panel}>
         <Pressable style={styles.header} onPress={() => toggleExpanded()} hitSlop={8}>
           <View style={styles.headerText}>
@@ -250,6 +263,7 @@ export default function RouteCreateScreen({ navigation }: Props) {
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: colors.bg },
+  search: { position: 'absolute', top: spacing.md, left: spacing.md, right: spacing.md },
   panel: { position: 'absolute', left: spacing.md, right: spacing.md, bottom: spacing.lg },
   header: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, marginBottom: spacing.sm },
   headerText: { flex: 1 },

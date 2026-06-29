@@ -30,6 +30,7 @@ func Run(cfg config.Config) error {
 		d:      deps,
 		router: NewOSRMRouter(cfg.RoutingURL, cfg.RoutingProfile),
 		elev:   NewOpenTopoData(cfg.ElevationURL),
+		geo:    NewNominatimGeocoder(cfg.GeocodeURL),
 	}
 	registerRoutes(deps, h)
 	registerPOIRoutes(deps, h)
@@ -40,6 +41,7 @@ func registerRoutes(d *server.Deps, h *handler) {
 	g := d.Engine.Group("/api/routes", d.JWT.Middleware())
 	g.POST("", h.create)
 	g.POST("/plan", h.plan)
+	g.GET("/geocode", h.geocode)
 	g.GET("", h.list)
 	g.GET("/explore", h.explore)
 	g.GET("/user/:id", h.userRoutes)
@@ -61,6 +63,7 @@ type handler struct {
 	d      *server.Deps
 	router Router
 	elev   ElevationProvider
+	geo    Geocoder
 }
 
 // Point is a single coordinate (WGS84).

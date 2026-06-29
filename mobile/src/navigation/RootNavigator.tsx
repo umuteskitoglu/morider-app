@@ -12,6 +12,7 @@ import LoginScreen from '../screens/LoginScreen';
 import SignupScreen from '../screens/SignupScreen';
 import MapScreen from '../screens/MapScreen';
 import RidesScreen from '../screens/RidesScreen';
+import RideDetailScreen from '../screens/RideDetailScreen';
 import RoutesScreen from '../screens/RoutesScreen';
 import ExploreScreen from '../screens/ExploreScreen';
 import RouteCreateScreen from '../screens/RouteCreateScreen';
@@ -65,6 +66,7 @@ export type ProfileStackParams = {
   Follows: undefined;
   UserProfile: { userId: number; name: string };
   Rides: undefined;
+  RideDetail: { id: number };
   RoutesList: undefined;
   Explore: undefined;
   RouteCreate: undefined;
@@ -153,6 +155,7 @@ function ProfileNavigator() {
       <ProfileStack.Screen name="ProfileMain" component={ProfileScreen} options={{ title: 'Profil' }} />
       <ProfileStack.Screen name="EditProfile" component={EditProfileScreen} options={{ title: 'Profili Düzenle' }} />
       <ProfileStack.Screen name="Rides" component={RidesScreen} options={{ title: 'Sürüşlerim' }} />
+      <ProfileStack.Screen name="RideDetail" component={RideDetailScreen} options={{ title: 'Sürüş Detayı' }} />
       <ProfileStack.Screen
         name="RoutesList"
         component={RoutesScreen}

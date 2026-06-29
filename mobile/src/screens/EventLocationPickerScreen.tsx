@@ -6,6 +6,8 @@ import * as Location from 'expo-location';
 
 import { EventsStackParams } from '../navigation/RootNavigator';
 import { Button, Card } from '../components/ui';
+import { PlaceSearch } from '../components/PlaceSearch';
+import { Place } from '../lib/geocode';
 import { eventDraft } from '../lib/eventDraft';
 import { colors, spacing } from '../theme';
 
@@ -17,6 +19,9 @@ const ISTANBUL: Region = { latitude: 41.0082, longitude: 28.9784, latitudeDelta:
 export default function EventLocationPickerScreen({ navigation, route }: Props) {
   const target = route.params.target;
   const [marker, setMarker] = useState<Coord | null>(null);
+  // Name from a searched place; lets confirm() skip the reverse-geocode lookup.
+  const [pickedName, setPickedName] = useState('');
+  const [near, setNear] = useState<{ lat: number; lon: number } | undefined>();
   const [busy, setBusy] = useState(false);
   const mapRef = useRef<MapView | null>(null);
 
@@ -31,6 +36,7 @@ export default function EventLocationPickerScreen({ navigation, route }: Props) 
         const { status } = await Location.requestForegroundPermissionsAsync();
         if (status !== 'granted') return;
         const loc = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
+        setNear({ lat: loc.coords.latitude, lon: loc.coords.longitude });
         mapRef.current?.animateToRegion(
           { latitude: loc.coords.latitude, longitude: loc.coords.longitude, latitudeDelta: 0.05, longitudeDelta: 0.05 },
           600,
@@ -43,17 +49,29 @@ export default function EventLocationPickerScreen({ navigation, route }: Props) 
 
   function onPress(e: MapPressEvent) {
     setMarker(e.nativeEvent.coordinate);
+    setPickedName(''); // a tapped point has no name yet — reverse-geocode on confirm
+  }
+
+  // A searched place comes with a name and coordinates: drop the marker, recenter
+  // and remember the label so confirm() doesn't need a reverse lookup.
+  function onPickPlace(place: Place) {
+    const coord = { latitude: place.lat, longitude: place.lon };
+    setMarker(coord);
+    setPickedName(place.name);
+    mapRef.current?.animateToRegion({ ...coord, latitudeDelta: 0.02, longitudeDelta: 0.02 }, 600);
   }
 
   async function confirm() {
     if (!marker) return;
     setBusy(true);
-    let name = '';
-    try {
-      const [p] = await Location.reverseGeocodeAsync({ latitude: marker.latitude, longitude: marker.longitude });
-      if (p) name = [p.city ?? p.subregion, p.region].filter(Boolean).join(', ') || p.name || '';
-    } catch {
-      // name stays empty; coords are still attached
+    let name = pickedName;
+    if (!name) {
+      try {
+        const [p] = await Location.reverseGeocodeAsync({ latitude: marker.latitude, longitude: marker.longitude });
+        if (p) name = [p.city ?? p.subregion, p.region].filter(Boolean).join(', ') || p.name || '';
+      } catch {
+        // name stays empty; coords are still attached
+      }
     }
     const point = { lat: marker.latitude, lon: marker.longitude, name };
     // Write to the draft store (not nav params) so the other already-picked
@@ -69,6 +87,8 @@ export default function EventLocationPickerScreen({ navigation, route }: Props) 
         {marker && <Marker coordinate={marker} pinColor={target === 'start' ? colors.success : colors.danger} />}
       </MapView>
 
+      <PlaceSearch onPick={onPickPlace} near={near} style={styles.search} />
+
       <Card style={styles.panel}>
         <Text style={styles.hint}>
           {marker ? 'Konum seçildi. Onaylamak için dokun.' : 'Haritaya dokunarak bir konum seç.'}
@@ -81,6 +101,7 @@ export default function EventLocationPickerScreen({ navigation, route }: Props) 
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: colors.bg },
+  search: { position: 'absolute', top: spacing.md, left: spacing.md, right: spacing.md },
   panel: { position: 'absolute', left: spacing.md, right: spacing.md, bottom: spacing.lg },
   hint: { color: colors.textMuted, marginBottom: spacing.sm, textAlign: 'center' },
 });

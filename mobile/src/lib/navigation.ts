@@ -201,11 +201,12 @@ export function offRouteTick(state: RerouteState, routePoints: LatLon[], pos: La
  * onto the route from wherever they actually are (instead of pointing at the
  * route's original start). Returns steps + geometry for the dashed guide line.
  */
-export async function planInitialRoute(
-  routePoints: LatLon[],
-  pos: LatLon,
-): Promise<{ steps: NavStep[]; points: LatLon[] }> {
-  if (routePoints.length < 2) return { steps: [], points: [] };
+// Result of a route plan: turn-by-turn steps, the road geometry (for the guide
+// line) and the total distance (km) / duration (min) for the ETA summary.
+export type PlanResult = { steps: NavStep[]; points: LatLon[]; distance: number; duration: number };
+
+export async function planInitialRoute(routePoints: LatLon[], pos: LatLon): Promise<PlanResult> {
+  if (routePoints.length < 2) return { steps: [], points: [], distance: 0, duration: 0 };
   const onRoute = distanceToRouteM(routePoints, pos) <= OFF_ROUTE_M;
   const waypoints = onRoute
     ? sampleWaypoints(routePoints)
@@ -213,7 +214,7 @@ export async function planInitialRoute(
   const { data } = await api.post('/api/routes/plan', { waypoints });
   const steps: NavStep[] = (data.steps ?? []).filter((s: NavStep) => s.lat !== 0 || s.lon !== 0);
   const points: LatLon[] = data.points ?? [];
-  return { steps, points };
+  return { steps, points, distance: data.distance ?? 0, duration: data.duration ?? 0 };
 }
 
 /**
@@ -221,10 +222,7 @@ export async function planInitialRoute(
  * route ~150 m ahead of the nearest point and follows it to the end. Returns
  * the new steps plus the new geometry (for redrawing the guide line).
  */
-export async function rerouteFromPosition(
-  routePoints: LatLon[],
-  pos: LatLon,
-): Promise<{ steps: NavStep[]; points: LatLon[] }> {
+export async function rerouteFromPosition(routePoints: LatLon[], pos: LatLon): Promise<PlanResult> {
   let nearest = 0;
   let best = Infinity;
   for (let i = 0; i < routePoints.length; i++) {
@@ -245,7 +243,7 @@ export async function rerouteFromPosition(
   const { data } = await api.post('/api/routes/plan', { waypoints });
   const steps: NavStep[] = (data.steps ?? []).filter((s: NavStep) => s.lat !== 0 || s.lon !== 0);
   const points: LatLon[] = data.points ?? [];
-  return { steps, points };
+  return { steps, points, distance: data.distance ?? 0, duration: data.duration ?? 0 };
 }
 
 export function speakRerouted(enabled: boolean): void {
