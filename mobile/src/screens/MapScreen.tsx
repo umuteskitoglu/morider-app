@@ -34,6 +34,7 @@ import {
 } from '../lib/navigation';
 import { POI, POI_CATEGORIES, POI_LABELS, poiColor, poiIcon } from '../lib/poi';
 import { setRideLocationHandler, startRideLocation, stopRideLocation } from '../lib/backgroundLocation';
+import { computeRideStats } from '../lib/rideStats';
 import { RideDashboard } from '../components/RideDashboard';
 import { api, errorMessage } from '../api/client';
 import { colors, radius, shadow, spacing } from '../theme';
@@ -580,13 +581,25 @@ export default function MapScreen({ route, navigation }: Props) {
       return;
     }
 
+    // Total ascent from the recorded altitude track (GPS jitter filtered out by
+    // computeRideStats); this is the elevation gain shown on the rides list.
+    const { ascent } = computeRideStats(
+      samples.current.map((s) => ({
+        lat: s.latitude,
+        lon: s.longitude,
+        altitude: s.altitude,
+        speed: s.speed,
+        ts: s.ts,
+      })),
+    );
+
     try {
       setSaving(true);
       const { data: ride } = await api.post('/api/rides', {
         distance,
         start_time: start.toISOString(),
         end_time: end.toISOString(),
-        elevation_gain: 0,
+        elevation_gain: Math.round(ascent),
         max_lean_right: Math.round(maxLeanRight.current),
         max_lean_left: Math.round(maxLeanLeft.current),
       });
@@ -707,13 +720,13 @@ export default function MapScreen({ route, navigation }: Props) {
           )}
 
           {destination ? (
-            <Pressable style={[styles.followChip, { top: insets.top + (recording ? spacing.md : 64) }]} onPress={clearDestination}>
+            <Pressable style={[styles.followChip, { top: insets.top + (recording ? 56 : 64) }]} onPress={clearDestination}>
               <MaterialCommunityIcons name="flag-checkered" size={16} color={colors.accent} />
               <Text style={styles.followChipText}>Hedefe gidiliyor</Text>
               <MaterialCommunityIcons name="close" size={16} color={colors.textMuted} />
             </Pressable>
           ) : followPath.length > 1 ? (
-            <Pressable style={[styles.followChip, { top: insets.top + (recording ? spacing.md : 64) }]} onPress={clearFollow}>
+            <Pressable style={[styles.followChip, { top: insets.top + (recording ? 56 : 64) }]} onPress={clearFollow}>
               <MaterialCommunityIcons name="map-marker-path" size={16} color={colors.accent} />
               <Text style={styles.followChipText}>Rota takipte</Text>
               <MaterialCommunityIcons name="close" size={16} color={colors.textMuted} />
