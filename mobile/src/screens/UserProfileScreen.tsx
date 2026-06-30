@@ -69,16 +69,25 @@ export default function UserProfileScreen({ route, navigation }: Props) {
   }, [navigation, name]);
 
   const load = useCallback(async () => {
-    try {
-      const reqs: Promise<any>[] = [
-        api.get(`/api/users/${userId}`),
-        api.get(`/api/feed/user/${userId}`),
-        api.get(`/api/rewards/user/${userId}`),
-        api.get(`/api/garage/user/${userId}`),
-        api.get(`/api/routes/user/${userId}`),
-      ];
-      if (!isSelf) reqs.push(api.get(`/api/follows/status/${userId}`));
-      const [u, p, b, g, r, s] = await Promise.all(reqs);
+    // Each section loads independently: one failing endpoint (e.g. an older
+    // backend missing a route) must not blank the whole profile. settle()
+    // swallows the error and yields null so the rest still renders.
+    const settle = async (p: Promise<any>): Promise<any | null> => {
+      try {
+        return await p;
+      } catch {
+        return null;
+      }
+    };
+    const [u, p, b, g, r, s] = await Promise.all([
+      settle(api.get(`/api/users/${userId}`)),
+      settle(api.get(`/api/feed/user/${userId}`)),
+      settle(api.get(`/api/rewards/user/${userId}`)),
+      settle(api.get(`/api/garage/user/${userId}`)),
+      settle(api.get(`/api/routes/user/${userId}`)),
+      isSelf ? Promise.resolve(null) : settle(api.get(`/api/follows/status/${userId}`)),
+    ]);
+    if (u) {
       setAvatarUrl(u.data.avatar_url ?? '');
       setUsername(u.data.username ?? '');
       setBio(u.data.bio ?? '');
@@ -89,16 +98,14 @@ export default function UserProfileScreen({ route, navigation }: Props) {
       });
       setLicenseType(u.data.license_type ?? '');
       setBikeType(u.data.bike_type ?? '');
-      setPosts(p.data.posts ?? []);
-      setBadges(b.data.rewards ?? []);
-      setGarage(g.data.motorcycles ?? []);
-      setRoutes(r.data.routes ?? []);
-      if (s) {
-        setFollowing(s.data.following ?? false);
-        setFollowedBy(s.data.followed_by ?? false);
-      }
-    } catch {
-      // ignore
+    }
+    setPosts(p?.data.posts ?? []);
+    setBadges(b?.data.rewards ?? []);
+    setGarage(g?.data.motorcycles ?? []);
+    setRoutes(r?.data.routes ?? []);
+    if (s) {
+      setFollowing(s.data.following ?? false);
+      setFollowedBy(s.data.followed_by ?? false);
     }
   }, [userId, isSelf]);
 

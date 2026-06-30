@@ -595,6 +595,9 @@ export default function MapScreen({ route, navigation }: Props) {
 
     try {
       setSaving(true);
+      // Top speed (km/h) from the recorded track; GPS reports m/s.
+      const maxSpeed = samples.current.reduce((m, s) => Math.max(m, s.speed * 3.6), 0);
+
       const { data: ride } = await api.post('/api/rides', {
         distance,
         start_time: start.toISOString(),
@@ -602,6 +605,7 @@ export default function MapScreen({ route, navigation }: Props) {
         elevation_gain: Math.round(ascent),
         max_lean_right: Math.round(maxLeanRight.current),
         max_lean_left: Math.round(maxLeanLeft.current),
+        max_speed: Math.round(maxSpeed),
       });
 
       await api.post('/api/telemetry', {

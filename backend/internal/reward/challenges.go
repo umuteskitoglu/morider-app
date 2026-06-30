@@ -20,9 +20,28 @@ import (
 // consistent and needs no separate counters), and reaching the goal awards a
 // per-challenge badge via the same idempotent rewards table the rules engine uses.
 
-// validMetrics is the set of metrics a challenge can target. distance is summed
-// km, elevation is summed elevation_gain (m), rides is a ride count.
-var validMetrics = map[string]bool{"distance": true, "elevation": true, "rides": true}
+// validMetrics is the set of metrics a challenge can target. Cumulative metrics
+// (distance km, elevation m, ride count) sum over the window; "best" metrics
+// (avg_speed, top_speed in km/h) take the rider's single best ride in the window.
+var validMetrics = map[string]bool{
+	"distance": true, "elevation": true, "rides": true, "avg_speed": true, "top_speed": true,
+}
+
+// metricSQL is the per-metric aggregate over a rides row alias (e.g. "r" or "").
+// Speed metrics are sanity-capped to ignore implausible GPS spikes.
+func metricSQL(alias string) string {
+	p := ""
+	if alias != "" {
+		p = alias + "."
+	}
+	return `CASE %[1]s
+	            WHEN 'distance'  THEN SUM(` + p + `distance)
+	            WHEN 'elevation' THEN SUM(` + p + `elevation_gain)
+	            WHEN 'rides'     THEN COUNT(` + p + `id)::float8
+	            WHEN 'avg_speed' THEN MAX(` + p + `avg_speed) FILTER (WHERE ` + p + `avg_speed BETWEEN 0 AND 400)
+	            WHEN 'top_speed' THEN MAX(` + p + `max_speed) FILTER (WHERE ` + p + `max_speed BETWEEN 0 AND 400)
+	        END`
+}
 
 // Challenge is the API representation of a challenge plus the caller's standing.
 type Challenge struct {
@@ -106,15 +125,12 @@ func (h *handler) createChallenge(c *gin.Context) {
 // so it stays a single grouped query (no N+1).
 func (h *handler) listChallenges(c *gin.Context) {
 	uid := authpkg.UserID(c)
+	progressExpr := fmt.Sprintf(metricSQL("r"), "c.metric")
 	rows, err := h.d.DB.Query(c,
 		`SELECT c.id, c.creator_id, c.title, COALESCE(c.description, ''), c.metric, c.goal, c.starts_at, c.ends_at,
 		        (SELECT COUNT(*) FROM challenge_participants p WHERE p.challenge_id = c.id),
 		        EXISTS(SELECT 1 FROM challenge_participants p WHERE p.challenge_id = c.id AND p.user_id = $1),
-		        COALESCE(CASE c.metric
-		            WHEN 'distance'  THEN SUM(r.distance)
-		            WHEN 'elevation' THEN SUM(r.elevation_gain)
-		            WHEN 'rides'     THEN COUNT(r.id)::float8
-		        END, 0)
+		        COALESCE(`+progressExpr+`, 0)
 		 FROM challenges c
 		 LEFT JOIN rides r ON r.user_id = $1
 		      AND COALESCE(r.start_time, r.created_at) >= c.starts_at
@@ -167,13 +183,10 @@ func (h *handler) getChallenge(c *gin.Context) {
 	}
 
 	// Standings: each participant's progress over the window, ranked.
+	progressExpr := fmt.Sprintf(metricSQL("r"), "$2::text")
 	rows, err := h.d.DB.Query(c,
 		`SELECT u.id, u.name, COALESCE(u.avatar_url, ''),
-		        COALESCE(CASE $2::text
-		            WHEN 'distance'  THEN SUM(r.distance)
-		            WHEN 'elevation' THEN SUM(r.elevation_gain)
-		            WHEN 'rides'     THEN COUNT(r.id)::float8
-		        END, 0) AS progress,
+		        COALESCE(`+progressExpr+`, 0) AS progress,
 		        cp.completed_at IS NOT NULL
 		 FROM challenge_participants cp
 		 JOIN users u ON u.id = cp.user_id
@@ -326,12 +339,9 @@ func (h *handler) evaluateChallenges(ctx context.Context, userID int64) {
 // challengeProgress aggregates the rider's metric over the challenge window.
 func (h *handler) challengeProgress(ctx context.Context, userID int64, metric string, starts, ends time.Time) (float64, error) {
 	var progress float64
+	progressExpr := fmt.Sprintf(metricSQL(""), "$4::text")
 	err := h.d.DB.QueryRow(ctx,
-		`SELECT COALESCE(CASE $4::text
-		     WHEN 'distance'  THEN SUM(distance)
-		     WHEN 'elevation' THEN SUM(elevation_gain)
-		     WHEN 'rides'     THEN COUNT(*)::float8
-		 END, 0)
+		`SELECT COALESCE(`+progressExpr+`, 0)
 		 FROM rides
 		 WHERE user_id = $1
 		   AND COALESCE(start_time, created_at) >= $2

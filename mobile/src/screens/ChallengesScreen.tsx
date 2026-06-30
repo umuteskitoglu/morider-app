@@ -176,11 +176,11 @@ export default function ChallengesScreen({ navigation }: Props) {
               <TextField label="Açıklama (opsiyonel)" value={desc} onChangeText={setDesc} placeholder="Yaz başı için ısınma turu" />
 
               <Text style={styles.fieldLabel}>Metrik</Text>
-              <View style={styles.pillRow}>
+              <View style={styles.pillWrap}>
                 {METRICS.map((m) => (
                   <Pressable
                     key={m.key}
-                    style={[styles.pill, metric === m.key && styles.pillActive]}
+                    style={[styles.pillAuto, metric === m.key && styles.pillActive]}
                     onPress={() => setMetric(m.key)}
                   >
                     <Text style={[styles.pillText, metric === m.key && styles.pillTextActive]}>{m.label}</Text>
@@ -250,10 +250,20 @@ const styles = StyleSheet.create({
     marginBottom: spacing.xs,
   },
   pillRow: { flexDirection: 'row', gap: spacing.sm },
+  pillWrap: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm },
   pill: {
     flex: 1,
     alignItems: 'center',
     paddingVertical: spacing.sm,
+    borderRadius: radius.pill,
+    borderWidth: 1,
+    borderColor: colors.border,
+    backgroundColor: colors.bgAlt,
+  },
+  pillAuto: {
+    alignItems: 'center',
+    paddingVertical: spacing.sm,
+    paddingHorizontal: spacing.md,
     borderRadius: radius.pill,
     borderWidth: 1,
     borderColor: colors.border,

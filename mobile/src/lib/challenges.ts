@@ -1,6 +1,6 @@
 // Challenge types + helpers, matching the backend (internal/reward/challenges.go).
 
-export type ChallengeMetric = 'distance' | 'elevation' | 'rides';
+export type ChallengeMetric = 'distance' | 'elevation' | 'rides' | 'avg_speed' | 'top_speed';
 
 export type Challenge = {
   id: number;
@@ -28,6 +28,8 @@ export const METRICS: { key: ChallengeMetric; label: string; unit: string; icon:
   { key: 'distance', label: 'Mesafe', unit: 'km', icon: 'map-marker-distance' },
   { key: 'elevation', label: 'Tırmanış', unit: 'm', icon: 'image-filter-hdr' },
   { key: 'rides', label: 'Sürüş', unit: 'sürüş', icon: 'motorbike' },
+  { key: 'avg_speed', label: 'Ort. Hız', unit: 'km/s', icon: 'speedometer-medium' },
+  { key: 'top_speed', label: 'Maks. Hız', unit: 'km/s', icon: 'speedometer' },
 ];
 
 export function metricInfo(metric: ChallengeMetric) {

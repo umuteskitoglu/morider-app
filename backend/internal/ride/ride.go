@@ -87,6 +87,7 @@ type createReq struct {
 	EndTime       *time.Time `json:"end_time"`
 	Distance      float64    `json:"distance" binding:"gte=0"`
 	AvgSpeed      float64    `json:"avg_speed"`
+	MaxSpeed      float64    `json:"max_speed"`
 	ElevationGain float64    `json:"elevation_gain"`
 	MotorcycleID  *int64     `json:"motorcycle_id"`
 	MaxLeanRight  *float64   `json:"max_lean_right"`
@@ -108,10 +109,10 @@ func (h *handler) create(c *gin.Context) {
 	userID := authpkg.UserID(c)
 	var r Ride
 	err := h.d.DB.QueryRow(c,
-		`INSERT INTO rides (user_id, route_id, start_time, end_time, distance, avg_speed, elevation_gain, motorcycle_id, max_lean_right, max_lean_left)
-		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+		`INSERT INTO rides (user_id, route_id, start_time, end_time, distance, avg_speed, elevation_gain, motorcycle_id, max_lean_right, max_lean_left, max_speed)
+		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
 		 RETURNING id, user_id, route_id, start_time, end_time, distance, avg_speed, elevation_gain, title, notes, motorcycle_id, max_lean_right, max_lean_left`,
-		userID, req.RouteID, req.StartTime, req.EndTime, req.Distance, req.AvgSpeed, req.ElevationGain, req.MotorcycleID, req.MaxLeanRight, req.MaxLeanLeft,
+		userID, req.RouteID, req.StartTime, req.EndTime, req.Distance, req.AvgSpeed, req.ElevationGain, req.MotorcycleID, req.MaxLeanRight, req.MaxLeanLeft, nullableFloat(req.MaxSpeed),
 	).Scan(&r.ID, &r.UserID, &r.RouteID, &r.StartTime, &r.EndTime, &r.Distance, &r.AvgSpeed, &r.ElevationGain,
 		&r.Title, &r.Notes, &r.MotorcycleID, &r.MaxLeanRight, &r.MaxLeanLeft)
 	if err != nil {
