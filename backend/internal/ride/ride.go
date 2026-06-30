@@ -38,6 +38,7 @@ func Run(cfg config.Config) error {
 
 	registerRoutes(deps, h)
 	registerGarageRoutes(deps, h)
+	registerSegmentRoutesOn(deps.Engine.Group("/api/segments", deps.JWT.Middleware()), h)
 	return deps.Run(config.ResolvePort("RIDE_PORT", "8083"))
 }
 
@@ -50,6 +51,7 @@ func registerRoutes(d *server.Deps, h *handler) {
 	g.GET("/:id/track", h.track)
 	g.PATCH("/:id", h.update)
 	g.DELETE("/:id", h.remove)
+	g.POST("/:id/segments/match", h.matchRideSegments)
 }
 
 // maxTrackPoints caps how many telemetry points a single track response returns

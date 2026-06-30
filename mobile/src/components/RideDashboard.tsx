@@ -5,7 +5,9 @@ import Svg, { Circle, G, Line, Path, Text as SvgText } from 'react-native-svg';
 
 import { Button } from './ui';
 import { SpeedDial } from './SpeedDial';
+import { Rideability, RideWeather } from './RouteWeatherCard';
 import { useLeanAngle } from '../lib/useLeanAngle';
+import { api } from '../api/client';
 import { colors, radius, shadow, spacing } from '../theme';
 
 export type DashSample = {
@@ -16,7 +18,7 @@ export type DashSample = {
   ts: string;
 };
 
-type GaugeKey = 'speed' | 'lean' | 'elev' | 'trip';
+type GaugeKey = 'speed' | 'lean' | 'elev' | 'trip' | 'weather';
 
 type Props = {
   speed: number; // km/h
@@ -36,12 +38,20 @@ const ICONS: Record<GaugeKey, React.ComponentProps<typeof MaterialCommunityIcons
   lean: 'angle-acute',
   elev: 'image-filter-hdr',
   trip: 'timer-outline',
+  weather: 'weather-partly-cloudy',
 };
 const LABELS: Record<GaugeKey, string> = {
   speed: 'Hız',
   lean: 'Yatış',
   elev: 'İrtifa',
   trip: 'Sürüş',
+  weather: 'Hava',
+};
+
+const WX_LEVEL: Record<Rideability['level'], { color: string; icon: any; label: string }> = {
+  good: { color: colors.success, icon: 'motorbike', label: 'Sürüşe uygun' },
+  caution: { color: colors.warning, icon: 'alert', label: 'Dikkatli sürün' },
+  poor: { color: colors.danger, icon: 'alert-octagon', label: 'Sürüş riskli' },
 };
 
 function haversineM(a: DashSample, b: DashSample): number {
@@ -98,6 +108,7 @@ export function RideDashboard({
 }: Props) {
   const [focused, setFocused] = useState<GaugeKey>('speed');
   const [elapsed, setElapsed] = useState(0);
+  const [wx, setWx] = useState<{ weather: RideWeather; rideability: Rideability } | null>(null);
   const { lean, maxLean, calibrate } = useLeanAngle(true);
   // Peak speed over the whole ride (samples store m/s); persists across toggles.
   const maxSpeed = Math.max(speed, ...samples.map((s) => s.speed * 3.6), 0);
@@ -110,6 +121,31 @@ export function RideDashboard({
     return () => clearInterval(id);
   }, [startedAt]);
 
+  // Fetch current conditions for the live position, refreshed every ~10 min.
+  // Best effort: the weather gauge just shows a placeholder until it lands.
+  const last = samples[samples.length - 1];
+  const lat = last?.latitude;
+  const lon = last?.longitude;
+  useEffect(() => {
+    if (lat == null || lon == null) return;
+    let active = true;
+    const fetchWx = async () => {
+      try {
+        const { data } = await api.get('/api/weather', { params: { lat, lon } });
+        if (active) setWx({ weather: data.weather, rideability: data.rideability });
+      } catch {
+        // ignore
+      }
+    };
+    fetchWx();
+    const id = setInterval(fetchWx, 10 * 60 * 1000);
+    return () => {
+      active = false;
+      clearInterval(id);
+    };
+    // Re-key on a coarse position (~1 km) so we don't refetch on every GPS tick.
+  }, [lat != null ? lat.toFixed(2) : null, lon != null ? lon.toFixed(2) : null]);
+
   const hours = elapsed / 3_600_000;
   const avg = hours > 0.0003 ? distance / hours : 0;
   const g = grade(samples);
@@ -119,9 +155,10 @@ export function RideDashboard({
     lean: { value: `${Math.abs(Math.round(lean))}°`, unit: lean >= 0 ? 'sağ' : 'sol' },
     elev: { value: `${Math.round(altitude)}`, unit: 'm' },
     trip: { value: fmtElapsed(elapsed), unit: `${distance.toFixed(1)} km` },
+    weather: { value: wx ? `${Math.round(wx.weather.temp_c)}°` : '--', unit: wx ? `${wx.rideability.score}/100` : 'hava' },
   };
 
-  const others = (['speed', 'lean', 'elev', 'trip'] as GaugeKey[]).filter((k) => k !== focused);
+  const others = (['speed', 'lean', 'elev', 'trip', 'weather'] as GaugeKey[]).filter((k) => k !== focused);
 
   return (
     <View style={styles.root}>
@@ -143,6 +180,7 @@ export function RideDashboard({
         {focused === 'lean' && <LeanBig lean={lean} maxLean={maxLean} onCalibrate={calibrate} />}
         {focused === 'elev' && <ElevBig altitude={altitude} grade={g} samples={samples} />}
         {focused === 'trip' && <TripBig elapsed={elapsed} distance={distance} maxSpeed={maxSpeed} avg={avg} />}
+        {focused === 'weather' && <WeatherBig wx={wx} />}
       </View>
 
       {/* secondary tiles — tap to promote into the big slot */}
@@ -318,6 +356,39 @@ function TripCell({
       <MaterialCommunityIcons name={icon} size={22} color={colors.primary} />
       <Text style={styles.tripValue}>{value}</Text>
       <Text style={styles.tripLabel}>{label}</Text>
+    </View>
+  );
+}
+
+function WeatherBig({ wx }: { wx: { weather: RideWeather; rideability: Rideability } | null }) {
+  if (!wx) {
+    return (
+      <View style={styles.center}>
+        <MaterialCommunityIcons name="weather-cloudy-clock" size={64} color={colors.textMuted} />
+        <Text style={styles.hint}>Hava durumu alınıyor…</Text>
+      </View>
+    );
+  }
+  const lvl = WX_LEVEL[wx.rideability.level] ?? WX_LEVEL.caution;
+  return (
+    <View style={styles.center}>
+      <Text style={[styles.bigValue, { color: lvl.color }]}>
+        {wx.rideability.score}
+        <Text style={styles.bigUnit}> /100</Text>
+      </Text>
+      <View style={styles.gradeRow}>
+        <MaterialCommunityIcons name={lvl.icon} size={20} color={lvl.color} />
+        <Text style={[styles.gradeText, { color: lvl.color }]}>{lvl.label}</Text>
+      </View>
+      <View style={styles.subRow}>
+        <Caption icon="thermometer" text={`${Math.round(wx.weather.temp_c)}°C`} />
+        <Caption icon="weather-windy" text={`${Math.round(wx.weather.wind_kph)} km/s`} />
+      </View>
+      {wx.rideability.warnings.length > 0 && (
+        <Text style={[styles.hint, { color: lvl.color, textAlign: 'center', paddingHorizontal: spacing.lg }]}>
+          {wx.rideability.warnings.slice(0, 2).join(' · ')}
+        </Text>
+      )}
     </View>
   );
 }

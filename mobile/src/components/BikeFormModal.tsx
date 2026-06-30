@@ -23,6 +23,9 @@ export type BikeFormValues = {
   insurance_expiry: string;
   kasko_expiry: string;
   inspection_expiry: string;
+  tank_liters: number;
+  avg_consumption: number;
+  fuel_type: string;
 };
 
 /**
@@ -45,6 +48,9 @@ export function BikeFormModal({
   const [name, setName] = useState('');
   const [plate, setPlate] = useState('');
   const [year, setYear] = useState('');
+  const [tank, setTank] = useState('');
+  const [consumption, setConsumption] = useState('');
+  const [fuelType, setFuelType] = useState('');
   const [dates, setDates] = useState<Record<DocKey, string>>({
     insurance_expiry: '',
     kasko_expiry: '',
@@ -59,6 +65,9 @@ export function BikeFormModal({
     setName(initial?.name ?? '');
     setPlate(initial?.plate ?? '');
     setYear(initial?.year ? String(initial.year) : '');
+    setTank(initial?.tank_liters ? String(initial.tank_liters) : '');
+    setConsumption(initial?.avg_consumption ? String(initial.avg_consumption) : '');
+    setFuelType(initial?.fuel_type ?? '');
     setDates({
       insurance_expiry: initial?.insurance_expiry ?? '',
       kasko_expiry: initial?.kasko_expiry ?? '',
@@ -91,6 +100,9 @@ export function BikeFormModal({
       name: name.trim(),
       plate: plate.trim().toUpperCase(),
       year: parseInt(year, 10) || 0,
+      tank_liters: parseFloat(tank.replace(',', '.')) || 0,
+      avg_consumption: parseFloat(consumption.replace(',', '.')) || 0,
+      fuel_type: fuelType.trim(),
       ...dates,
     });
   }
@@ -112,6 +124,21 @@ export function BikeFormModal({
                   <TextField label="Yıl" value={year} onChangeText={setYear} placeholder="2022" keyboardType="number-pad" maxLength={4} />
                 </View>
               </View>
+
+              <Text style={styles.docsHeader}>Yakıt & menzil</Text>
+              <Text style={styles.docsHint}>
+                Depo hacmi ve tüketim ile kalan menzil tahmini gösterilir. Tüketim, dolu-depo yakıt kayıtlarından otomatik güncellenir.
+              </Text>
+              <View style={styles.row}>
+                <View style={styles.flex}>
+                  <TextField label="Depo (L)" value={tank} onChangeText={setTank} placeholder="14" keyboardType="decimal-pad" />
+                </View>
+                <View style={{ width: spacing.sm }} />
+                <View style={styles.flex}>
+                  <TextField label="Tüketim (L/100km)" value={consumption} onChangeText={setConsumption} placeholder="4.5" keyboardType="decimal-pad" />
+                </View>
+              </View>
+              <TextField label="Yakıt tipi (opsiyonel)" value={fuelType} onChangeText={setFuelType} placeholder="benzin" autoCapitalize="none" />
 
               <Text style={styles.docsHeader}>Belge bitiş tarihleri</Text>
               <Text style={styles.docsHint}>

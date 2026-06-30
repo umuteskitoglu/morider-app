@@ -20,7 +20,10 @@ func (h *handler) onRideCompleted(msg *nats.Msg) {
 		return
 	}
 	// Background context: this runs outside any HTTP request lifecycle.
-	h.evaluateAndAward(context.Background(), evt.UserID)
+	ctx := context.Background()
+	h.evaluateAndAward(ctx, evt.UserID)
+	// Active challenges may now be complete for this rider.
+	h.evaluateChallenges(ctx, evt.UserID)
 }
 
 // onSessionRoster is the NATS handler for session.roster events. A session with
@@ -119,6 +122,13 @@ func (h *handler) statsFor(ctx context.Context, userID int64) (Stats, error) {
 	if err := h.d.DB.QueryRow(ctx,
 		`SELECT COUNT(*), COALESCE(MAX(size), 0) FROM group_ride_logs WHERE user_id = $1`, userID,
 	).Scan(&s.GroupRideCount, &s.MaxGroupSize); err != nil {
+		return s, err
+	}
+
+	// Segment efforts: how many distinct segments the rider has a timed effort on.
+	if err := h.d.DB.QueryRow(ctx,
+		`SELECT COUNT(DISTINCT segment_id) FROM segment_efforts WHERE user_id = $1`, userID,
+	).Scan(&s.SegmentEfforts); err != nil {
 		return s, err
 	}
 	return s, nil

@@ -30,6 +30,12 @@ type Motorcycle struct {
 	InsuranceExpiry  string `json:"insurance_expiry"`
 	KaskoExpiry      string `json:"kasko_expiry"`
 	InspectionExpiry string `json:"inspection_expiry"`
+	// Fuel & range metadata. TankLiters and FuelType are user-set; AvgConsumption
+	// (L/100km) is auto-derived from full fills (see fuel.go) but may be seeded
+	// manually. Zero means "not set".
+	TankLiters     float64 `json:"tank_liters"`
+	AvgConsumption float64 `json:"avg_consumption"`
+	FuelType       string  `json:"fuel_type"`
 }
 
 // ServiceRecord is one maintenance log entry.
@@ -52,6 +58,8 @@ func registerGarageRoutes(d *server.Deps, h *handler) {
 	g.POST("/:id/services", h.addServiceRecord)
 	g.GET("/:id/services", h.listServiceRecords)
 	g.DELETE("/:id/services/:sid", h.removeServiceRecord)
+	registerFuelRoutes(g, h)
+	registerMaintenanceRoutes(g, h)
 }
 
 type motoReq struct {
@@ -63,6 +71,10 @@ type motoReq struct {
 	InsuranceExpiry  string `json:"insurance_expiry"`
 	KaskoExpiry      string `json:"kasko_expiry"`
 	InspectionExpiry string `json:"inspection_expiry"`
+
+	TankLiters     float64 `json:"tank_liters" binding:"omitempty,min=0,max=200"`
+	AvgConsumption float64 `json:"avg_consumption" binding:"omitempty,min=0,max=100"`
+	FuelType       string  `json:"fuel_type" binding:"max=20"`
 }
 
 // parseDate turns an optional "YYYY-MM-DD" string into a nullable time.
@@ -106,9 +118,11 @@ func (h *handler) createMoto(c *gin.Context) {
 	}
 	var id int64
 	err := h.d.DB.QueryRow(c,
-		`INSERT INTO motorcycles (user_id, name, plate, year, insurance_expiry, kasko_expiry, inspection_expiry)
-		 VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING id`,
+		`INSERT INTO motorcycles (user_id, name, plate, year, insurance_expiry, kasko_expiry, inspection_expiry,
+		                          tank_liters, avg_consumption, fuel_type)
+		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10) RETURNING id`,
 		authpkg.UserID(c), req.Name, req.Plate, req.Year, ins, kasko, insp,
+		nullableFloat(req.TankLiters), nullableFloat(req.AvgConsumption), req.FuelType,
 	).Scan(&id)
 	if err != nil {
 		httpx.Internal(c, "could not create motorcycle")
@@ -118,13 +132,24 @@ func (h *handler) createMoto(c *gin.Context) {
 		ID: id, Name: req.Name, Plate: req.Plate, Year: req.Year,
 		InsuranceExpiry: req.InsuranceExpiry, KaskoExpiry: req.KaskoExpiry,
 		InspectionExpiry: req.InspectionExpiry,
+		TankLiters:       req.TankLiters, AvgConsumption: req.AvgConsumption, FuelType: req.FuelType,
 	})
+}
+
+// nullableFloat maps a zero value to SQL NULL so "not set" stays distinct from
+// a real zero in numeric columns.
+func nullableFloat(v float64) *float64 {
+	if v == 0 {
+		return nil
+	}
+	return &v
 }
 
 func (h *handler) listMotos(c *gin.Context) {
 	rows, err := h.d.DB.Query(c,
 		`SELECT id, name, COALESCE(plate, ''), COALESCE(year, 0),
-		        insurance_expiry, kasko_expiry, inspection_expiry
+		        insurance_expiry, kasko_expiry, inspection_expiry,
+		        COALESCE(tank_liters, 0), COALESCE(avg_consumption, 0), COALESCE(fuel_type, '')
 		 FROM motorcycles WHERE user_id = $1 ORDER BY created_at`, authpkg.UserID(c))
 	if err != nil {
 		httpx.Internal(c, "could not list motorcycles")
@@ -135,7 +160,8 @@ func (h *handler) listMotos(c *gin.Context) {
 	for rows.Next() {
 		var m Motorcycle
 		var ins, kasko, insp *time.Time
-		if err := rows.Scan(&m.ID, &m.Name, &m.Plate, &m.Year, &ins, &kasko, &insp); err != nil {
+		if err := rows.Scan(&m.ID, &m.Name, &m.Plate, &m.Year, &ins, &kasko, &insp,
+			&m.TankLiters, &m.AvgConsumption, &m.FuelType); err != nil {
 			httpx.Internal(c, "could not read motorcycles")
 			return
 		}
@@ -220,24 +246,33 @@ func (h *handler) updateMoto(c *gin.Context) {
 		httpx.BadRequest(c, "dates must be YYYY-MM-DD")
 		return
 	}
-	tag, err := h.d.DB.Exec(c,
+	var avgConsumption float64
+	err = h.d.DB.QueryRow(c,
 		`UPDATE motorcycles
 		 SET name = $3, plate = $4, year = $5,
-		     insurance_expiry = $6, kasko_expiry = $7, inspection_expiry = $8
-		 WHERE id = $1 AND user_id = $2`,
-		id, authpkg.UserID(c), req.Name, req.Plate, req.Year, ins, kasko, insp)
-	if err != nil {
-		httpx.Internal(c, "could not update motorcycle")
+		     insurance_expiry = $6, kasko_expiry = $7, inspection_expiry = $8,
+		     tank_liters = $9,
+		     -- avg_consumption is auto-derived from fuel logs; only overwrite it
+		     -- when the form sends an explicit (non-null) manual estimate.
+		     avg_consumption = COALESCE($10, avg_consumption), fuel_type = $11
+		 WHERE id = $1 AND user_id = $2
+		 RETURNING COALESCE(avg_consumption, 0)`,
+		id, authpkg.UserID(c), req.Name, req.Plate, req.Year, ins, kasko, insp,
+		nullableFloat(req.TankLiters), nullableFloat(req.AvgConsumption), req.FuelType,
+	).Scan(&avgConsumption)
+	if errors.Is(err, pgx.ErrNoRows) {
+		httpx.Error(c, http.StatusNotFound, "motorcycle not found")
 		return
 	}
-	if tag.RowsAffected() == 0 {
-		httpx.Error(c, http.StatusNotFound, "motorcycle not found")
+	if err != nil {
+		httpx.Internal(c, "could not update motorcycle")
 		return
 	}
 	c.JSON(http.StatusOK, Motorcycle{
 		ID: id, Name: req.Name, Plate: req.Plate, Year: req.Year,
 		InsuranceExpiry: req.InsuranceExpiry, KaskoExpiry: req.KaskoExpiry,
 		InspectionExpiry: req.InspectionExpiry,
+		TankLiters:       req.TankLiters, AvgConsumption: avgConsumption, FuelType: req.FuelType,
 	})
 }
 

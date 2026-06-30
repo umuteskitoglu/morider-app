@@ -43,6 +43,10 @@ type Config struct {
 	// instance has a strict usage policy; self-host for production.
 	GeocodeURL string
 
+	// Weather (forecast) endpoint, Open-Meteo-compatible. The public instance is
+	// keyless and free for non-commercial use; self-host for production.
+	WeatherURL string
+
 	// Directory where the feed service stores uploaded photos.
 	UploadDir string
 
@@ -86,6 +90,8 @@ func Load() Config {
 		ElevationURL: getEnv("ELEVATION_URL", "https://api.opentopodata.org/v1/srtm90m"),
 
 		GeocodeURL: getEnv("GEOCODE_URL", "https://nominatim.openstreetmap.org"),
+
+		WeatherURL: getEnv("WEATHER_URL", "https://api.open-meteo.com/v1/forecast"),
 
 		UploadDir: getEnv("UPLOAD_DIR", "./uploads"),
 

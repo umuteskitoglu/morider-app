@@ -9,6 +9,10 @@ export type Motorcycle = {
   insurance_expiry: string;
   kasko_expiry: string;
   inspection_expiry: string;
+  // Fuel & range (internal/ride/fuel.go). 0 = not set.
+  tank_liters: number;
+  avg_consumption: number; // L/100km, auto-derived from full fills
+  fuel_type: string;
 };
 
 export type ServiceRecord = {
@@ -19,6 +23,59 @@ export type ServiceRecord = {
   cost: number;
   service_date: string;
 };
+
+// Fuel log + summary, matching internal/ride/fuel.go.
+export type FuelLog = {
+  id: number;
+  liters: number;
+  cost: number;
+  odometer_km: number;
+  is_full_tank: boolean;
+  lat: number;
+  lon: number;
+  filled_at: string;
+};
+
+export type FuelSummary = {
+  avg_consumption: number; // L/100km
+  total_liters: number;
+  total_cost: number;
+  distance_km: number;
+  cost_per_km: number;
+};
+
+// Maintenance schedule with derived state, matching internal/ride/maintenance.go.
+export type MaintenanceItem = {
+  id: number;
+  item: string;
+  interval_km: number;
+  interval_months: number;
+  last_done_km: number;
+  last_done_at: string;
+  due_in_km?: number; // negative = overdue
+  due_in_days?: number;
+  status: 'ok' | 'soon' | 'overdue';
+};
+
+// Tank range in km from capacity (L) and consumption (L/100km); null when unknown.
+export function rangeKm(tankLiters: number, avgConsumption: number): number | null {
+  if (!tankLiters || !avgConsumption) return null;
+  return (tankLiters / avgConsumption) * 100;
+}
+
+// Colour + short Turkish label for a maintenance item's status, reusing the
+// document-expiry colour scheme (green / amber / red).
+export function maintenanceStatusInfo(m: MaintenanceItem): { color: string; text: string } {
+  const color = m.status === 'overdue' ? '#ff4d5e' : m.status === 'soon' ? '#f59f00' : '#37b24d';
+  const parts: string[] = [];
+  if (m.due_in_km != null) {
+    parts.push(m.due_in_km <= 0 ? `${(-m.due_in_km).toLocaleString('tr-TR')} km geçti` : `${m.due_in_km.toLocaleString('tr-TR')} km`);
+  }
+  if (m.due_in_days != null) {
+    parts.push(m.due_in_days <= 0 ? `${-m.due_in_days} gün geçti` : `${m.due_in_days} gün`);
+  }
+  return { color, text: parts.join(' · ') || 'Planlandı' };
+}
 
 // Document keys with Turkish labels, in display order.
 export const DOC_KEYS = ['insurance_expiry', 'inspection_expiry', 'kasko_expiry'] as const;

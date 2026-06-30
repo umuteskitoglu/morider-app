@@ -309,6 +309,7 @@ export default function ProfileScreen() {
           <QuickTile icon="history" label="Sürüşlerim" onPress={() => navigation.navigate('Rides')} />
           <QuickTile icon="map-marker-path" label="Rotalarım" onPress={() => navigation.navigate('RoutesList')} />
           <QuickTile icon="garage-variant" label="Garaj" onPress={() => navigation.navigate('Garage')} />
+          <QuickTile icon="trophy-outline" label="Meydan Okuma" onPress={() => navigation.navigate('Challenges')} />
         </View>
 
         <SectionTitle icon="chart-box" title="Haftalık Özet" />

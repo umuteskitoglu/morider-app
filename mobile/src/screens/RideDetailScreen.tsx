@@ -23,6 +23,7 @@ import {
   toCoords,
   TrackPoint,
 } from '../lib/rideStats';
+import { Effort, fmtSeconds, thin } from '../lib/segments';
 import { api, errorMessage } from '../api/client';
 import { colors, radius, shadow, spacing } from '../theme';
 
@@ -69,6 +70,11 @@ export default function RideDetailScreen({ route, navigation }: Props) {
   const { id } = route.params;
   const [ride, setRide] = useState<Ride | null>(null);
   const [coords, setCoords] = useState<Coord[]>([]);
+  const [trackPts, setTrackPts] = useState<TrackPoint[]>([]);
+  const [efforts, setEfforts] = useState<Effort[]>([]);
+  const [creatingSeg, setCreatingSeg] = useState(false);
+  const [segName, setSegName] = useState('');
+  const [savingSeg, setSavingSeg] = useState(false);
   const [segments, setSegments] = useState<{ color: string; coordinates: Coord[] }[]>([]);
   const [stats, setStats] = useState<RideStats | null>(null);
   const [elevation, setElevation] = useState<ElevationProfile | null>(null);
@@ -107,6 +113,7 @@ export default function RideDetailScreen({ route, navigation }: Props) {
       ]);
       setRide(rideRes.data);
       const points: TrackPoint[] = trackRes.data.points ?? [];
+      setTrackPts(points);
       const pts = toCoords(points);
       setCoords(pts);
       setSegments(coloredSegments(points));
@@ -152,6 +159,14 @@ export default function RideDetailScreen({ route, navigation }: Props) {
     try {
       const { data } = await api.get('/api/garage');
       setMotos(data.motorcycles ?? []);
+    } catch {
+      // ignore
+    }
+    // Match this ride's track against nearby segments (idempotent on the server).
+    // Best effort — the efforts section just stays empty on failure.
+    try {
+      const { data } = await api.post(`/api/rides/${id}/segments/match`);
+      setEfforts(data.efforts ?? []);
     } catch {
       // ignore
     }
@@ -260,6 +275,36 @@ export default function RideDetailScreen({ route, navigation }: Props) {
         },
       },
     ]);
+  }
+
+  async function saveSegment() {
+    if (!segName.trim()) {
+      Alert.alert('İsim gerekli', 'Segmente bir isim ver (örn. "Sahil düzlüğü").');
+      return;
+    }
+    if (trackPts.length < 2) {
+      Alert.alert('Yetersiz veri', 'Bu sürüşte segment oluşturacak kadar iz yok.');
+      return;
+    }
+    try {
+      setSavingSeg(true);
+      const points = thin(trackPts, 60).map((p) => ({ lat: p.lat, lon: p.lon }));
+      await api.post('/api/segments', { name: segName.trim(), points, visibility: 'public' });
+      setCreatingSeg(false);
+      setSegName('');
+      // Re-match so this ride immediately shows an effort on the new segment.
+      try {
+        const { data } = await api.post(`/api/rides/${id}/segments/match`);
+        setEfforts(data.efforts ?? []);
+      } catch {
+        // ignore
+      }
+      Alert.alert('Segment oluşturuldu', 'Bu yol artık herkesin sıralandığı bir segment.');
+    } catch (err) {
+      Alert.alert('Oluşturulamadı', errorMessage(err));
+    } finally {
+      setSavingSeg(false);
+    }
   }
 
   const initialRegion: Region = coords[0]
@@ -384,7 +429,34 @@ export default function RideDetailScreen({ route, navigation }: Props) {
             </View>
           )}
 
+          {efforts.length > 0 && (
+            <View style={styles.segWrap}>
+              <Text style={styles.segHead}>Segmentler</Text>
+              {efforts.map((e) => (
+                <Pressable
+                  key={e.segment_id}
+                  style={styles.segRow}
+                  onPress={() => navigation.navigate('SegmentDetail', { id: e.segment_id, name: e.segment_name })}
+                >
+                  <MaterialCommunityIcons name="flag-checkered" size={18} color={colors.primary} />
+                  <Text style={styles.segName} numberOfLines={1}>
+                    {e.segment_name}
+                  </Text>
+                  {e.is_pr && (
+                    <View style={styles.prBadge}>
+                      <MaterialCommunityIcons name="trophy" size={11} color={colors.bg} />
+                      <Text style={styles.prBadgeText}>PR</Text>
+                    </View>
+                  )}
+                  <Text style={styles.segTime}>{fmtSeconds(e.elapsed_seconds)}</Text>
+                </Pressable>
+              ))}
+            </View>
+          )}
+
           <View style={{ height: spacing.md }} />
+          <Button title="Bu Sürüşten Segment Oluştur" variant="ghost" icon="flag-checkered" onPress={() => setCreatingSeg(true)} />
+          <View style={{ height: spacing.sm }} />
           <Button title="Paylaş" variant="ghost" icon="share-variant" onPress={share} />
           <View style={{ height: spacing.sm }} />
           <Button title="Düzenle" variant="ghost" icon="pencil-outline" onPress={openEdit} />
@@ -419,6 +491,21 @@ export default function RideDetailScreen({ route, navigation }: Props) {
             </View>
             <View style={{ height: spacing.md }} />
             <Button title="Kaydet" icon="check" onPress={saveEdit} loading={saving} />
+          </Pressable>
+        </Pressable>
+      </Modal>
+
+      <Modal visible={creatingSeg} animationType="slide" transparent statusBarTranslucent onRequestClose={() => setCreatingSeg(false)}>
+        <Pressable style={styles.backdrop} onPress={() => setCreatingSeg(false)}>
+          <Pressable style={styles.modalSheet} onPress={() => {}}>
+            <Text style={styles.modalTitle}>Segment Oluştur</Text>
+            <Text style={styles.muted}>
+              Bu sürüşün izinden herkese açık bir segment yaratılır. Buradan geçen herkes otomatik sıralanır.
+            </Text>
+            <View style={{ height: spacing.sm }} />
+            <TextField label="İsim" value={segName} onChangeText={setSegName} placeholder="Sahil düzlüğü" />
+            <View style={{ height: spacing.md }} />
+            <Button title="Oluştur" icon="flag-checkered" onPress={saveSegment} loading={savingSeg} />
           </Pressable>
         </Pressable>
       </Modal>
@@ -527,4 +614,20 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     ...shadow.card,
   },
+  segWrap: { marginTop: spacing.md, gap: spacing.xs },
+  segHead: { color: colors.text, fontSize: 14, fontWeight: '900', marginBottom: spacing.xs },
+  segRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, paddingVertical: spacing.xs },
+  segName: { color: colors.text, fontWeight: '700', flex: 1 },
+  segTime: { color: colors.text, fontWeight: '900', fontVariant: ['tabular-nums'] },
+  prBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 2,
+    backgroundColor: colors.accent,
+    borderRadius: radius.pill,
+    paddingHorizontal: 6,
+    paddingVertical: 1,
+  },
+  prBadgeText: { color: colors.bg, fontSize: 10, fontWeight: '900' },
 });
+

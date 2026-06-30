@@ -53,6 +53,7 @@ func registerRoutes(d *server.Deps, h *handler) {
 	g.GET("/rewards/user/:uid", h.userBadges)
 	g.GET("/leaderboard/top", h.leaderboard)
 	g.GET("/leaderboard/following", h.leaderboardFollowing)
+	registerChallengeRoutes(g, h)
 }
 
 type handler struct {

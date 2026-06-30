@@ -12,6 +12,7 @@ import { AppTabParams, ProfileStackParams } from '../navigation/RootNavigator';
 import { useAuth } from '../store/auth';
 import { Button, Card, Stars } from '../components/ui';
 import { ElevationChart, ElevationProfile } from '../components/ElevationChart';
+import { RouteWeatherCard, RouteWeather } from '../components/RouteWeatherCard';
 import { POI, poiColor, poiIcon, poiLabel } from '../lib/poi';
 import { api, errorMessage } from '../api/client';
 import { colors, shadow, spacing } from '../theme';
@@ -43,6 +44,7 @@ export default function RouteDetailScreen({ route, navigation }: Props) {
   const [exporting, setExporting] = useState(false);
   const [pois, setPois] = useState<POI[]>([]);
   const [elevation, setElevation] = useState<ElevationProfile | null>(null);
+  const [weather, setWeather] = useState<RouteWeather | null>(null);
   const mapRef = useRef<MapView | null>(null);
 
   const isOwner = user?.id === ownerId;
@@ -90,6 +92,13 @@ export default function RouteDetailScreen({ route, navigation }: Props) {
     try {
       const { data } = await api.get(`/api/routes/${id}/elevation`);
       if ((data.points ?? []).length > 1) setElevation(data);
+    } catch {
+      // ignore
+    }
+    // Weather along the route (best effort — the card just stays hidden).
+    try {
+      const { data } = await api.get(`/api/routes/${id}/weather`);
+      if ((data.points ?? []).length > 0) setWeather(data);
     } catch {
       // ignore
     }
@@ -231,6 +240,7 @@ export default function RouteDetailScreen({ route, navigation }: Props) {
           )}
         </View>
 
+        {weather && <RouteWeatherCard weather={weather} />}
         {elevation && <ElevationChart profile={elevation} />}
 
         <View style={styles.ratingRow}>

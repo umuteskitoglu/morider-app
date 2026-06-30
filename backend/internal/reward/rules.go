@@ -26,6 +26,7 @@ type Stats struct {
 	MaxAvgSpeed       float64 // highest single-ride average speed in km/h
 	GroupRideCount    int64   // distinct group rides joined that had 2+ participants
 	MaxGroupSize      int64   // largest participant count among joined group rides
+	SegmentEfforts    int64   // distinct segments the rider has posted an effort on
 }
 
 // RidePoint pairs a ride's timestamp with its distance. It is the input to the
@@ -83,6 +84,10 @@ var rules = []rule{
 	// Group size (largest pack ridden with).
 	{Badge{"pack_5", "5 kişilik grupla sürüş"}, func(s Stats) bool { return s.MaxGroupSize >= 5 }},
 	{Badge{"pack_10", "10 kişilik grupla sürüş"}, func(s Stats) bool { return s.MaxGroupSize >= 10 }},
+
+	// Segments (timed efforts posted on rider-defined stretches of road).
+	{Badge{"segment_first", "İlk segment denemesi"}, func(s Stats) bool { return s.SegmentEfforts >= 1 }},
+	{Badge{"segment_10", "10 segmentte deneme"}, func(s Stats) bool { return s.SegmentEfforts >= 10 }},
 }
 
 // Evaluate returns every badge earned for the given stats, in rule order.

@@ -27,13 +27,15 @@ func Run(cfg config.Config) error {
 		return err
 	}
 	h := &handler{
-		d:      deps,
-		router: NewOSRMRouter(cfg.RoutingURL, cfg.RoutingProfile),
-		elev:   NewOpenTopoData(cfg.ElevationURL),
-		geo:    NewNominatimGeocoder(cfg.GeocodeURL),
+		d:       deps,
+		router:  NewOSRMRouter(cfg.RoutingURL, cfg.RoutingProfile),
+		elev:    NewOpenTopoData(cfg.ElevationURL),
+		geo:     NewNominatimGeocoder(cfg.GeocodeURL),
+		weather: NewOpenMeteo(cfg.WeatherURL),
 	}
 	registerRoutes(deps, h)
 	registerPOIRoutes(deps, h)
+	registerWeatherRoutes(deps, h)
 	return deps.Run(config.ResolvePort("ROUTE_PORT", "8084"))
 }
 
@@ -49,6 +51,7 @@ func registerRoutes(d *server.Deps, h *handler) {
 	g.GET("/:id/gpx", h.exportGPX)
 	g.GET("/:id/kml", h.exportKML)
 	g.GET("/:id/elevation", h.elevation)
+	g.GET("/:id/weather", h.routeWeather)
 	g.PUT("/:id", h.update)
 	g.DELETE("/:id", h.remove)
 	g.POST("/:id/rate", h.rate)
@@ -59,11 +62,19 @@ func registerRoutes(d *server.Deps, h *handler) {
 	g.POST("/import/kml", h.importRoute)
 }
 
+// registerWeatherRoutes mounts the point-weather endpoint under its own prefix
+// (the gateway proxies /api/weather to this service alongside /api/routes).
+func registerWeatherRoutes(d *server.Deps, h *handler) {
+	g := d.Engine.Group("/api/weather", d.JWT.Middleware())
+	g.GET("", h.weatherNow)
+}
+
 type handler struct {
-	d      *server.Deps
-	router Router
-	elev   ElevationProvider
-	geo    Geocoder
+	d       *server.Deps
+	router  Router
+	elev    ElevationProvider
+	geo     Geocoder
+	weather WeatherProvider
 }
 
 // Point is a single coordinate (WGS84).

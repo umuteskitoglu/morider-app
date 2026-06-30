@@ -31,6 +31,10 @@ import EditProfileScreen from '../screens/EditProfileScreen';
 import FollowsScreen from '../screens/FollowsScreen';
 import GarageScreen from '../screens/GarageScreen';
 import BikeDetailScreen from '../screens/BikeDetailScreen';
+import SegmentsScreen from '../screens/SegmentsScreen';
+import SegmentDetailScreen from '../screens/SegmentDetailScreen';
+import ChallengesScreen from '../screens/ChallengesScreen';
+import ChallengeDetailScreen from '../screens/ChallengeDetailScreen';
 import EventsScreen from '../screens/EventsScreen';
 import EventCreateScreen from '../screens/EventCreateScreen';
 import EventDetailScreen from '../screens/EventDetailScreen';
@@ -79,6 +83,10 @@ export type ProfileStackParams = {
   RouteDetail: { id: number; name: string };
   Garage: undefined;
   BikeDetail: { id: number; name: string };
+  Segments: undefined;
+  SegmentDetail: { id: number; name: string };
+  Challenges: undefined;
+  ChallengeDetail: { id: number; name: string };
 };
 
 export type EventsStackParams = {
@@ -163,6 +171,7 @@ function ProfileNavigator() {
           title: 'Rotalarım',
           headerRight: () => (
             <View style={styles.headerRow}>
+              <HeaderIconButton icon="flag-checkered" onPress={() => navigation.navigate('Segments')} />
               <HeaderIconButton icon="compass-outline" onPress={() => navigation.navigate('Explore')} />
             </View>
           ),
@@ -175,6 +184,10 @@ function ProfileNavigator() {
       <ProfileStack.Screen name="UserProfile" component={UserProfileScreen} options={{ title: 'Profil' }} />
       <ProfileStack.Screen name="Garage" component={GarageScreen} options={{ title: 'Garajım' }} />
       <ProfileStack.Screen name="BikeDetail" component={BikeDetailScreen} options={{ title: 'Motor' }} />
+      <ProfileStack.Screen name="Segments" component={SegmentsScreen} options={{ title: 'Segmentler' }} />
+      <ProfileStack.Screen name="SegmentDetail" component={SegmentDetailScreen} options={{ title: 'Segment' }} />
+      <ProfileStack.Screen name="Challenges" component={ChallengesScreen} options={{ title: 'Meydan Okumalar' }} />
+      <ProfileStack.Screen name="ChallengeDetail" component={ChallengeDetailScreen} options={{ title: 'Meydan Okuma' }} />
     </ProfileStack.Navigator>
   );
 }
