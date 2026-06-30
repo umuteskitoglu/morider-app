@@ -22,6 +22,11 @@ npm-debug.*
 .env
 *.local
 
+# Firebase service-account key (secret — never commit; mounted into the container
+# at runtime via docker-compose instead). See docs: FCM_CREDENTIALS_FILE.
+*firebase-adminsdk*.json
+*service-account*.json
+
 # OSRM routing data (downloaded/preprocessed locally, large binaries)
 infra/osrm/
 

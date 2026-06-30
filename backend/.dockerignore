@@ -3,3 +3,8 @@ bin/
 *.out
 Dockerfile
 .dockerignore
+
+# Secrets — keep the FCM service-account key out of the build context entirely
+# (it is mounted into the container at runtime via docker-compose).
+*firebase-adminsdk*.json
+*service-account*.json

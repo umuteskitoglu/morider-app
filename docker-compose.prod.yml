@@ -87,8 +87,12 @@ services:
       TELEMETRY_SERVICE_URL: http://localhost:8086
       FEED_SERVICE_URL: http://localhost:8087
       EVENT_SERVICE_URL: http://localhost:8088
+      # Firebase service-account key for FCM push (mounted read-only below).
+      FCM_CREDENTIALS_FILE: /run/secrets/fcm.json
     volumes:
       - uploads:/data/uploads
+      # Host file is gitignored; override the source with FCM_CREDENTIALS_HOST_FILE.
+      - ${FCM_CREDENTIALS_HOST_FILE:-./backend/morider-app-firebase-adminsdk-fbsvc-8c762c9582.json}:/run/secrets/fcm.json:ro
     ports:
       - "8080:8080"
     depends_on:
