@@ -47,6 +47,10 @@ type Config struct {
 	// keyless and free for non-commercial use; self-host for production.
 	WeatherURL string
 
+	// Path to a Firebase service-account JSON. When set, the reward service sends
+	// push via FCM HTTP v1; when empty it falls back to the Expo push relay.
+	FCMCredentialsFile string
+
 	// Directory where the feed service stores uploaded photos.
 	UploadDir string
 
@@ -92,6 +96,8 @@ func Load() Config {
 		GeocodeURL: getEnv("GEOCODE_URL", "https://nominatim.openstreetmap.org"),
 
 		WeatherURL: getEnv("WEATHER_URL", "https://api.open-meteo.com/v1/forecast"),
+
+		FCMCredentialsFile: getEnv("FCM_CREDENTIALS_FILE", ""),
 
 		UploadDir: getEnv("UPLOAD_DIR", "./uploads"),
 

@@ -22,6 +22,20 @@ type Notification struct {
 	Data  map[string]any `json:"data,omitempty"`
 }
 
+// Sender delivers a notification to a set of device tokens. Implementations:
+// ExpoSender (Expo push relay) and FCMSender (Firebase Cloud Messaging v1).
+type Sender interface {
+	SendToTokens(ctx context.Context, tokens []string, n Notification) error
+}
+
+// ExpoSender delivers via Expo's push relay. The zero value is ready to use.
+type ExpoSender struct{}
+
+// SendToTokens implements Sender by delegating to the package-level Expo sender.
+func (ExpoSender) SendToTokens(ctx context.Context, tokens []string, n Notification) error {
+	return SendToTokens(ctx, tokens, n)
+}
+
 // message is one entry in the Expo push request array.
 type message struct {
 	To    string         `json:"to"`

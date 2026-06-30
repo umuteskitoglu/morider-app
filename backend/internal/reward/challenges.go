@@ -434,7 +434,7 @@ func (h *handler) notify(userID int64, n push.Notification) {
 				tokens = append(tokens, t)
 			}
 		}
-		_ = push.SendToTokens(ctx, tokens, n)
+		_ = h.push.SendToTokens(ctx, tokens, n)
 	}()
 }
 
