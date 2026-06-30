@@ -9,6 +9,8 @@ import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { PostDetail, DetailPost } from '../components/PostDetail';
 import { AvatarViewer } from '../components/AvatarViewer';
 import FollowButton from '../components/FollowButton';
+import { CreateChallengeModal } from '../components/CreateChallengeModal';
+import { Button } from '../components/ui';
 import { useAuth } from '../store/auth';
 import { RiderChips } from '../components/RiderChips';
 import { ProfileStackParams } from '../navigation/RootNavigator';
@@ -50,6 +52,7 @@ export default function UserProfileScreen({ route, navigation }: Props) {
   const [licenseType, setLicenseType] = useState('');
   const [bikeType, setBikeType] = useState('');
   const [zoomUri, setZoomUri] = useState<string | null>(null);
+  const [challengeOpen, setChallengeOpen] = useState(false);
 
   const isSelf = user?.id === userId;
   // Instagram-style: follow lists open only when there's a connection — you
@@ -180,14 +183,17 @@ export default function UserProfileScreen({ route, navigation }: Props) {
         </LinearGradient>
 
         {!isSelf && (
-          <FollowButton
-            userId={userId}
-            following={following}
-            onChange={(next) => {
-              setFollowing(next);
-              setStats((s) => ({ ...s, followerCount: Math.max(0, s.followerCount + (next ? 1 : -1)) }));
-            }}
-          />
+          <>
+            <FollowButton
+              userId={userId}
+              following={following}
+              onChange={(next) => {
+                setFollowing(next);
+                setStats((s) => ({ ...s, followerCount: Math.max(0, s.followerCount + (next ? 1 : -1)) }));
+              }}
+            />
+            <Button title="Meydan Oku" variant="ghost" icon="flag-checkered" onPress={() => setChallengeOpen(true)} />
+          </>
         )}
 
         {posts.length === 0 ? (
@@ -245,6 +251,12 @@ export default function UserProfileScreen({ route, navigation }: Props) {
       </ScrollView>
       <PostDetail post={viewer} onClose={() => setViewer(null)} />
       <AvatarViewer uri={zoomUri} onClose={() => setZoomUri(null)} />
+      <CreateChallengeModal
+        visible={challengeOpen}
+        onClose={() => setChallengeOpen(false)}
+        inviteUserId={userId}
+        inviteName={name}
+      />
     </>
   );
 }

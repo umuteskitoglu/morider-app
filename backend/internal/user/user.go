@@ -47,6 +47,7 @@ func registerRoutes(d *server.Deps) {
 	g.GET("/:id", h.get)
 	protected := g.Use(d.JWT.Middleware())
 	protected.GET("/search", h.searchUsers)
+	protected.POST("/push-token", h.registerPushToken)
 	protected.PUT("/:id", h.update)
 
 	f := d.Engine.Group("/api/follows", d.JWT.Middleware())
@@ -75,6 +76,32 @@ type profile struct {
 	FollowerCount  int64  `json:"follower_count"`
 	FollowingCount int64  `json:"following_count"`
 	ShowGarage     bool   `json:"show_garage"`
+}
+
+type pushTokenReq struct {
+	Token    string `json:"token" binding:"required,max=255"`
+	Platform string `json:"platform" binding:"max=16"`
+}
+
+// registerPushToken upserts the caller's Expo push token. A token is unique to a
+// device, so it is keyed on the token and reassigned to the current user (e.g.
+// after a device changes hands or accounts).
+func (h *handler) registerPushToken(c *gin.Context) {
+	var req pushTokenReq
+	if err := c.ShouldBindJSON(&req); err != nil {
+		httpx.BadRequest(c, err.Error())
+		return
+	}
+	if _, err := h.d.DB.Exec(c,
+		`INSERT INTO push_tokens (token, user_id, platform, updated_at)
+		 VALUES ($1, $2, $3, now())
+		 ON CONFLICT (token) DO UPDATE SET user_id = EXCLUDED.user_id, platform = EXCLUDED.platform, updated_at = now()`,
+		req.Token, authpkg.UserID(c), req.Platform,
+	); err != nil {
+		httpx.Internal(c, "could not register push token")
+		return
+	}
+	c.Status(http.StatusNoContent)
 }
 
 func (h *handler) get(c *gin.Context) {

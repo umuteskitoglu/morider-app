@@ -1,56 +1,41 @@
 import React, { useCallback, useLayoutEffect, useState } from 'react';
-import {
-  Alert,
-  FlatList,
-  KeyboardAvoidingView,
-  Modal,
-  Platform,
-  Pressable,
-  StyleSheet,
-  Text,
-  View,
-} from 'react-native';
+import { Alert, FlatList, Pressable, StyleSheet, Text, View } from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 
 import { ProfileStackParams } from '../navigation/RootNavigator';
-import { Button, Card, TextField } from '../components/ui';
+import { Button, Card } from '../components/ui';
 import { ProgressBar } from '../components/ProgressBar';
-import {
-  Challenge,
-  ChallengeMetric,
-  fmtMetric,
-  METRICS,
-  metricInfo,
-  progressFraction,
-  windowLabel,
-} from '../lib/challenges';
+import { CreateChallengeModal } from '../components/CreateChallengeModal';
+import { Challenge, fmtMetric, metricInfo, progressFraction, windowLabel } from '../lib/challenges';
 import { api, errorMessage } from '../api/client';
 import { colors, radius, spacing } from '../theme';
 
 type Props = NativeStackScreenProps<ProfileStackParams, 'Challenges'>;
 
-const DURATIONS = [
-  { label: '1 hafta', days: 7 },
-  { label: '1 ay', days: 30 },
-  { label: '3 ay', days: 90 },
-];
+type Invite = {
+  id: number;
+  challenge_id: number;
+  title: string;
+  metric: Challenge['metric'];
+  goal: number;
+  inviter_name: string;
+};
 
 export default function ChallengesScreen({ navigation }: Props) {
   const [challenges, setChallenges] = useState<Challenge[]>([]);
+  const [invites, setInvites] = useState<Invite[]>([]);
   const [creating, setCreating] = useState(false);
-  const [saving, setSaving] = useState(false);
-  const [title, setTitle] = useState('');
-  const [desc, setDesc] = useState('');
-  const [metric, setMetric] = useState<ChallengeMetric>('distance');
-  const [goal, setGoal] = useState('');
-  const [durationDays, setDurationDays] = useState(30);
 
   const load = useCallback(async () => {
     try {
-      const { data } = await api.get('/api/challenges');
-      setChallenges(data.challenges ?? []);
+      const [ch, inv] = await Promise.all([
+        api.get('/api/challenges'),
+        api.get('/api/challenge-invites').catch(() => ({ data: { invites: [] } })),
+      ]);
+      setChallenges(ch.data.challenges ?? []);
+      setInvites(inv.data.invites ?? []);
     } catch (err) {
       Alert.alert('Yüklenemedi', errorMessage(err));
     }
@@ -65,21 +50,23 @@ export default function ChallengesScreen({ navigation }: Props) {
   useLayoutEffect(() => {
     navigation.setOptions({
       headerRight: () => (
-        <Pressable onPress={openCreate} hitSlop={8} style={{ paddingHorizontal: spacing.xs }}>
+        <Pressable onPress={() => setCreating(true)} hitSlop={8} style={{ paddingHorizontal: spacing.xs }}>
           <MaterialCommunityIcons name="plus" size={24} color={colors.primary} />
         </Pressable>
       ),
     });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [navigation]);
 
-  function openCreate() {
-    setTitle('');
-    setDesc('');
-    setMetric('distance');
-    setGoal('');
-    setDurationDays(30);
-    setCreating(true);
+  async function respondInvite(inv: Invite, action: 'accept' | 'decline') {
+    try {
+      await api.post(`/api/challenge-invites/${inv.id}/${action}`);
+      load();
+      if (action === 'accept') {
+        navigation.navigate('ChallengeDetail', { id: inv.challenge_id, name: inv.title });
+      }
+    } catch (err) {
+      Alert.alert('İşlem başarısız', errorMessage(err));
+    }
   }
 
   async function join(c: Challenge) {
@@ -91,32 +78,30 @@ export default function ChallengesScreen({ navigation }: Props) {
     }
   }
 
-  async function create() {
-    const g = parseFloat(goal.replace(',', '.'));
-    if (!title.trim() || !g) {
-      Alert.alert('Eksik bilgi', 'Başlık ve hedef gerekli.');
-      return;
-    }
-    try {
-      setSaving(true);
-      const startsAt = new Date();
-      const endsAt = new Date(startsAt.getTime() + durationDays * 86_400_000);
-      await api.post('/api/challenges', {
-        title: title.trim(),
-        description: desc.trim(),
-        metric,
-        goal: g,
-        starts_at: startsAt.toISOString(),
-        ends_at: endsAt.toISOString(),
-      });
-      setCreating(false);
-      load();
-    } catch (err) {
-      Alert.alert('Oluşturulamadı', errorMessage(err));
-    } finally {
-      setSaving(false);
-    }
-  }
+  const header = invites.length > 0 && (
+    <View style={styles.invites}>
+      <Text style={styles.invitesTitle}>Davetler</Text>
+      {invites.map((inv) => (
+        <Card key={inv.id} style={styles.inviteCard}>
+          <MaterialCommunityIcons name="flag-plus" size={20} color={colors.accent} />
+          <View style={styles.flex}>
+            <Text style={styles.inviteName} numberOfLines={1}>
+              {inv.title}
+            </Text>
+            <Text style={styles.inviteMeta}>
+              {inv.inviter_name} davet etti · {fmtMetric(inv.metric, inv.goal)}
+            </Text>
+          </View>
+          <Pressable onPress={() => respondInvite(inv, 'accept')} hitSlop={6} style={styles.acceptBtn}>
+            <MaterialCommunityIcons name="check" size={18} color={colors.bg} />
+          </Pressable>
+          <Pressable onPress={() => respondInvite(inv, 'decline')} hitSlop={6} style={styles.declineBtn}>
+            <MaterialCommunityIcons name="close" size={18} color={colors.textMuted} />
+          </Pressable>
+        </Card>
+      ))}
+    </View>
+  );
 
   return (
     <View style={styles.container}>
@@ -124,10 +109,11 @@ export default function ChallengesScreen({ navigation }: Props) {
         data={challenges}
         keyExtractor={(c) => String(c.id)}
         contentContainerStyle={styles.list}
+        ListHeaderComponent={header || null}
         ListEmptyComponent={
           <Card>
             <Text style={styles.muted}>
-              Aktif meydan okuma yok. Sağ üstten "+" ile bir tane başlat: mesafe, tırmanış ya da sürüş sayısı hedefi koy.
+              Aktif meydan okuma yok. Sağ üstten "+" ile bir tane başlat: mesafe, tırmanış, sürüş ya da hız hedefi koy.
             </Text>
           </Card>
         }
@@ -167,54 +153,7 @@ export default function ChallengesScreen({ navigation }: Props) {
         }}
       />
 
-      <Modal visible={creating} animationType="slide" transparent statusBarTranslucent onRequestClose={() => setCreating(false)}>
-        <KeyboardAvoidingView style={styles.flex} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
-          <Pressable style={styles.backdrop} onPress={() => setCreating(false)}>
-            <Pressable style={styles.sheet} onPress={() => {}}>
-              <Text style={styles.sheetTitle}>Yeni Meydan Okuma</Text>
-              <TextField label="Başlık" value={title} onChangeText={setTitle} placeholder="Haziran 1000 km" />
-              <TextField label="Açıklama (opsiyonel)" value={desc} onChangeText={setDesc} placeholder="Yaz başı için ısınma turu" />
-
-              <Text style={styles.fieldLabel}>Metrik</Text>
-              <View style={styles.pillWrap}>
-                {METRICS.map((m) => (
-                  <Pressable
-                    key={m.key}
-                    style={[styles.pillAuto, metric === m.key && styles.pillActive]}
-                    onPress={() => setMetric(m.key)}
-                  >
-                    <Text style={[styles.pillText, metric === m.key && styles.pillTextActive]}>{m.label}</Text>
-                  </Pressable>
-                ))}
-              </View>
-
-              <TextField
-                label={`Hedef (${metricInfo(metric).unit})`}
-                value={goal}
-                onChangeText={setGoal}
-                placeholder={metric === 'rides' ? '20' : metric === 'elevation' ? '5000' : '1000'}
-                keyboardType="decimal-pad"
-              />
-
-              <Text style={styles.fieldLabel}>Süre</Text>
-              <View style={styles.pillRow}>
-                {DURATIONS.map((d) => (
-                  <Pressable
-                    key={d.days}
-                    style={[styles.pill, durationDays === d.days && styles.pillActive]}
-                    onPress={() => setDurationDays(d.days)}
-                  >
-                    <Text style={[styles.pillText, durationDays === d.days && styles.pillTextActive]}>{d.label}</Text>
-                  </Pressable>
-                ))}
-              </View>
-
-              <View style={{ height: spacing.md }} />
-              <Button title="Başlat" icon="flag-checkered" onPress={create} loading={saving} />
-            </Pressable>
-          </Pressable>
-        </KeyboardAvoidingView>
-      </Modal>
+      <CreateChallengeModal visible={creating} onClose={() => setCreating(false)} onCreated={load} />
     </View>
   );
 }
@@ -232,44 +171,27 @@ const styles = StyleSheet.create({
   progressText: { color: colors.text, fontSize: 12, fontWeight: '700' },
   joinRow: { marginTop: spacing.sm },
   muted: { color: colors.textMuted },
-  backdrop: { flex: 1, backgroundColor: 'rgba(0,0,0,0.55)', justifyContent: 'flex-end' },
-  sheet: {
-    backgroundColor: colors.surface,
-    borderTopLeftRadius: radius.lg,
-    borderTopRightRadius: radius.lg,
-    padding: spacing.lg,
-  },
-  sheetTitle: { color: colors.text, fontSize: 18, fontWeight: '900', marginBottom: spacing.sm },
-  fieldLabel: {
-    color: colors.textMuted,
-    fontSize: 12,
-    fontWeight: '700',
-    textTransform: 'uppercase',
-    letterSpacing: 0.5,
-    marginTop: spacing.sm,
-    marginBottom: spacing.xs,
-  },
-  pillRow: { flexDirection: 'row', gap: spacing.sm },
-  pillWrap: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm },
-  pill: {
-    flex: 1,
+  invites: { gap: spacing.sm, marginBottom: spacing.sm },
+  invitesTitle: { color: colors.text, fontSize: 14, fontWeight: '900' },
+  inviteCard: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, borderColor: colors.accent, borderWidth: 1 },
+  inviteName: { color: colors.text, fontWeight: '800' },
+  inviteMeta: { color: colors.textMuted, fontSize: 12, marginTop: 1 },
+  acceptBtn: {
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    backgroundColor: colors.accent,
     alignItems: 'center',
-    paddingVertical: spacing.sm,
-    borderRadius: radius.pill,
+    justifyContent: 'center',
+  },
+  declineBtn: {
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    backgroundColor: colors.surfaceAlt,
     borderWidth: 1,
     borderColor: colors.border,
-    backgroundColor: colors.bgAlt,
-  },
-  pillAuto: {
     alignItems: 'center',
-    paddingVertical: spacing.sm,
-    paddingHorizontal: spacing.md,
-    borderRadius: radius.pill,
-    borderWidth: 1,
-    borderColor: colors.border,
-    backgroundColor: colors.bgAlt,
+    justifyContent: 'center',
   },
-  pillActive: { borderColor: colors.primary, backgroundColor: 'rgba(255,106,26,0.12)' },
-  pillText: { color: colors.textMuted, fontWeight: '700', fontSize: 13 },
-  pillTextActive: { color: colors.primary },
 });

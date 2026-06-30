@@ -13,6 +13,7 @@ import (
 
 	authpkg "github.com/morider/backend/pkg/auth"
 	"github.com/morider/backend/pkg/httpx"
+	"github.com/morider/backend/pkg/push"
 )
 
 // Challenges: time-boxed competitions over a rider metric. Progress is always
@@ -73,7 +74,14 @@ func registerChallengeRoutes(g *gin.RouterGroup, h *handler) {
 	g.GET("/challenges/:id", h.getChallenge)
 	g.POST("/challenges/:id/join", h.joinChallenge)
 	g.POST("/challenges/:id/leave", h.leaveChallenge)
+	g.POST("/challenges/:id/invite", h.inviteToChallenge)
 	g.DELETE("/challenges/:id", h.deleteChallenge)
+
+	// Invite inbox lives under its own prefix to avoid colliding with the
+	// /challenges/:id param route. The gateway proxies it to this service too.
+	g.GET("/challenge-invites", h.listInvites)
+	g.POST("/challenge-invites/:iid/accept", h.acceptInvite)
+	g.POST("/challenge-invites/:iid/decline", h.declineInvite)
 }
 
 type challengeReq struct {
@@ -272,6 +280,162 @@ func (h *handler) deleteChallenge(c *gin.Context) {
 		return
 	}
 	c.Status(http.StatusNoContent)
+}
+
+// Invite is a pending challenge invitation shown in the invitee's inbox.
+type Invite struct {
+	ID          int64   `json:"id"`
+	ChallengeID int64   `json:"challenge_id"`
+	Title       string  `json:"title"`
+	Metric      string  `json:"metric"`
+	Goal        float64 `json:"goal"`
+	InviterName string  `json:"inviter_name"`
+}
+
+type inviteReq struct {
+	UserID int64 `json:"user_id" binding:"required"`
+}
+
+// inviteToChallenge lets a participant invite another rider, recording a pending
+// invite and pushing them a notification. Idempotent per (challenge, invitee).
+func (h *handler) inviteToChallenge(c *gin.Context) {
+	cid, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil {
+		httpx.BadRequest(c, "invalid challenge id")
+		return
+	}
+	var req inviteReq
+	if err := c.ShouldBindJSON(&req); err != nil {
+		httpx.BadRequest(c, err.Error())
+		return
+	}
+	inviter := authpkg.UserID(c)
+	if req.UserID == inviter {
+		httpx.BadRequest(c, "kendine davet gönderemezsin")
+		return
+	}
+	// Caller must be an active participant of a not-yet-ended challenge.
+	var title string
+	err = h.d.DB.QueryRow(c,
+		`SELECT c.title FROM challenges c
+		 JOIN challenge_participants p ON p.challenge_id = c.id AND p.user_id = $2
+		 WHERE c.id = $1 AND c.ends_at >= now()`, cid, inviter).Scan(&title)
+	if errors.Is(err, pgx.ErrNoRows) {
+		httpx.Error(c, http.StatusForbidden, "bu meydan okumaya davet edemezsin")
+		return
+	}
+	if err != nil {
+		httpx.Internal(c, "could not load challenge")
+		return
+	}
+	if _, err := h.d.DB.Exec(c,
+		`INSERT INTO challenge_invites (challenge_id, inviter_id, invitee_id) VALUES ($1, $2, $3)
+		 ON CONFLICT (challenge_id, invitee_id) DO NOTHING`, cid, inviter, req.UserID); err != nil {
+		httpx.Internal(c, "could not create invite")
+		return
+	}
+
+	var inviterName string
+	_ = h.d.DB.QueryRow(c, `SELECT name FROM users WHERE id = $1`, inviter).Scan(&inviterName)
+	h.notify(req.UserID, push.Notification{
+		Title: "Sana meydan okundu! 🏍️",
+		Body:  inviterName + " seni \"" + title + "\" yarışmasına davet etti",
+		Data:  map[string]any{"type": "challenge_invite", "challenge_id": cid},
+	})
+	c.Status(http.StatusCreated)
+}
+
+// listInvites returns the caller's pending invites to still-active challenges.
+func (h *handler) listInvites(c *gin.Context) {
+	rows, err := h.d.DB.Query(c,
+		`SELECT ci.id, c.id, c.title, c.metric, c.goal, u.name
+		 FROM challenge_invites ci
+		 JOIN challenges c ON c.id = ci.challenge_id
+		 JOIN users u ON u.id = ci.inviter_id
+		 WHERE ci.invitee_id = $1 AND ci.status = 'pending' AND c.ends_at >= now()
+		 ORDER BY ci.created_at DESC`, authpkg.UserID(c))
+	if err != nil {
+		httpx.Internal(c, "could not list invites")
+		return
+	}
+	defer rows.Close()
+	out := make([]Invite, 0)
+	for rows.Next() {
+		var iv Invite
+		if err := rows.Scan(&iv.ID, &iv.ChallengeID, &iv.Title, &iv.Metric, &iv.Goal, &iv.InviterName); err != nil {
+			httpx.Internal(c, "could not read invites")
+			return
+		}
+		out = append(out, iv)
+	}
+	c.JSON(http.StatusOK, gin.H{"invites": out})
+}
+
+// acceptInvite marks the invite accepted and joins the caller to the challenge.
+func (h *handler) acceptInvite(c *gin.Context) {
+	iid, err := strconv.ParseInt(c.Param("iid"), 10, 64)
+	if err != nil {
+		httpx.BadRequest(c, "invalid invite id")
+		return
+	}
+	var cid int64
+	err = h.d.DB.QueryRow(c,
+		`UPDATE challenge_invites SET status = 'accepted'
+		 WHERE id = $1 AND invitee_id = $2 AND status = 'pending'
+		 RETURNING challenge_id`, iid, authpkg.UserID(c)).Scan(&cid)
+	if errors.Is(err, pgx.ErrNoRows) {
+		httpx.Error(c, http.StatusNotFound, "invite not found")
+		return
+	}
+	if err != nil {
+		httpx.Internal(c, "could not accept invite")
+		return
+	}
+	if _, err := h.d.DB.Exec(c,
+		`INSERT INTO challenge_participants (challenge_id, user_id)
+		 SELECT $1, $2 FROM challenges WHERE id = $1 AND ends_at >= now()
+		 ON CONFLICT DO NOTHING`, cid, authpkg.UserID(c)); err != nil {
+		httpx.Internal(c, "could not join challenge")
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"challenge_id": cid})
+}
+
+// declineInvite marks the invite declined.
+func (h *handler) declineInvite(c *gin.Context) {
+	iid, err := strconv.ParseInt(c.Param("iid"), 10, 64)
+	if err != nil {
+		httpx.BadRequest(c, "invalid invite id")
+		return
+	}
+	if _, err := h.d.DB.Exec(c,
+		`UPDATE challenge_invites SET status = 'declined'
+		 WHERE id = $1 AND invitee_id = $2 AND status = 'pending'`, iid, authpkg.UserID(c)); err != nil {
+		httpx.Internal(c, "could not decline invite")
+		return
+	}
+	c.Status(http.StatusNoContent)
+}
+
+// notify pushes a notification to all of a user's registered devices in the
+// background (best effort, never blocks or fails the request).
+func (h *handler) notify(userID int64, n push.Notification) {
+	go func() {
+		ctx := context.Background()
+		rows, err := h.d.DB.Query(ctx, `SELECT token FROM push_tokens WHERE user_id = $1`, userID)
+		if err != nil {
+			return
+		}
+		defer rows.Close()
+		var tokens []string
+		for rows.Next() {
+			var t string
+			if err := rows.Scan(&t); err == nil {
+				tokens = append(tokens, t)
+			}
+		}
+		_ = push.SendToTokens(ctx, tokens, n)
+	}()
 }
 
 // challengeBadgeType is the stable rewards.type for completing a challenge.

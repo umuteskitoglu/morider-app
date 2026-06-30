@@ -8,6 +8,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 
 import { useAuth } from '../store/auth';
+import { registerForPush } from '../lib/push';
 import { colors, gradients, radius, shadow, spacing } from '../theme';
 import LoginScreen from '../screens/LoginScreen';
 import SignupScreen from '../screens/SignupScreen';
@@ -349,6 +350,11 @@ function AuthFlow() {
 
 export default function RootNavigator() {
   const { token, loading } = useAuth();
+
+  // Register this device for push once the rider is signed in (best effort).
+  useEffect(() => {
+    if (token) registerForPush();
+  }, [token]);
 
   if (loading) {
     return (
