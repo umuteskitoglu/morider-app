@@ -64,10 +64,10 @@ func (h *handler) evaluateAndAward(ctx context.Context, userID int64) {
 	}
 	for _, b := range Evaluate(stats) {
 		if _, err := h.d.DB.Exec(ctx,
-			`INSERT INTO rewards (user_id, type, description)
-			 VALUES ($1, $2, $3)
+			`INSERT INTO rewards (user_id, type, description, tier, xp)
+			 VALUES ($1, $2, $3, $4, $5)
 			 ON CONFLICT (user_id, type) DO NOTHING`,
-			userID, b.Type, b.Description,
+			userID, b.Type, b.Description, b.Tier, TierXP(b.Tier),
 		); err != nil {
 			h.d.Log.Error().Err(err).Int64("user_id", userID).Str("type", b.Type).Msg("could not award badge")
 			continue

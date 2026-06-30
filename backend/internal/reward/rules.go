@@ -3,15 +3,75 @@ package reward
 import (
 	"fmt"
 	"sort"
+	"strings"
 	"time"
 )
 
 // Badge is an achievement the rules engine can grant. Type is the stable,
 // machine identifier (also the idempotency key per user); Description is the
-// human-facing text stored alongside it.
+// human-facing text stored alongside it; Tier is its rarity, which determines
+// the XP it awards.
 type Badge struct {
 	Type        string
 	Description string
+	Tier        string // bronze | silver | gold | platinum
+}
+
+// Tier constants and their XP values. XP is a pure function of tier so badges
+// have a single source of difficulty.
+const (
+	TierBronze   = "bronze"
+	TierSilver   = "silver"
+	TierGold     = "gold"
+	TierPlatinum = "platinum"
+)
+
+// TierXP returns the XP awarded for a badge of the given tier.
+func TierXP(tier string) int {
+	switch tier {
+	case TierBronze:
+		return 10
+	case TierSilver:
+		return 25
+	case TierGold:
+		return 50
+	case TierPlatinum:
+		return 100
+	default:
+		return 0
+	}
+}
+
+// BadgeMeta resolves a stored reward type back to its tier and XP. Static badges
+// come from the rule set; a completed challenge (challenge_<id>) counts as gold.
+func BadgeMeta(badgeType string) (tier string, xp int) {
+	for _, r := range rules {
+		if r.badge.Type == badgeType {
+			return r.badge.Tier, TierXP(r.badge.Tier)
+		}
+	}
+	if strings.HasPrefix(badgeType, "challenge_") {
+		return TierGold, TierXP(TierGold)
+	}
+	return "special", 0
+}
+
+// Level maps total XP to a rider level and progress within that level. Level n
+// starts at cumulative XP 50*n*(n-1): 0, 100, 300, 600, 1000, ... so each level
+// costs 100 XP more than the last. into is XP earned inside the current level and
+// span is the XP the current level spans.
+func Level(xp int) (level, into, span int) {
+	if xp < 0 {
+		xp = 0
+	}
+	cum := func(n int) int { return 50 * n * (n - 1) }
+	level = 1
+	for cum(level+1) <= xp {
+		level++
+	}
+	into = xp - cum(level)
+	span = cum(level+1) - cum(level)
+	return level, into, span
 }
 
 // Stats is the aggregate riding history a rule is evaluated against. It is the
@@ -47,47 +107,47 @@ type rule struct {
 // stay unchanged. Mirrors the examples in Morider-app.md §8.
 var rules = []rule{
 	// Volume / count
-	{Badge{"first_ride", "İlk sürüş tamamlandı"}, func(s Stats) bool { return s.RideCount >= 1 }},
-	{Badge{"rider_10", "10 sürüş tamamlandı"}, func(s Stats) bool { return s.RideCount >= 10 }},
-	{Badge{"rider_50", "50 sürüş tamamlandı"}, func(s Stats) bool { return s.RideCount >= 50 }},
+	{Badge{"first_ride", "İlk sürüş tamamlandı", TierBronze}, func(s Stats) bool { return s.RideCount >= 1 }},
+	{Badge{"rider_10", "10 sürüş tamamlandı", TierSilver}, func(s Stats) bool { return s.RideCount >= 10 }},
+	{Badge{"rider_50", "50 sürüş tamamlandı", TierGold}, func(s Stats) bool { return s.RideCount >= 50 }},
 
 	// Single ride distance
-	{Badge{"century_ride", "Tek sürüşte 100 km"}, func(s Stats) bool { return s.LongestRide >= 100 }},
-	{Badge{"long_hauler", "Tek sürüşte 300 km"}, func(s Stats) bool { return s.LongestRide >= 300 }},
+	{Badge{"century_ride", "Tek sürüşte 100 km", TierBronze}, func(s Stats) bool { return s.LongestRide >= 100 }},
+	{Badge{"long_hauler", "Tek sürüşte 300 km", TierSilver}, func(s Stats) bool { return s.LongestRide >= 300 }},
 
 	// Total distance
-	{Badge{"club_1000", "1000 km kulübü"}, func(s Stats) bool { return s.TotalDistance >= 1000 }},
-	{Badge{"club_10000", "10.000 km kulübü"}, func(s Stats) bool { return s.TotalDistance >= 10000 }},
+	{Badge{"club_1000", "1000 km kulübü", TierSilver}, func(s Stats) bool { return s.TotalDistance >= 1000 }},
+	{Badge{"club_10000", "10.000 km kulübü", TierGold}, func(s Stats) bool { return s.TotalDistance >= 10000 }},
 
 	// Weekly distance
-	{Badge{"week_300", "Bir haftada 300 km"}, func(s Stats) bool { return s.BestWeekDistance >= 300 }},
-	{Badge{"week_700", "Bir haftada 700 km"}, func(s Stats) bool { return s.BestWeekDistance >= 700 }},
+	{Badge{"week_300", "Bir haftada 300 km", TierBronze}, func(s Stats) bool { return s.BestWeekDistance >= 300 }},
+	{Badge{"week_700", "Bir haftada 700 km", TierSilver}, func(s Stats) bool { return s.BestWeekDistance >= 700 }},
 
 	// Monthly distance
-	{Badge{"month_1000", "Bir ayda 1000 km"}, func(s Stats) bool { return s.BestMonthDistance >= 1000 }},
-	{Badge{"month_3000", "Bir ayda 3000 km"}, func(s Stats) bool { return s.BestMonthDistance >= 3000 }},
+	{Badge{"month_1000", "Bir ayda 1000 km", TierBronze}, func(s Stats) bool { return s.BestMonthDistance >= 1000 }},
+	{Badge{"month_3000", "Bir ayda 3000 km", TierSilver}, func(s Stats) bool { return s.BestMonthDistance >= 3000 }},
 
 	// Streak
-	{Badge{"streak_7", "7 gün aralıksız sürüş"}, func(s Stats) bool { return s.LongestStreak >= 7 }},
-	{Badge{"streak_30", "30 gün aralıksız sürüş"}, func(s Stats) bool { return s.LongestStreak >= 30 }},
+	{Badge{"streak_7", "7 gün aralıksız sürüş", TierBronze}, func(s Stats) bool { return s.LongestStreak >= 7 }},
+	{Badge{"streak_30", "30 gün aralıksız sürüş", TierSilver}, func(s Stats) bool { return s.LongestStreak >= 30 }},
 
 	// Speed (average speed of a single ride). MaxAvgSpeed is sanity-capped at the
 	// data layer to ignore implausible GPS spikes; full anti-cheat is future work.
-	{Badge{"speedster_100", "Ortalama 100 km/s sürüş"}, func(s Stats) bool { return s.MaxAvgSpeed >= 100 }},
-	{Badge{"speedster_140", "Ortalama 140 km/s sürüş"}, func(s Stats) bool { return s.MaxAvgSpeed >= 140 }},
+	{Badge{"speedster_100", "Ortalama 100 km/s sürüş", TierBronze}, func(s Stats) bool { return s.MaxAvgSpeed >= 100 }},
+	{Badge{"speedster_140", "Ortalama 140 km/s sürüş", TierSilver}, func(s Stats) bool { return s.MaxAvgSpeed >= 140 }},
 
 	// Group rides (sessions ridden with at least one other rider).
-	{Badge{"group_first", "İlk grup sürüşü"}, func(s Stats) bool { return s.GroupRideCount >= 1 }},
-	{Badge{"group_5", "5 grup sürüşü"}, func(s Stats) bool { return s.GroupRideCount >= 5 }},
-	{Badge{"group_20", "20 grup sürüşü"}, func(s Stats) bool { return s.GroupRideCount >= 20 }},
+	{Badge{"group_first", "İlk grup sürüşü", TierBronze}, func(s Stats) bool { return s.GroupRideCount >= 1 }},
+	{Badge{"group_5", "5 grup sürüşü", TierSilver}, func(s Stats) bool { return s.GroupRideCount >= 5 }},
+	{Badge{"group_20", "20 grup sürüşü", TierGold}, func(s Stats) bool { return s.GroupRideCount >= 20 }},
 
 	// Group size (largest pack ridden with).
-	{Badge{"pack_5", "5 kişilik grupla sürüş"}, func(s Stats) bool { return s.MaxGroupSize >= 5 }},
-	{Badge{"pack_10", "10 kişilik grupla sürüş"}, func(s Stats) bool { return s.MaxGroupSize >= 10 }},
+	{Badge{"pack_5", "5 kişilik grupla sürüş", TierBronze}, func(s Stats) bool { return s.MaxGroupSize >= 5 }},
+	{Badge{"pack_10", "10 kişilik grupla sürüş", TierSilver}, func(s Stats) bool { return s.MaxGroupSize >= 10 }},
 
 	// Segments (timed efforts posted on rider-defined stretches of road).
-	{Badge{"segment_first", "İlk segment denemesi"}, func(s Stats) bool { return s.SegmentEfforts >= 1 }},
-	{Badge{"segment_10", "10 segmentte deneme"}, func(s Stats) bool { return s.SegmentEfforts >= 10 }},
+	{Badge{"segment_first", "İlk segment denemesi", TierBronze}, func(s Stats) bool { return s.SegmentEfforts >= 1 }},
+	{Badge{"segment_10", "10 segmentte deneme", TierSilver}, func(s Stats) bool { return s.SegmentEfforts >= 10 }},
 }
 
 // Evaluate returns every badge earned for the given stats, in rule order.

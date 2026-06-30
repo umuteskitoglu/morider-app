@@ -48,11 +48,13 @@ func Run(cfg config.Config) error {
 func registerRoutes(d *server.Deps, h *handler) {
 	g := d.Engine.Group("/api", d.JWT.Middleware())
 	g.GET("/rewards", h.list)
+	g.GET("/rewards/summary", h.summary)
 	g.POST("/rewards", h.award)
 	g.PUT("/rewards/showcase", h.showcase)
 	g.GET("/rewards/user/:uid", h.userBadges)
 	g.GET("/leaderboard/top", h.leaderboard)
 	g.GET("/leaderboard/following", h.leaderboardFollowing)
+	g.GET("/leaderboard/season", h.seasonLeaderboard)
 	registerChallengeRoutes(g, h)
 }
 
@@ -67,6 +69,8 @@ type Reward struct {
 	UserID      int64     `json:"user_id"`
 	Type        string    `json:"type"`
 	Description string    `json:"description"`
+	Tier        string    `json:"tier"`
+	XP          int       `json:"xp"`
 	AwardedAt   time.Time `json:"awarded_at"`
 	Showcased   bool      `json:"showcased"`
 }
@@ -87,7 +91,7 @@ func (h *handler) userBadges(c *gin.Context) {
 
 func (h *handler) queryRewards(c *gin.Context, where string, arg any) {
 	rows, err := h.d.DB.Query(c,
-		`SELECT id, user_id, type, COALESCE(description, ''), awarded_at, showcased
+		`SELECT id, user_id, type, COALESCE(description, ''), COALESCE(tier, 'special'), COALESCE(xp, 0), awarded_at, showcased
 		 FROM rewards WHERE `+where+` ORDER BY awarded_at DESC`, arg)
 	if err != nil {
 		httpx.Internal(c, "could not list rewards")
@@ -98,13 +102,72 @@ func (h *handler) queryRewards(c *gin.Context, where string, arg any) {
 	rewards := make([]Reward, 0)
 	for rows.Next() {
 		var r Reward
-		if err := rows.Scan(&r.ID, &r.UserID, &r.Type, &r.Description, &r.AwardedAt, &r.Showcased); err != nil {
+		if err := rows.Scan(&r.ID, &r.UserID, &r.Type, &r.Description, &r.Tier, &r.XP, &r.AwardedAt, &r.Showcased); err != nil {
 			httpx.Internal(c, "could not read rewards")
 			return
 		}
 		rewards = append(rewards, r)
 	}
 	c.JSON(http.StatusOK, gin.H{"rewards": rewards})
+}
+
+// LevelSummary is the rider's XP standing for the profile header.
+type LevelSummary struct {
+	XP         int `json:"xp"`           // lifetime XP
+	Level      int `json:"level"`        // current level
+	LevelInto  int `json:"level_into"`   // XP earned within the current level
+	LevelSpan  int `json:"level_span"`   // XP the current level spans
+	SeasonXP   int `json:"season_xp"`    // XP earned this calendar month
+	BadgeCount int `json:"badge_count"`
+}
+
+// summary returns the caller's XP, level and season XP for the profile header.
+func (h *handler) summary(c *gin.Context) {
+	uid := authpkg.UserID(c)
+	var s LevelSummary
+	if err := h.d.DB.QueryRow(c,
+		`SELECT COALESCE(SUM(xp), 0), COUNT(*),
+		        COALESCE(SUM(xp) FILTER (WHERE awarded_at >= date_trunc('month', now())), 0)
+		 FROM rewards WHERE user_id = $1`, uid,
+	).Scan(&s.XP, &s.BadgeCount, &s.SeasonXP); err != nil {
+		httpx.Internal(c, "could not load summary")
+		return
+	}
+	s.Level, s.LevelInto, s.LevelSpan = Level(s.XP)
+	c.JSON(http.StatusOK, s)
+}
+
+// seasonLeaderboard ranks riders by XP earned in the current calendar month.
+func (h *handler) seasonLeaderboard(c *gin.Context) {
+	rows, err := h.d.DB.Query(c,
+		`SELECT u.id, u.name, COALESCE(u.avatar_url, ''), COALESCE(SUM(r.xp), 0) AS season_xp
+		 FROM users u
+		 JOIN rewards r ON r.user_id = u.id AND r.awarded_at >= date_trunc('month', now())
+		 GROUP BY u.id, u.name, u.avatar_url
+		 HAVING SUM(r.xp) > 0
+		 ORDER BY season_xp DESC
+		 LIMIT 50`)
+	if err != nil {
+		httpx.Internal(c, "could not load season leaderboard")
+		return
+	}
+	defer rows.Close()
+	type entry struct {
+		UserID    int64  `json:"user_id"`
+		Name      string `json:"name"`
+		AvatarURL string `json:"avatar_url"`
+		SeasonXP  int    `json:"season_xp"`
+	}
+	entries := make([]entry, 0)
+	for rows.Next() {
+		var e entry
+		if err := rows.Scan(&e.UserID, &e.Name, &e.AvatarURL, &e.SeasonXP); err != nil {
+			httpx.Internal(c, "could not read season leaderboard")
+			return
+		}
+		entries = append(entries, e)
+	}
+	c.JSON(http.StatusOK, gin.H{"leaderboard": entries})
 }
 
 type showcaseReq struct {
@@ -139,14 +202,15 @@ func (h *handler) award(c *gin.Context) {
 		httpx.BadRequest(c, err.Error())
 		return
 	}
+	tier, xp := BadgeMeta(req.Type)
 	var r Reward
 	err := h.d.DB.QueryRow(c,
-		`INSERT INTO rewards (user_id, type, description)
-		 VALUES ($1, $2, $3)
+		`INSERT INTO rewards (user_id, type, description, tier, xp)
+		 VALUES ($1, $2, $3, $4, $5)
 		 ON CONFLICT (user_id, type) DO NOTHING
-		 RETURNING id, user_id, type, COALESCE(description, ''), awarded_at`,
-		authpkg.UserID(c), req.Type, req.Description,
-	).Scan(&r.ID, &r.UserID, &r.Type, &r.Description, &r.AwardedAt)
+		 RETURNING id, user_id, type, COALESCE(description, ''), COALESCE(tier, 'special'), COALESCE(xp, 0), awarded_at`,
+		authpkg.UserID(c), req.Type, req.Description, tier, xp,
+	).Scan(&r.ID, &r.UserID, &r.Type, &r.Description, &r.Tier, &r.XP, &r.AwardedAt)
 	if errors.Is(err, pgx.ErrNoRows) {
 		// No row returned means the unique (user_id, type) badge already exists.
 		httpx.Error(c, http.StatusConflict, "reward already awarded")

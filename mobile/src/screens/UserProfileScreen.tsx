@@ -11,13 +11,14 @@ import { AvatarViewer } from '../components/AvatarViewer';
 import FollowButton from '../components/FollowButton';
 import { CreateChallengeModal } from '../components/CreateChallengeModal';
 import { Button } from '../components/ui';
+import { tierMeta } from '../lib/rewards';
 import { useAuth } from '../store/auth';
 import { RiderChips } from '../components/RiderChips';
 import { ProfileStackParams } from '../navigation/RootNavigator';
 import { api, apiBaseURL } from '../api/client';
 import { colors, gradients, radius, shadow, spacing } from '../theme';
 
-type Badge = { id: number; type: string; description: string };
+type Badge = { id: number; type: string; description: string; tier?: string };
 type PublicMoto = { id: number; name: string; year: number };
 type PublicRoute = { id: number; name: string; distance: number };
 
@@ -172,12 +173,15 @@ export default function UserProfileScreen({ route, navigation }: Props) {
           </View>
           {badges.length > 0 && (
             <View style={styles.badges}>
-              {badges.map((b) => (
-                <View key={b.id} style={styles.chip}>
-                  <Text style={styles.chipIcon}>🏅</Text>
-                  <Text style={styles.chipText}>{b.description || b.type}</Text>
-                </View>
-              ))}
+              {badges.map((b) => {
+                const tm = tierMeta(b.tier);
+                return (
+                  <View key={b.id} style={[styles.chip, { borderColor: tm.color }]}>
+                    <MaterialCommunityIcons name="medal" size={14} color={tm.color} />
+                    <Text style={styles.chipText}>{b.description || b.type}</Text>
+                  </View>
+                );
+              })}
             </View>
           )}
         </LinearGradient>

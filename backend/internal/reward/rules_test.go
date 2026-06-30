@@ -184,3 +184,36 @@ func TestBestMonthDistance(t *testing.T) {
 		t.Errorf("BestMonthDistance = %v, want 1100", got)
 	}
 }
+
+func TestLevel(t *testing.T) {
+	cases := []struct {
+		xp, level, into, span int
+	}{
+		{0, 1, 0, 100},
+		{99, 1, 99, 100},
+		{100, 2, 0, 200},
+		{299, 2, 199, 200},
+		{300, 3, 0, 300},
+	}
+	for _, c := range cases {
+		level, into, span := Level(c.xp)
+		if level != c.level || into != c.into || span != c.span {
+			t.Errorf("Level(%d) = (%d,%d,%d), want (%d,%d,%d)", c.xp, level, into, span, c.level, c.into, c.span)
+		}
+	}
+}
+
+func TestBadgeMeta(t *testing.T) {
+	if tier, xp := BadgeMeta("first_ride"); tier != TierBronze || xp != 10 {
+		t.Errorf("first_ride = (%q,%d), want bronze,10", tier, xp)
+	}
+	if tier, xp := BadgeMeta("rider_50"); tier != TierGold || xp != 50 {
+		t.Errorf("rider_50 = (%q,%d), want gold,50", tier, xp)
+	}
+	if tier, xp := BadgeMeta("challenge_42"); tier != TierGold || xp != 50 {
+		t.Errorf("challenge_42 = (%q,%d), want gold,50", tier, xp)
+	}
+	if tier, xp := BadgeMeta("unknown_thing"); tier != "special" || xp != 0 {
+		t.Errorf("unknown = (%q,%d), want special,0", tier, xp)
+	}
+}

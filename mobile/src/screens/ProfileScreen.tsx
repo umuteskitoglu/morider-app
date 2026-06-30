@@ -27,12 +27,15 @@ import { PostDetail, DetailPost } from '../components/PostDetail';
 import { removeFromFeedCache } from './FeedScreen';
 import { AvatarViewer } from '../components/AvatarViewer';
 import { RiderChips } from '../components/RiderChips';
+import { ProgressBar } from '../components/ProgressBar';
+import { tierMeta, RiderLevel } from '../lib/rewards';
 import { useAuth, User } from '../store/auth';
 import { ProfileStackParams } from '../navigation/RootNavigator';
 import { api, apiBaseURL, errorMessage } from '../api/client';
 import { colors, gradients, radius, shadow, spacing } from '../theme';
 
-type Reward = { id: number; type: string; description: string; showcased: boolean };
+type Reward = { id: number; type: string; description: string; showcased: boolean; tier?: string; xp?: number };
+type SeasonEntry = { user_id: number; name: string; avatar_url?: string; season_xp: number };
 type LeaderEntry = {
   user_id: number;
   name: string;
@@ -52,7 +55,9 @@ export default function ProfileScreen() {
   const [rewards, setRewards] = useState<Reward[]>([]);
   const [leaders, setLeaders] = useState<LeaderEntry[]>([]);
   const [following, setFollowing] = useState<LeaderEntry[]>([]);
-  const [lbScope, setLbScope] = useState<'following' | 'global'>('following');
+  const [lbScope, setLbScope] = useState<'following' | 'global' | 'season'>('following');
+  const [seasonLeaders, setSeasonLeaders] = useState<SeasonEntry[]>([]);
+  const [level, setLevel] = useState<RiderLevel | null>(null);
   const [recap, setRecap] = useState<Recap | null>(null);
   const [posts, setPosts] = useState<DetailPost[]>([]);
   const [viewer, setViewer] = useState<DetailPost | null>(null);
@@ -78,21 +83,26 @@ export default function ProfileScreen() {
     try {
       // allSettled (not all): one failing endpoint must never blank the rest of
       // the profile. A missing optional section (e.g. recap) just renders empty.
-      const [r, l, p, fl, rc, u] = await Promise.allSettled([
+      const [r, l, p, fl, rc, u, sm, sl] = await Promise.allSettled([
         api.get('/api/rewards'),
         api.get('/api/leaderboard/top'),
         api.get('/api/posts/mine'),
         api.get('/api/leaderboard/following'),
         api.get('/api/rides/recap'),
         user ? api.get(`/api/users/${user.id}`) : Promise.resolve(null),
+        api.get('/api/rewards/summary'),
+        api.get('/api/leaderboard/season'),
       ]);
       const val = (s: PromiseSettledResult<any>) => (s.status === 'fulfilled' ? s.value : null);
       const rv = val(r), lv = val(l), pv = val(p), flv = val(fl), rcv = val(rc), uv = val(u);
+      const smv = val(sm), slv = val(sl);
       if (rv) setRewards(rv.data.rewards ?? []);
       if (lv) setLeaders(lv.data.leaderboard ?? []);
       if (pv) setPosts(pv.data.posts ?? []);
       if (flv) setFollowing(flv.data.leaderboard ?? []);
       if (rcv) setRecap(rcv.data ?? null);
+      if (smv) setLevel(smv.data ?? null);
+      if (slv) setSeasonLeaders(slv.data.leaderboard ?? []);
       if (uv?.data) {
         const u = uv;
         setStats({
@@ -295,12 +305,15 @@ export default function ProfileScreen() {
 
           {showcased.length > 0 && (
             <View style={styles.badges}>
-              {showcased.map((r) => (
-                <View key={r.id} style={styles.chip}>
-                  <Text style={styles.chipIcon}>🏅</Text>
-                  <Text style={styles.chipText}>{r.description || r.type}</Text>
-                </View>
-              ))}
+              {showcased.map((r) => {
+                const tm = tierMeta(r.tier);
+                return (
+                  <View key={r.id} style={[styles.chip, { borderColor: tm.color }]}>
+                    <MaterialCommunityIcons name="medal" size={14} color={tm.color} />
+                    <Text style={styles.chipText}>{r.description || r.type}</Text>
+                  </View>
+                );
+              })}
             </View>
           )}
         </LinearGradient>
@@ -341,6 +354,31 @@ export default function ProfileScreen() {
           </View>
         )}
 
+        {level && (
+          <>
+            <SectionTitle icon="star-four-points" title="Seviye" />
+            <Card style={styles.levelCard}>
+              <View style={styles.levelBadge}>
+                <Text style={styles.levelNum}>{level.level}</Text>
+                <Text style={styles.levelNumLabel}>SVY</Text>
+              </View>
+              <View style={styles.flex}>
+                <View style={styles.levelTopRow}>
+                  <Text style={styles.levelXp}>{level.xp} XP</Text>
+                  <Text style={styles.seasonXp}>Sezon: {level.season_xp} XP</Text>
+                </View>
+                <ProgressBar
+                  fraction={level.level_span > 0 ? level.level_into / level.level_span : 0}
+                  color={colors.accent}
+                />
+                <Text style={styles.levelHint}>
+                  Sonraki seviyeye {Math.max(0, level.level_span - level.level_into)} XP
+                </Text>
+              </View>
+            </Card>
+          </>
+        )}
+
         <View style={styles.sectionRowBetween}>
           <SectionTitle icon="trophy-variant" title="Rozetlerim" />
           {rewards.length > 0 && (
@@ -356,23 +394,35 @@ export default function ProfileScreen() {
             <Text style={styles.muted}>Profilinde sergilemek için "Tüm Rozetler"den rozet seç.</Text>
           ) : (
             <View style={styles.chips}>
-              {showcased.map((r) => (
-                <View key={r.id} style={styles.chip}>
-                  <Text style={styles.chipIcon}>🏅</Text>
-                  <Text style={styles.chipText}>{r.description || r.type}</Text>
-                </View>
-              ))}
+              {showcased.map((r) => {
+                const tm = tierMeta(r.tier);
+                return (
+                  <View key={r.id} style={[styles.chip, { borderColor: tm.color }]}>
+                    <MaterialCommunityIcons name="medal" size={14} color={tm.color} />
+                    <Text style={styles.chipText}>{r.description || r.type}</Text>
+                  </View>
+                );
+              })}
             </View>
           )}
         </Card>
 
         <SectionTitle icon="podium" title="Liderlik Tablosu" />
         <View style={styles.segment}>
-          <SegBtn label="Takip Ettiklerim" active={lbScope === 'following'} onPress={() => setLbScope('following')} />
+          <SegBtn label="Takip" active={lbScope === 'following'} onPress={() => setLbScope('following')} />
           <SegBtn label="Global" active={lbScope === 'global'} onPress={() => setLbScope('global')} />
+          <SegBtn label="Sezon" active={lbScope === 'season'} onPress={() => setLbScope('season')} />
         </View>
         <Card>
           {(() => {
+            if (lbScope === 'season') {
+              if (seasonLeaders.length === 0) {
+                return <Text style={styles.muted}>Bu ay henüz XP kazanan yok.</Text>;
+              }
+              return seasonLeaders.map((l, i) => (
+                <SeasonRow key={l.user_id} entry={l} rank={i} isLast={i === seasonLeaders.length - 1} isMe={l.user_id === user?.id} />
+              ));
+            }
             const list = lbScope === 'following' ? following : leaders;
             if (list.length === 0) {
               return <Text style={styles.muted}>Veri yok.</Text>;
@@ -488,10 +538,17 @@ export default function ProfileScreen() {
           <Text style={styles.muted}>Profilinde göstermek istediğin rozetleri seç.</Text>
           {rewards.map((r) => {
             const on = selected.includes(r.type);
+            const tm = tierMeta(r.tier);
             return (
               <Pressable key={r.id} style={styles.manageRow} onPress={() => toggle(r.type)}>
-                <Text style={styles.manageIcon}>🏅</Text>
-                <Text style={styles.manageName}>{r.description || r.type}</Text>
+                <MaterialCommunityIcons name="medal" size={20} color={tm.color} />
+                <View style={styles.flex}>
+                  <Text style={styles.manageName}>{r.description || r.type}</Text>
+                  <Text style={[styles.manageTier, { color: tm.color }]}>
+                    {tm.label}
+                    {r.xp ? ` · ${r.xp} XP` : ''}
+                  </Text>
+                </View>
                 <MaterialCommunityIcons
                   name={on ? 'star' : 'star-outline'}
                   size={24}
@@ -595,6 +652,31 @@ function LeaderRow({ entry, rank, isLast, isMe }: { entry: LeaderEntry; rank: nu
         <Text style={styles.leaderSub}>{entry.ride_count} sürüş</Text>
       </View>
       <Text style={styles.leaderDist}>{entry.total_distance.toFixed(1)} km</Text>
+    </View>
+  );
+}
+
+// SeasonRow ranks a rider by XP earned this calendar month.
+function SeasonRow({ entry, rank, isLast, isMe }: { entry: SeasonEntry; rank: number; isLast: boolean; isMe: boolean }) {
+  return (
+    <View style={[styles.leaderRow, !isLast && styles.leaderDivider, isMe && styles.leaderMe]}>
+      <View style={[styles.rankBadge, { backgroundColor: MEDALS[rank] ?? colors.surfaceAlt }]}>
+        <Text style={[styles.rankText, rank > 2 && { color: colors.textMuted }]}>{rank + 1}</Text>
+      </View>
+      {entry.avatar_url ? (
+        <Image source={{ uri: apiBaseURL() + entry.avatar_url }} style={styles.leaderAvatar} />
+      ) : (
+        <LinearGradient colors={gradients.primary} style={styles.leaderAvatar}>
+          <Text style={styles.leaderAvatarText}>{entry.name?.charAt(0).toUpperCase() ?? '?'}</Text>
+        </LinearGradient>
+      )}
+      <View style={styles.flex}>
+        <Text style={[styles.leaderName, isMe && styles.leaderNameMe]} numberOfLines={1}>
+          {entry.name}{isMe ? ' (Sen)' : ''}
+        </Text>
+        <Text style={styles.leaderSub}>bu ay</Text>
+      </View>
+      <Text style={[styles.leaderDist, { color: colors.accent }]}>{entry.season_xp} XP</Text>
     </View>
   );
 }
@@ -756,5 +838,23 @@ const styles = StyleSheet.create({
   manageContent: { padding: spacing.md, gap: spacing.xs },
   manageRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, paddingVertical: spacing.md, borderBottomWidth: 1, borderBottomColor: colors.border },
   manageIcon: { fontSize: 18 },
+  manageTier: { fontSize: 11, fontWeight: '700', marginTop: 1 },
+  levelCard: { flexDirection: 'row', alignItems: 'center', gap: spacing.md },
+  levelBadge: {
+    width: 56,
+    height: 56,
+    borderRadius: 28,
+    backgroundColor: colors.surfaceAlt,
+    borderWidth: 2,
+    borderColor: colors.accent,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  levelNum: { color: colors.accent, fontSize: 22, fontWeight: '900', lineHeight: 24 },
+  levelNumLabel: { color: colors.textMuted, fontSize: 9, fontWeight: '800', letterSpacing: 1 },
+  levelTopRow: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 6 },
+  levelXp: { color: colors.text, fontWeight: '900', fontSize: 15 },
+  seasonXp: { color: colors.textMuted, fontWeight: '700', fontSize: 12 },
+  levelHint: { color: colors.textMuted, fontSize: 11, marginTop: 4 },
   manageName: { color: colors.text, flex: 1, fontWeight: '600' },
 });
