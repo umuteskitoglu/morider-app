@@ -18,6 +18,18 @@ export type VoiceStatus = 'off' | 'connecting' | 'connected' | 'error';
 
 type VoiceTokenResponse = { url: string; token: string; room: string };
 
+// Gürültü bastırma: motosiklet sürüşünde rüzgar + motor sesi mikrofonu dolduruyor.
+// LiveKit'in Krisp filtresi sadece web/tarayıcıda çalıştığı (ve ücretli olduğu)
+// için React Native'de kullanamıyoruz; bunun yerine WebRTC'nin yerleşik ses işleme
+// modülünü (APM) açıkça etkinleştiriyoruz — ücretsiz ve native tarafta hazır.
+// Durağan gürültüde (motor uğultusu, fan) iyi sonuç verir; rüzgar gibi ani
+// gürültüde sınırlıdır ama varsayılana göre belirgin iyileşme sağlar.
+const MIC_CAPTURE_OPTIONS = {
+  noiseSuppression: true,
+  echoCancellation: true,
+  autoGainControl: true,
+} as const;
+
 // Identity minted by the backend is "user-<id>"; recover the numeric id so the
 // UI can line speakers up with the map markers.
 export function userIdFromIdentity(identity: string): number | null {
@@ -98,7 +110,7 @@ export function useGroupVoice(code: string): GroupVoice {
 
       await room.connect(data.url, data.token);
       // Always-on: publish the mic immediately, no push-to-talk gate.
-      await room.localParticipant.setMicrophoneEnabled(true);
+      await room.localParticipant.setMicrophoneEnabled(true, MIC_CAPTURE_OPTIONS);
       updatePeers(room);
       setMuted(false);
       setStatus('connected');
@@ -127,7 +139,7 @@ export function useGroupVoice(code: string): GroupVoice {
     const room = roomRef.current;
     if (!room) return;
     const next = !muted;
-    await room.localParticipant.setMicrophoneEnabled(!next);
+    await room.localParticipant.setMicrophoneEnabled(!next, MIC_CAPTURE_OPTIONS);
     setMuted(next);
     if (next) setSelfSpeaking(false); // muting kills the mic; reflect it at once
   }, [muted]);

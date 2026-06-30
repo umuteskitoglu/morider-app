@@ -104,6 +104,21 @@ bağlanamayabilir. Sıkı mobil NAT için:
   IP'sini yayınlar; RTC UDP/TCP portlarını (7881/7882) firewall'da aç.
 - TLS arkasındaysan `LIVEKIT_URL`'i `wss://` olarak ver.
 
+## Gürültü bastırma
+
+Motosiklet sürüşünde rüzgar + motor sesi mikrofonu doldurur. Mobil tarafta
+([voice.ts](../mobile/src/lib/voice.ts)) mikrofon yayınlanırken WebRTC'nin yerleşik
+ses işleme modülü (APM) açıkça etkinleştirilir: `noiseSuppression`,
+`echoCancellation`, `autoGainControl`. Ücretsizdir ve native WebRTC tarafında
+hazırdır.
+
+> **Not — Krisp neden yok:** LiveKit'in Krisp gürültü filtresi
+> (`@livekit/krisp-noise-filter`) yalnızca **web/tarayıcıda** çalışır (WASM +
+> AudioWorklet) ve ücretlidir; React Native'de kullanılamaz. WebRTC APM durağan
+> gürültüde (motor uğultusu) iyi sonuç verir; rüzgar gibi ani gürültüde sınırlıdır.
+> Daha güçlü bastırma gerekirse açık kaynak **RNNoise** native modül olarak
+> entegre edilebilir (hazır Expo/RN paketi yok, ek geliştirme gerektirir).
+
 ## Pil / veri
 
 Sürekli açık ses + GPS + navigasyon ciddi pil/veri tüketir. SDK varsayılanı düşük
