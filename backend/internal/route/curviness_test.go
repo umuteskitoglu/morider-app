@@ -81,6 +81,33 @@ func TestAngleDiff(t *testing.T) {
 	}
 }
 
+func TestMergeLeg(t *testing.T) {
+	var merged RoutePlan
+	leg1 := RoutePlan{
+		Distance: 1, Duration: 2,
+		Points: []Point{{Lat: 41.00, Lon: 29.0}, {Lat: 41.01, Lon: 29.0}},
+		Steps:  []Step{{Instruction: "a"}},
+	}
+	leg2 := RoutePlan{
+		Distance: 2, Duration: 3,
+		Points: []Point{{Lat: 41.01, Lon: 29.0}, {Lat: 41.02, Lon: 29.0}},
+		Steps:  []Step{{Instruction: "b"}},
+	}
+	mergeLeg(&merged, leg1)
+	mergeLeg(&merged, leg2)
+
+	if merged.Distance != 3 || merged.Duration != 5 {
+		t.Errorf("merged distance/duration = %v/%v, want 3/5", merged.Distance, merged.Duration)
+	}
+	// The junction point shared by both legs is dropped: 2 + (2-1) = 3, not 4.
+	if len(merged.Points) != 3 {
+		t.Errorf("merged points = %d, want 3 (shared junction dropped once)", len(merged.Points))
+	}
+	if len(merged.Steps) != 2 {
+		t.Errorf("merged steps = %d, want 2", len(merged.Steps))
+	}
+}
+
 func TestParseOSRMRoutesAlternatives(t *testing.T) {
 	body := `{"code":"Ok","routes":[
 	  {"distance":1000,"duration":60,"geometry":{"coordinates":[[29.0,41.0],[29.0,41.01]]},"legs":[]},

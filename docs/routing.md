@@ -103,8 +103,8 @@ make osrm-up
 
 - `POST /api/routes/plan` ve `POST /api/routes` (snap ile) opsiyonel `"curviness": 0..1` alır: OSRM'den **alternatif rotalar** istenir (`alternatives=3`) ve istenen virajlılığa en uygun olan seçilir (0 = en düz, 1 = en virajlı).
 - **Skor:** toplam mutlak yön değişimi (derece) / mesafe (km) — saf fonksiyon `curvinessScore` ([`curviness.go`](../backend/internal/route/curviness.go)). Yanıttaki her plan `curviness` alanını taşır (≈ <30 düz, 30–100 kıvrımlı, >100 çok virajlı).
-- **Kısıt:** OSRM alternatifleri yalnız **2 nokta** arasında üretir; ara nokta varsa tek rota döner ve tercih etkisizdir. Daha derin kontrol için motosiklete özel OSRM profili gerekir (bkz. "Motosiklete özel OSRM profili").
-- **Mobil:** Yeni Rota ekranında sürgü (Düz ↔ Virajlı); önizleme istatistiklerinde virajlılık etiketi.
+- **Çok duraklı rota:** OSRM alternatifleri yalnız **2 nokta** arasında üretir. Ara nokta varsa servis rotayı **bacak bacak** planlar (`planCurvy`): her ardışık nokta çifti `alternatives=3` ile istenir, istenen virajlılığa en uygun bacak seçilir ve seçilen bacaklar birleştirilir (ortak kavşak noktası bir kez tutulur). Böylece slider haritaya birden çok nokta konsa da etkilidir; rapor edilen virajlılık birleşik geometri üzerinden yeniden hesaplanır. Maliyet: bacak başına bir OSRM isteği. Daha derin kontrol için motosiklete özel OSRM profili gerekir (bkz. "Motosiklete özel OSRM profili").
+- **Mobil:** Yeni Rota ekranında sürgü (Düz ↔ Virajlı), seçilen tercihin canlı etiketi (Düz yollar / Dengeli / Virajlı yollar) ve sürgü bırakıldığında önizlemenin otomatik yeniden hesaplanması; önizleme istatistiklerinde rotanın gerçek virajlılık etiketi.
 
 ## Dosya içe/dışa aktarma (GPX + KML)
 

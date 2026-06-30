@@ -31,11 +31,19 @@ if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental
   UIManager.setLayoutAnimationEnabledExperimental(true);
 }
 
-// Human label for the backend's deg/km curviness score.
+// Human label for the backend's deg/km curviness score (the planned route's
+// actual twistiness).
 function curvinessText(score: number): string {
   if (score < 30) return 'düz';
   if (score < 100) return 'kıvrımlı';
   return 'çok virajlı';
+}
+
+// Human label for the requested curviness preference (the slider's 0..1 value).
+function prefLabel(v: number): string {
+  if (v < 0.33) return 'Düz yollar';
+  if (v < 0.66) return 'Dengeli';
+  return 'Virajlı yollar';
 }
 
 export default function RouteCreateScreen({ navigation }: Props) {
@@ -98,7 +106,7 @@ export default function RouteCreateScreen({ navigation }: Props) {
     setWaypoints(points.slice(0, -1));
   }
 
-  async function computeRoute() {
+  async function computeRoute(curvinessOverride?: number) {
     if (points.length < 2) {
       Alert.alert('Yetersiz nokta', 'Hesaplamak için en az 2 nokta seç.');
       return;
@@ -107,7 +115,7 @@ export default function RouteCreateScreen({ navigation }: Props) {
       setPlanning(true);
       const { data } = await api.post('/api/routes/plan', {
         waypoints: points.map((p) => ({ lat: p.latitude, lon: p.longitude })),
-        curviness,
+        curviness: curvinessOverride ?? curviness,
       });
       setSnapped(
         (data.points ?? []).map((p: { lat: number; lon: number }) => ({
@@ -159,6 +167,14 @@ export default function RouteCreateScreen({ navigation }: Props) {
     }
   }
 
+  // Committing a new curviness (slide released) re-previews immediately when a
+  // route is already computed, so the slider visibly changes the result instead
+  // of going stale until the next manual "Hesapla".
+  function onCurvinessCommit(next: number) {
+    setCurviness(next);
+    if (plan && points.length >= 2) void computeRoute(next);
+  }
+
   const line = snapped.length > 1 ? snapped : points;
 
   return (
@@ -206,14 +222,20 @@ export default function RouteCreateScreen({ navigation }: Props) {
         {expanded && (
           <View style={styles.form}>
             <TextField label="Rota adı" value={name} onChangeText={setName} placeholder="Sahil turu" />
+            <View style={styles.curvyHeader}>
+              <Text style={styles.curvyTitle}>Virajlılık tercihi</Text>
+              <Text style={styles.curvyValue}>{prefLabel(curviness)}</Text>
+            </View>
             <View style={styles.curvyRow}>
               <MaterialCommunityIcons name="arrow-expand-horizontal" size={16} color={colors.textMuted} />
               <Slider
                 style={styles.slider}
                 minimumValue={0}
                 maximumValue={1}
+                step={0.05}
                 value={curviness}
-                onSlidingComplete={setCurviness}
+                onValueChange={setCurviness}
+                onSlidingComplete={onCurvinessCommit}
                 minimumTrackTintColor={colors.primary}
                 maximumTrackTintColor={colors.border}
                 thumbTintColor={colors.primary}
@@ -221,7 +243,7 @@ export default function RouteCreateScreen({ navigation }: Props) {
               <MaterialCommunityIcons name="sine-wave" size={16} color={colors.primary} />
             </View>
             <Text style={styles.curvyHint}>
-              Virajlılık tercihi (2 nokta arasında alternatif rotalardan seçer)
+              Düz yollar ↔ virajlı yollar arasında tercih. Çok duraklı rotalarda her bölüm ayrı seçilir.
             </Text>
             <View style={styles.segment}>
               {([
@@ -270,7 +292,15 @@ const styles = StyleSheet.create({
   subHint: { color: colors.textMuted, fontSize: 12, marginTop: 2 },
   form: { marginBottom: spacing.xs },
   hint: { color: colors.text, fontWeight: '600' },
-  curvyRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.xs, marginTop: spacing.sm },
+  curvyHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginTop: spacing.sm,
+  },
+  curvyTitle: { color: colors.text, fontWeight: '600', fontSize: 13 },
+  curvyValue: { color: colors.primary, fontWeight: '700', fontSize: 13 },
+  curvyRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.xs, marginTop: spacing.xs },
   slider: { flex: 1, height: 32 },
   curvyHint: { color: colors.textMuted, fontSize: 11, marginBottom: spacing.sm },
   stats: { color: colors.primary, fontWeight: '700' },
