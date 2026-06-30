@@ -1,13 +1,14 @@
-import React, { useCallback, useState } from 'react';
-import { FlatList, Pressable, RefreshControl, StyleSheet, Text, View } from 'react-native';
+import React, { useCallback, useRef, useState } from 'react';
+import { Alert, FlatList, Pressable, RefreshControl, StyleSheet, Text, View } from 'react-native';
+import { Swipeable } from 'react-native-gesture-handler';
 import { useFocusEffect, useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 
 import { ProfileStackParams } from '../navigation/RootNavigator';
-import { EmptyState, TouchCard } from '../components/ui';
+import { Card, EmptyState } from '../components/ui';
 import { api, errorMessage } from '../api/client';
-import { colors, spacing } from '../theme';
+import { colors, radius, spacing } from '../theme';
 
 type Ride = {
   id: number;
@@ -42,6 +43,26 @@ export default function RidesScreen() {
     }, [load]),
   );
 
+  const remove = useCallback((item: Ride, close: () => void) => {
+    const label = item.start_time ? item.start_time.slice(0, 10) : `${item.distance.toFixed(2)} km`;
+    Alert.alert('Sürüşü sil', `"${label}" sürüşü silinsin mi?`, [
+      { text: 'Vazgeç', style: 'cancel', onPress: close },
+      {
+        text: 'Sil',
+        style: 'destructive',
+        onPress: async () => {
+          try {
+            await api.delete(`/api/rides/${item.id}`);
+            setRides((prev) => prev.filter((r) => r.id !== item.id));
+          } catch (err) {
+            Alert.alert('Silinemedi', errorMessage(err));
+            close();
+          }
+        },
+      },
+    ]);
+  }, []);
+
   return (
     <View style={styles.container}>
       <FlatList
@@ -55,22 +76,50 @@ export default function RidesScreen() {
           ) : null
         }
         renderItem={({ item }) => (
-          <TouchCard onPress={() => navigation.navigate('RideDetail', { id: item.id })} style={styles.card}>
-              <View style={styles.cardHead}>
-              <View style={styles.distanceWrap}>
-                <MaterialCommunityIcons name="motorbike" size={20} color={colors.primary} />
-                <Text style={styles.distance}>{item.distance.toFixed(2)} km</Text>
-              </View>
-              <Text style={styles.date}>{item.start_time ? item.start_time.slice(0, 10) : '-'}</Text>
-            </View>
-              <View style={styles.row}>
-                <Meta icon="speedometer" label="Ort. hız" value={`${item.avg_speed.toFixed(0)} km/s`} />
-                <Meta icon="image-filter-hdr" label="Yükseklik" value={`${item.elevation_gain.toFixed(0)} m`} />
-              </View>
-          </TouchCard>
+          <RideRow item={item} onOpen={() => navigation.navigate('RideDetail', { id: item.id })} onDelete={remove} />
         )}
       />
     </View>
+  );
+}
+
+function RideRow({
+  item,
+  onOpen,
+  onDelete,
+}: {
+  item: Ride;
+  onOpen: () => void;
+  onDelete: (item: Ride, close: () => void) => void;
+}) {
+  const ref = useRef<Swipeable>(null);
+
+  // Red "Sil" panel revealed by swiping the row left.
+  const renderRightActions = () => (
+    <Pressable style={styles.deleteAction} onPress={() => onDelete(item, () => ref.current?.close())}>
+      <MaterialCommunityIcons name="trash-can-outline" size={24} color="#fff" />
+      <Text style={styles.deleteText}>Sil</Text>
+    </Pressable>
+  );
+
+  return (
+    <Swipeable ref={ref} renderRightActions={renderRightActions} overshootRight={false} rightThreshold={40}>
+      <Pressable onPress={onOpen}>
+        <Card style={styles.card}>
+          <View style={styles.cardHead}>
+            <View style={styles.distanceWrap}>
+              <MaterialCommunityIcons name="motorbike" size={20} color={colors.primary} />
+              <Text style={styles.distance}>{item.distance.toFixed(2)} km</Text>
+            </View>
+            <Text style={styles.date}>{item.start_time ? item.start_time.slice(0, 10) : '-'}</Text>
+          </View>
+          <View style={styles.row}>
+            <Meta icon="speedometer" label="Ort. hız" value={`${item.avg_speed.toFixed(0)} km/s`} />
+            <Meta icon="image-filter-hdr" label="Yükseklik" value={`${item.elevation_gain.toFixed(0)} m`} />
+          </View>
+        </Card>
+      </Pressable>
+    </Swipeable>
   );
 }
 
@@ -98,6 +147,14 @@ const styles = StyleSheet.create({
   meta: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
   metaValue: { color: colors.text, fontWeight: '800' },
   metaLabel: { color: colors.textMuted, fontSize: 11, textTransform: 'uppercase', letterSpacing: 0.5 },
-  emptyWrap: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: spacing.md, marginTop: spacing.xxl },
-  empty: { color: colors.textMuted, textAlign: 'center', lineHeight: 22 },
+  deleteAction: {
+    backgroundColor: colors.danger,
+    justifyContent: 'center',
+    alignItems: 'center',
+    width: 84,
+    borderRadius: radius.md,
+    marginLeft: spacing.sm,
+    gap: 2,
+  },
+  deleteText: { color: '#fff', fontWeight: '800', fontSize: 12 },
 });
