@@ -61,6 +61,12 @@ func registerRoutes(d *server.Deps, h *handler) {
 	s.POST("/:code/transfer", jwt, h.transferHost)
 	s.POST("/:code/voice-token", jwt, h.voiceToken)
 	s.GET("/:code/ws", h.sessionWS)
+
+	// Ambient "active riders" presence layer (REST polling, not a WS room).
+	p := d.Engine.Group("/api/presence", jwt)
+	p.POST("/heartbeat", h.heartbeat)
+	p.POST("/offline", h.offline)
+	p.GET("/nearby", h.nearby)
 }
 
 type handler struct {

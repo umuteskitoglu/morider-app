@@ -9,6 +9,7 @@ import { MaterialCommunityIcons } from '@expo/vector-icons';
 
 import { useAuth } from '../store/auth';
 import { registerForPush } from '../lib/push';
+import OnboardingTour from '../components/OnboardingTour';
 import { colors, gradients, radius, shadow, spacing } from '../theme';
 import LoginScreen from '../screens/LoginScreen';
 import SignupScreen from '../screens/SignupScreen';
@@ -41,6 +42,9 @@ import EventCreateScreen from '../screens/EventCreateScreen';
 import EventDetailScreen from '../screens/EventDetailScreen';
 import EventChatScreen from '../screens/EventChatScreen';
 import EventLocationPickerScreen from '../screens/EventLocationPickerScreen';
+import ConversationsScreen from '../screens/ConversationsScreen';
+import GlobalChatScreen from '../screens/GlobalChatScreen';
+import ChatThreadScreen from '../screens/ChatThreadScreen';
 
 export type AuthStackParams = {
   Login: undefined;
@@ -101,10 +105,21 @@ export type EventsStackParams = {
   EventLocationPicker: { target: 'start' | 'end' };
 };
 
+// Community + private messaging. Global is the single community room; the DM
+// inbox and per-conversation threads handle one-to-one chat. ChatThread accepts
+// either a conversationId (from the inbox / deep link) or a userId (from a rider
+// tapped on the map, which is resolved into a conversation on open).
+export type ChatStackParams = {
+  Conversations: undefined;
+  GlobalChat: undefined;
+  ChatThread: { conversationId?: number; userId?: number; name?: string; avatarUrl?: string };
+};
+
 export type AppTabParams = {
   Ride: NavigatorScreenParams<RideStackParams> | undefined;
   Feed: undefined;
   Events: NavigatorScreenParams<EventsStackParams> | undefined;
+  Chat: NavigatorScreenParams<ChatStackParams> | undefined;
   Profile: NavigatorScreenParams<ProfileStackParams> | undefined;
 };
 
@@ -113,6 +128,7 @@ const RideStack = createNativeStackNavigator<RideStackParams>();
 const FeedStack = createNativeStackNavigator<FeedStackParams>();
 const ProfileStack = createNativeStackNavigator<ProfileStackParams>();
 const EventsStack = createNativeStackNavigator<EventsStackParams>();
+const ChatStack = createNativeStackNavigator<ChatStackParams>();
 const Tabs = createBottomTabNavigator<AppTabParams>();
 
 type IconName = React.ComponentProps<typeof MaterialCommunityIcons>['name'];
@@ -185,8 +201,8 @@ function ProfileNavigator() {
       <ProfileStack.Screen name="UserProfile" component={UserProfileScreen} options={{ title: 'Profil' }} />
       <ProfileStack.Screen name="Garage" component={GarageScreen} options={{ title: 'Garajım' }} />
       <ProfileStack.Screen name="BikeDetail" component={BikeDetailScreen} options={{ title: 'Motor' }} />
-      <ProfileStack.Screen name="Segments" component={SegmentsScreen} options={{ title: 'Segmentler' }} />
-      <ProfileStack.Screen name="SegmentDetail" component={SegmentDetailScreen} options={{ title: 'Segment' }} />
+      <ProfileStack.Screen name="Segments" component={SegmentsScreen} options={{ title: 'Kapışmalar' }} />
+      <ProfileStack.Screen name="SegmentDetail" component={SegmentDetailScreen} options={{ title: 'Kapışma' }} />
       <ProfileStack.Screen name="Challenges" component={ChallengesScreen} options={{ title: 'Meydan Okumalar' }} />
       <ProfileStack.Screen name="ChallengeDetail" component={ChallengeDetailScreen} options={{ title: 'Meydan Okuma' }} />
     </ProfileStack.Navigator>
@@ -209,6 +225,30 @@ function EventsNavigator() {
       <EventsStack.Screen name="EventChat" component={EventChatScreen} options={{ title: 'Sohbet' }} />
       <EventsStack.Screen name="EventLocationPicker" component={EventLocationPickerScreen} options={{ title: 'Konum Seç' }} />
     </EventsStack.Navigator>
+  );
+}
+
+function ChatNavigator() {
+  return (
+    <ChatStack.Navigator
+      screenOptions={{
+        headerStyle: { backgroundColor: colors.surface },
+        headerTitleStyle: { color: colors.text, fontWeight: '800' },
+        headerTintColor: colors.primary,
+        contentStyle: { backgroundColor: colors.bg },
+      }}
+    >
+      <ChatStack.Screen
+        name="Conversations"
+        component={ConversationsScreen}
+        options={({ navigation }) => ({
+          title: 'Mesajlar',
+          headerRight: () => <HeaderIconButton icon="earth" onPress={() => navigation.navigate('GlobalChat')} />,
+        })}
+      />
+      <ChatStack.Screen name="GlobalChat" component={GlobalChatScreen} options={{ title: 'Topluluk Sohbeti' }} />
+      <ChatStack.Screen name="ChatThread" component={ChatThreadScreen} options={{ title: 'Sohbet' }} />
+    </ChatStack.Navigator>
   );
 }
 
@@ -262,6 +302,13 @@ const linking: LinkingOptions<AppTabParams> = {
           GroupJoin: 'join/:code',
         },
       },
+      // morider://dm/<conversationId> opens a direct-message thread (used by DM
+      // push notifications).
+      Chat: {
+        screens: {
+          ChatThread: 'dm/:conversationId',
+        },
+      },
     },
   },
 };
@@ -271,6 +318,7 @@ const TAB_META: Record<keyof AppTabParams, { icon: IconName; label: string }> = 
   Ride: { icon: 'motorbike', label: 'Sürüş' },
   Feed: { icon: 'image-multiple', label: 'Akış' },
   Events: { icon: 'calendar-clock', label: 'Etkinlik' },
+  Chat: { icon: 'chat', label: 'Sohbet' },
   Profile: { icon: 'account', label: 'Profil' },
 };
 
@@ -334,6 +382,7 @@ function AppTabs() {
       <Tabs.Screen name="Ride" component={RideNavigator} options={{ headerShown: false }} />
       <Tabs.Screen name="Feed" component={FeedNavigator} options={{ headerShown: false }} />
       <Tabs.Screen name="Events" component={EventsNavigator} options={{ headerShown: false }} />
+      <Tabs.Screen name="Chat" component={ChatNavigator} options={{ headerShown: false }} />
       <Tabs.Screen name="Profile" component={ProfileNavigator} options={{ headerShown: false }} />
     </Tabs.Navigator>
   );
@@ -366,7 +415,15 @@ export default function RootNavigator() {
 
   return (
     <NavigationContainer theme={navTheme} linking={linking}>
-      {token ? <AppTabs /> : <AuthFlow />}
+      {token ? (
+        <>
+          <AppTabs />
+          {/* First-run welcome tour; self-hides once the rider has seen it. */}
+          <OnboardingTour />
+        </>
+      ) : (
+        <AuthFlow />
+      )}
     </NavigationContainer>
   );
 }

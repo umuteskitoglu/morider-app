@@ -9,6 +9,7 @@ import {
   RefreshControl,
   ScrollView,
   StyleSheet,
+  Switch,
   Text,
   useWindowDimensions,
   View,
@@ -24,12 +25,15 @@ import { Button, Card, TextField } from '../components/ui';
 import { BIKE_LABELS, BIKE_TYPES, bikeLabel, LICENSE_LABELS, LICENSE_TYPES, licenseLabel } from '../lib/rider';
 import { getEmergencyContact, setEmergencyContact } from '../lib/emergency';
 import { PostDetail, DetailPost } from '../components/PostDetail';
+import { replayOnboarding } from '../components/OnboardingTour';
 import { removeFromFeedCache } from './FeedScreen';
 import { AvatarViewer } from '../components/AvatarViewer';
 import { RiderChips } from '../components/RiderChips';
 import { ProgressBar } from '../components/ProgressBar';
+import { LevelInfoButton } from '../components/LevelInfoButton';
 import { tierMeta, RiderLevel } from '../lib/rewards';
 import { useAuth, User } from '../store/auth';
+import { goOffline } from '../lib/presence';
 import { ProfileStackParams } from '../navigation/RootNavigator';
 import { api, apiBaseURL, errorMessage } from '../api/client';
 import { colors, gradients, radius, shadow, spacing } from '../theme';
@@ -74,6 +78,7 @@ export default function ProfileScreen() {
   const [emergencyPhone, setEmergencyPhone] = useState('');
   const [editEmergency, setEditEmergency] = useState(false);
   const [emergencyInput, setEmergencyInput] = useState('');
+  const [savingLoc, setSavingLoc] = useState(false);
 
   const thumb = (width - spacing.md * 2 - spacing.xs * 2) / 3;
   const showcased = rewards.filter((r) => r.showcased);
@@ -120,6 +125,7 @@ export default function ProfileScreen() {
         if ((u.data.license_type ?? '') !== (user?.license_type ?? '')) fresh.license_type = u.data.license_type || undefined;
         if ((u.data.bike_type ?? '') !== (user?.bike_type ?? '')) fresh.bike_type = u.data.bike_type || undefined;
         if (typeof u.data.show_garage === 'boolean' && u.data.show_garage !== user?.show_garage) fresh.show_garage = u.data.show_garage;
+        if (typeof u.data.share_live_location === 'boolean' && u.data.share_live_location !== user?.share_live_location) fresh.share_live_location = u.data.share_live_location;
         if (Object.keys(fresh).length > 0) updateUser(fresh);
       }
     } catch {
@@ -216,6 +222,21 @@ export default function ProfileScreen() {
     await setEmergencyContact(emergencyInput);
     setEmergencyPhone(emergencyInput.trim());
     setEditEmergency(false);
+  }
+
+  async function toggleLocationSharing(next: boolean) {
+    if (!user || savingLoc) return;
+    try {
+      setSavingLoc(true);
+      await api.put(`/api/users/${user.id}`, { share_live_location: next });
+      await updateUser({ share_live_location: next });
+      // Turning it off should remove us from others' maps right away.
+      if (!next) goOffline();
+    } catch (err) {
+      Alert.alert('Kaydedilemedi', errorMessage(err));
+    } finally {
+      setSavingLoc(false);
+    }
   }
 
   function openManage() {
@@ -356,7 +377,10 @@ export default function ProfileScreen() {
 
         {level && (
           <>
-            <SectionTitle icon="star-four-points" title="Seviye" />
+            <View style={styles.sectionRowBetween}>
+              <SectionTitle icon="star-four-points" title="Seviye" />
+              <LevelInfoButton />
+            </View>
             <Card style={styles.levelCard}>
               <View style={styles.levelBadge}>
                 <Text style={styles.levelNum}>{level.level}</Text>
@@ -433,6 +457,24 @@ export default function ProfileScreen() {
           })()}
         </Card>
 
+        <SectionTitle icon="map-marker-account" title="Konum & Gizlilik" />
+        <Card style={styles.emRow}>
+          <MaterialCommunityIcons name="map-marker-radius" size={22} color={colors.primary} />
+          <View style={styles.flex}>
+            <Text style={styles.emTitle}>Haritada Görün</Text>
+            <Text style={styles.muted}>
+              Açıkken yakındaki sürücüler seni haritada görebilir (konumun yaklaşık gösterilir).
+            </Text>
+          </View>
+          <Switch
+            value={!!user?.share_live_location}
+            onValueChange={toggleLocationSharing}
+            disabled={savingLoc}
+            trackColor={{ false: colors.surfaceAlt, true: colors.primary }}
+            thumbColor="#fff"
+          />
+        </Card>
+
         <SectionTitle icon="shield-alert-outline" title="Güvenlik" />
         <Pressable onPress={openEmergencyEdit}>
           <Card style={styles.emRow}>
@@ -442,6 +484,17 @@ export default function ProfileScreen() {
               <Text style={styles.muted}>
                 {emergencyPhone || 'Kayıtlı değil — kaza algılandığında SMS taslağı için ekle'}
               </Text>
+            </View>
+            <MaterialCommunityIcons name="chevron-right" size={22} color={colors.textMuted} />
+          </Card>
+        </Pressable>
+
+        <Pressable onPress={replayOnboarding}>
+          <Card style={styles.emRow}>
+            <MaterialCommunityIcons name="compass-outline" size={22} color={colors.primary} />
+            <View style={styles.flex}>
+              <Text style={styles.emTitle}>Uygulama Turu</Text>
+              <Text style={styles.muted}>Sekmeleri ve ana özellikleri tanıtan turu tekrar izle</Text>
             </View>
             <MaterialCommunityIcons name="chevron-right" size={22} color={colors.textMuted} />
           </Card>

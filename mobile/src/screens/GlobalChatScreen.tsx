@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useLayoutEffect, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   FlatList,
   KeyboardAvoidingView,
@@ -10,44 +10,56 @@ import {
   View,
 } from 'react-native';
 import { useHeaderHeight } from '@react-navigation/elements';
-import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 
-import { EventsStackParams } from '../navigation/RootNavigator';
 import { EmptyState } from '../components/ui';
 import { useAuth } from '../store/auth';
-import { api } from '../api/client';
+import { fetchGlobalMessages, GlobalMsg, SlowmodeFrame } from '../lib/chat';
 import { useChatSocket } from '../lib/useChatSocket';
 import { formatTime } from '../lib/datetime';
 import { colors, radius, shadow, spacing } from '../theme';
 
-type ChatMsg = { id: number; user_id: number; name: string; body: string; created_at: string };
-type Props = NativeStackScreenProps<EventsStackParams, 'EventChat'>;
-
-export default function EventChatScreen({ navigation, route }: Props) {
-  const { code, title } = route.params;
+export default function GlobalChatScreen() {
   const { user } = useAuth();
   const headerHeight = useHeaderHeight();
 
-  const [messages, setMessages] = useState<ChatMsg[]>([]);
+  const [messages, setMessages] = useState<GlobalMsg[]>([]);
   const [draft, setDraft] = useState('');
-
-  useLayoutEffect(() => {
-    navigation.setOptions({ title: title ? `Sohbet · ${title}` : 'Sohbet' });
-  }, [navigation, title]);
+  // Seconds remaining under slow mode; 0 = may send. Counts down each second.
+  const [cooldown, setCooldown] = useState(0);
+  const cooldownTimer = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const loadMessages = useCallback(async () => {
     try {
-      const { data } = await api.get(`/api/events/${code}/messages`);
-      setMessages(data.messages ?? []);
+      setMessages(await fetchGlobalMessages());
     } catch {
       // best effort
     }
-  }, [code]);
+  }, []);
+
+  const startCooldown = useCallback((ms: number) => {
+    const secs = Math.ceil(ms / 1000);
+    setCooldown(secs);
+    if (cooldownTimer.current) clearInterval(cooldownTimer.current);
+    cooldownTimer.current = setInterval(() => {
+      setCooldown((c) => {
+        if (c <= 1) {
+          if (cooldownTimer.current) clearInterval(cooldownTimer.current);
+          return 0;
+        }
+        return c - 1;
+      });
+    }, 1000);
+  }, []);
 
   const { connected, send: sendFrame } = useChatSocket({
-    path: `/api/events/${code}/ws`,
-    onMessage: (m: ChatMsg) => {
+    path: '/api/chat/global/ws',
+    onMessage: (parsed) => {
+      if (parsed?.type === 'slowmode') {
+        startCooldown((parsed as SlowmodeFrame).retry_after_ms);
+        return;
+      }
+      const m = parsed as GlobalMsg;
       if (m?.id == null) return;
       setMessages((prev) => (prev.some((x) => x.id === m.id) ? prev : [...prev, m]));
     },
@@ -56,16 +68,17 @@ export default function EventChatScreen({ navigation, route }: Props) {
 
   useEffect(() => {
     loadMessages();
+    return () => {
+      if (cooldownTimer.current) clearInterval(cooldownTimer.current);
+    };
   }, [loadMessages]);
 
   function send() {
     const body = draft.trim();
-    if (!body) return;
+    if (!body || cooldown > 0) return;
     if (sendFrame({ body })) setDraft('');
   }
 
-  // Inverted list wants newest first; it then renders newest at the bottom near
-  // the composer and scrolls up for history.
   const data = messages.slice().reverse();
 
   return (
@@ -82,7 +95,7 @@ export default function EventChatScreen({ navigation, route }: Props) {
         keyboardShouldPersistTaps="handled"
         ListEmptyComponent={
           <View style={styles.empty}>
-            <EmptyState icon="chat-outline" title="Henüz mesaj yok" hint="İlk mesajı sen yaz ve grubu hareketlendir!" />
+            <EmptyState icon="earth" title="Topluluk sohbeti sessiz" hint="İlk mesajı sen yaz — yoldaki herkes görür!" />
           </View>
         }
         renderItem={({ item: m }) => {
@@ -110,16 +123,21 @@ export default function EventChatScreen({ navigation, route }: Props) {
           style={styles.composerInput}
           value={draft}
           onChangeText={setDraft}
-          placeholder="Mesaj yaz…"
+          placeholder={cooldown > 0 ? `Yavaş mod: ${cooldown}s bekle…` : 'Mesaj yaz…'}
           placeholderTextColor={colors.textMuted}
           multiline
-          maxLength={2000}
+          maxLength={1000}
+          editable={cooldown === 0}
           autoCorrect={false}
           autoComplete="off"
           spellCheck={false}
         />
-        <Pressable style={styles.sendBtn} onPress={send} disabled={!draft.trim()}>
-          <MaterialCommunityIcons name="send" size={20} color="#fff" />
+        <Pressable style={[styles.sendBtn, (cooldown > 0 || !draft.trim()) && styles.sendBtnOff]} onPress={send} disabled={cooldown > 0 || !draft.trim()}>
+          {cooldown > 0 ? (
+            <Text style={styles.cooldownText}>{cooldown}</Text>
+          ) : (
+            <MaterialCommunityIcons name="send" size={20} color="#fff" />
+          )}
         </Pressable>
       </View>
     </KeyboardAvoidingView>
@@ -131,15 +149,12 @@ const styles = StyleSheet.create({
   list: { padding: spacing.md, gap: spacing.xs },
   emptyWrap: { flexGrow: 1 },
   empty: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: spacing.md, padding: spacing.xl },
-  emptyText: { color: colors.textMuted, textAlign: 'center', lineHeight: 22 },
   msgRow: { flexDirection: 'row', marginVertical: 2 },
   msgRowMine: { justifyContent: 'flex-end' },
   msgBubble: { maxWidth: '80%', paddingHorizontal: spacing.sm, paddingVertical: 6, borderRadius: radius.md },
   msgBubbleMine: { backgroundColor: colors.primary, borderBottomRightRadius: 2 },
   msgBubbleOther: { backgroundColor: colors.surfaceAlt, borderBottomLeftRadius: 2 },
   msgAuthor: { color: colors.accent, fontSize: 11, fontWeight: '800', marginBottom: 1 },
-  // paddingRight gives the last glyph room: Android clips text to its measured
-  // width and can otherwise cut the final character.
   msgBody: { color: '#fff', fontSize: 15, paddingRight: 3 },
   msgTime: { color: 'rgba(255,255,255,0.6)', fontSize: 10, alignSelf: 'flex-end', marginTop: 1 },
   connBar: { alignItems: 'center', paddingVertical: 3, backgroundColor: colors.surfaceAlt },
@@ -172,4 +187,6 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     ...shadow.glow,
   },
+  sendBtnOff: { backgroundColor: colors.surfaceAlt },
+  cooldownText: { color: colors.textMuted, fontWeight: '900', fontSize: 15 },
 });

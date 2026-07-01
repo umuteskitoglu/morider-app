@@ -42,6 +42,18 @@ func SubjectEventChat(eventID int64) string {
 	return fmt.Sprintf("event.%d.chat", eventID)
 }
 
+// SubjectGlobalChat carries messages for the single community-wide chat room.
+// Every chat service replica subscribes to it so a message posted on one replica
+// fans out to global-chat WebSocket clients connected to any replica.
+const SubjectGlobalChat = "chat.global"
+
+// SubjectDMChat returns the NATS subject carrying messages for a single
+// one-to-one conversation, so direct messages fan out across chat replicas to
+// both participants wherever they are connected.
+func SubjectDMChat(conversationID int64) string {
+	return fmt.Sprintf("chat.dm.%d", conversationID)
+}
+
 // SubjectSessionRoster is published by the telemetry service whenever a group
 // ride's participant set changes, and consumed by the reward service to award
 // group-ride badges to every current participant.

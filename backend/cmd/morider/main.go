@@ -17,6 +17,7 @@ import (
 	"os"
 
 	"github.com/morider/backend/internal/auth"
+	"github.com/morider/backend/internal/chat"
 	"github.com/morider/backend/internal/event"
 	"github.com/morider/backend/internal/feed"
 	"github.com/morider/backend/internal/gateway"
@@ -32,7 +33,7 @@ import (
 )
 
 func main() {
-	service := flag.String("service", "", "service to run: all|gateway|auth|user|ride|route|reward|telemetry|feed|event")
+	service := flag.String("service", "", "service to run: all|gateway|auth|user|ride|route|reward|telemetry|feed|event|chat")
 	flag.Parse()
 
 	// Allow selecting the service via env too (handy in containers).
@@ -65,6 +66,7 @@ func main() {
 		"telemetry": telemetry.Run,
 		"feed":      feed.Run,
 		"event":     event.Run,
+		"chat":      chat.Run,
 	}
 
 	if name == "all" {
@@ -95,7 +97,7 @@ func runAll(cfg config.Config, runners map[string]func(config.Config) error) err
 	// already listening by the time it starts proxying.
 	order := []string{
 		"auth", "user", "ride", "route", "reward",
-		"telemetry", "feed", "event", "gateway",
+		"telemetry", "feed", "event", "chat", "gateway",
 	}
 
 	results := make(chan error, len(order))

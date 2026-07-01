@@ -31,6 +31,10 @@ type Config struct {
 	RateLimitRPS   float64
 	RateLimitBurst int
 
+	// Minimum interval between two global-chat messages from the same user
+	// (slow mode). Guards the community room against flooding.
+	GlobalChatSlowmode time.Duration
+
 	// Routing engine (OSRM-compatible) used by the route service.
 	RoutingURL     string
 	RoutingProfile string
@@ -70,6 +74,7 @@ type Config struct {
 	TelemetryURL string
 	FeedURL      string
 	EventURL     string
+	ChatURL      string
 }
 
 // Load reads configuration from the environment, applying sane defaults so the
@@ -87,6 +92,8 @@ func Load() Config {
 
 		RateLimitRPS:   getFloat("RATE_LIMIT_RPS", 50),
 		RateLimitBurst: getInt("RATE_LIMIT_BURST", 100),
+
+		GlobalChatSlowmode: time.Duration(getInt("GLOBAL_CHAT_SLOWMODE_SECONDS", 30)) * time.Second,
 
 		RoutingURL:     getEnv("ROUTING_URL", "https://router.project-osrm.org"),
 		RoutingProfile: getEnv("ROUTING_PROFILE", "driving"),
@@ -113,6 +120,7 @@ func Load() Config {
 		TelemetryURL: getEnv("TELEMETRY_SERVICE_URL", "http://localhost:8086"),
 		FeedURL:      getEnv("FEED_SERVICE_URL", "http://localhost:8087"),
 		EventURL:     getEnv("EVENT_SERVICE_URL", "http://localhost:8088"),
+		ChatURL:      getEnv("CHAT_SERVICE_URL", "http://localhost:8089"),
 	}
 }
 

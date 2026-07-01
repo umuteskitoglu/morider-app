@@ -1,7 +1,9 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { Alert, Modal, Pressable, StyleSheet, Text, View } from 'react-native';
 import MapView, { LongPressEvent, Marker, Polyline, Region } from 'react-native-maps';
+import { Image } from 'expo-image';
 import * as Location from 'expo-location';
+import { useFocusEffect } from '@react-navigation/native';
 import { activateKeepAwakeAsync, deactivateKeepAwake } from 'expo-keep-awake';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -35,8 +37,11 @@ import {
 import { POI, POI_CATEGORIES, POI_LABELS, poiColor, poiIcon } from '../lib/poi';
 import { setRideLocationHandler, startRideLocation, stopRideLocation } from '../lib/backgroundLocation';
 import { computeRideStats } from '../lib/rideStats';
+import { kapismaSummary } from '../lib/segments';
 import { RideDashboard } from '../components/RideDashboard';
-import { api, errorMessage } from '../api/client';
+import { useAuth } from '../store/auth';
+import { fetchNearby, goOffline, heartbeat, NearbyRider } from '../lib/presence';
+import { api, apiBaseURL, errorMessage } from '../api/client';
 import { colors, radius, shadow, spacing } from '../theme';
 
 type Coord = { latitude: number; longitude: number };
@@ -124,6 +129,18 @@ export default function MapScreen({ route, navigation }: Props) {
   const [followCam, setFollowCam] = useState(true);
   const followCamRef = useRef(true);
   followCamRef.current = followCam;
+
+  // Live "active riders" layer. Only runs while the profile toggle is on and the
+  // map is focused; a single tick both heartbeats our position and refreshes the
+  // nearby list, so it costs one location fix every ~12s.
+  const { user } = useAuth();
+  const shareLoc = !!user?.share_live_location;
+  const [nearby, setNearby] = useState<NearbyRider[]>([]);
+  const [selectedRider, setSelectedRider] = useState<NearbyRider | null>(null);
+  const headingRef = useRef(-1);
+  headingRef.current = heading;
+  const speedRef = useRef(0);
+  speedRef.current = speed;
 
   // Track peak lean over the whole ride so it can be saved on the ride.
   const { lean } = useLeanAngle(recording);
@@ -218,6 +235,47 @@ export default function MapScreen({ route, navigation }: Props) {
       void deactivateKeepAwake(tag);
     };
   }, [recording]);
+
+  // Presence loop: heartbeat + refresh nearby riders while sharing is on and the
+  // map is focused. Leaving the screen (or turning sharing off) removes us from
+  // others' maps immediately.
+  useFocusEffect(
+    useCallback(() => {
+      if (!shareLoc) {
+        setNearby([]);
+        return;
+      }
+      let active = true;
+      const tick = async () => {
+        try {
+          let lat: number;
+          let lon: number;
+          if (lastCoord.current) {
+            lat = lastCoord.current.latitude;
+            lon = lastCoord.current.longitude;
+          } else {
+            const loc = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
+            lat = loc.coords.latitude;
+            lon = loc.coords.longitude;
+          }
+          const isActive = await heartbeat(lat, lon, headingRef.current >= 0 ? headingRef.current : undefined, speedRef.current);
+          if (!isActive) return; // sharing turned off server-side
+          const riders = await fetchNearby(lat, lon);
+          if (active) setNearby(riders);
+        } catch {
+          // ignore — next tick retries
+        }
+      };
+      tick();
+      const timer = setInterval(tick, 12000);
+      return () => {
+        active = false;
+        clearInterval(timer);
+        setNearby([]);
+        goOffline();
+      };
+    }, [shareLoc]),
+  );
 
   async function centerOnUser(initial = false) {
     try {
@@ -619,7 +677,20 @@ export default function MapScreen({ route, navigation }: Props) {
         })),
       });
 
-      Alert.alert('🏁 Sürüş kaydedildi', `${distance.toFixed(2)} km kaydedildi.`);
+      // Match the track against public kapışmalar so a rider who merely passed
+      // through one gets ranked automatically. Only a PR/podium result surfaces
+      // (see kapismaSummary), folded into the save confirmation as one line —
+      // never one alert per segment. Best-effort: matching must not block saving.
+      let kapisma = '';
+      try {
+        const { data } = await api.post(`/api/rides/${ride.id}/segments/match`);
+        kapisma = kapismaSummary(data.efforts ?? []);
+      } catch {
+        // ignore — the ride is already saved
+      }
+
+      const body = `${distance.toFixed(2)} km kaydedildi.` + (kapisma ? `\n\n${kapisma}` : '');
+      Alert.alert('🏁 Sürüş kaydedildi', body);
     } catch (err) {
       Alert.alert('Kaydedilemedi', errorMessage(err));
     } finally {
@@ -696,6 +767,20 @@ export default function MapScreen({ route, navigation }: Props) {
           >
             <View style={[styles.poiPin, { borderColor: poiColor(p.category) }]}>
               <MaterialCommunityIcons name={poiIcon(p.category) as any} size={15} color={poiColor(p.category)} />
+            </View>
+          </Marker>
+        ))}
+        {/* Active riders sharing their (approximate) location nearby. */}
+        {nearby.map((r) => (
+          <Marker
+            key={`rider-${r.user_id}`}
+            coordinate={{ latitude: r.lat, longitude: r.lon }}
+            anchor={{ x: 0.5, y: 0.5 }}
+            onPress={() => setSelectedRider(r)}
+            tracksViewChanges={false}
+          >
+            <View style={styles.riderPin}>
+              <MaterialCommunityIcons name="motorbike" size={16} color="#fff" />
             </View>
           </Marker>
         ))}
@@ -857,6 +942,43 @@ export default function MapScreen({ route, navigation }: Props) {
           </Pressable>
         </Pressable>
       </Modal>
+
+      {/* Nearby rider card → start a direct message */}
+      <Modal
+        visible={selectedRider != null}
+        animationType="fade"
+        transparent
+        statusBarTranslucent
+        onRequestClose={() => setSelectedRider(null)}
+      >
+        <Pressable style={styles.poiBackdrop} onPress={() => setSelectedRider(null)}>
+          <Pressable style={styles.riderSheet} onPress={() => {}}>
+            {selectedRider?.avatar_url ? (
+              <Image source={{ uri: apiBaseURL() + selectedRider.avatar_url }} style={styles.riderAvatar} />
+            ) : (
+              <View style={styles.riderAvatarFallback}>
+                <MaterialCommunityIcons name="account" size={28} color="#fff" />
+              </View>
+            )}
+            <Text style={styles.riderName}>{selectedRider?.name}</Text>
+            <Text style={styles.poiSub}>Yakında aktif sürücü</Text>
+            <View style={{ height: spacing.sm }} />
+            <Button
+              title="Mesaj Gönder"
+              icon="message-text"
+              onPress={() => {
+                const r = selectedRider;
+                setSelectedRider(null);
+                if (!r) return;
+                (navigation.getParent() as any)?.navigate('Chat', {
+                  screen: 'ChatThread',
+                  params: { userId: r.user_id, name: r.name, avatarUrl: r.avatar_url },
+                });
+              }}
+            />
+          </Pressable>
+        </Pressable>
+      </Modal>
     </View>
   );
 }
@@ -965,6 +1087,36 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     ...shadow.card,
   },
+  riderPin: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: colors.accent,
+    borderWidth: 2,
+    borderColor: '#fff',
+    alignItems: 'center',
+    justifyContent: 'center',
+    ...shadow.card,
+  },
+  riderSheet: {
+    backgroundColor: colors.surface,
+    borderTopLeftRadius: radius.lg,
+    borderTopRightRadius: radius.lg,
+    padding: spacing.lg,
+    paddingBottom: spacing.xl,
+    alignItems: 'center',
+    gap: spacing.xs,
+  },
+  riderAvatar: { width: 64, height: 64, borderRadius: 32 },
+  riderAvatarFallback: {
+    width: 64,
+    height: 64,
+    borderRadius: 32,
+    backgroundColor: colors.primary,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  riderName: { color: colors.text, fontSize: 18, fontWeight: '900', marginTop: spacing.xs },
   poiBackdrop: { flex: 1, backgroundColor: 'rgba(0,0,0,0.55)', justifyContent: 'flex-end' },
   poiSheet: {
     backgroundColor: colors.surface,

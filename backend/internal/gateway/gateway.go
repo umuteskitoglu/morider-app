@@ -36,10 +36,13 @@ func Run(cfg config.Config) error {
 		{"/api/challenge-invites", cfg.RewardURL},
 		{"/api/telemetry", cfg.TelemetryURL},
 		{"/api/sessions", cfg.TelemetryURL},
+		{"/api/presence", cfg.TelemetryURL},
 		{"/api/feed", cfg.FeedURL},
 		{"/api/posts", cfg.FeedURL},
 		{"/api/comments", cfg.FeedURL},
 		{"/api/events", cfg.EventURL},
+		{"/api/chat", cfg.ChatURL},
+		{"/api/dm", cfg.ChatURL},
 	}
 
 	for _, r := range routes {

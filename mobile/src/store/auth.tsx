@@ -14,6 +14,7 @@ export type User = {
   license_type?: string;
   bike_type?: string;
   show_garage?: boolean;
+  share_live_location?: boolean;
 };
 
 type AuthState = {
