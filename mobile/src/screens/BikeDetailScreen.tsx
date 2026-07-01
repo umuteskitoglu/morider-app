@@ -43,15 +43,8 @@ export default function BikeDetailScreen({ route, navigation }: Props) {
   const { id, name } = route.params;
   const { user } = useAuth();
   const [moto, setMoto] = useState<Motorcycle | null>(null);
-  const [records, setRecords] = useState<ServiceRecord[]>([]);
   const [editing, setEditing] = useState(false);
   const [saving, setSaving] = useState(false);
-  const [addingRecord, setAddingRecord] = useState(false);
-  const [savingRecord, setSavingRecord] = useState(false);
-  const [recTitle, setRecTitle] = useState('');
-  const [recNote, setRecNote] = useState('');
-  const [recKm, setRecKm] = useState('');
-  const [recCost, setRecCost] = useState('');
 
   // Fuel
   const [fuelLogs, setFuelLogs] = useState<FuelLog[]>([]);
@@ -63,13 +56,27 @@ export default function BikeDetailScreen({ route, navigation }: Props) {
   const [fKm, setFKm] = useState('');
   const [fFull, setFFull] = useState(true);
 
-  // Maintenance
+  // Maintenance (merged with service history)
   const [maint, setMaint] = useState<MaintenanceItem[]>([]);
+  const [odometer, setOdometer] = useState(0);
   const [addingMaint, setAddingMaint] = useState(false);
   const [savingMaint, setSavingMaint] = useState(false);
   const [mItem, setMItem] = useState('');
   const [mKm, setMKm] = useState('');
   const [mMonths, setMMonths] = useState('');
+
+  // "Yapıldı" sheet — mark a maintenance item as done + record completion
+  const [doneFor, setDoneFor] = useState<MaintenanceItem | null>(null);
+  const [doneKm, setDoneKm] = useState('');
+  const [doneCost, setDoneCost] = useState('');
+  const [doneNote, setDoneNote] = useState('');
+  const [savingDone, setSavingDone] = useState(false);
+
+  // Expanded history per item (item id set)
+  const [expanded, setExpanded] = useState<Set<number>>(new Set());
+
+  // Orphan service records — added before migration or via manual legacy flow
+  const [orphans, setOrphans] = useState<ServiceRecord[]>([]);
 
   useLayoutEffect(() => {
     navigation.setOptions({ title: moto?.name ?? name });
@@ -77,18 +84,20 @@ export default function BikeDetailScreen({ route, navigation }: Props) {
 
   const load = useCallback(async () => {
     try {
-      // No single-bike endpoint; the garage list is tiny, so find it there.
-      const [g, s] = await Promise.all([
+      const [g, m] = await Promise.all([
         api.get('/api/garage'),
-        api.get(`/api/garage/${id}/services`),
+        api.get(`/api/garage/${id}/maintenance`),
       ]);
       const found = (g.data.motorcycles ?? []).find((m: Motorcycle) => m.id === id) ?? null;
       setMoto(found);
-      setRecords(s.data.records ?? []);
+      const items: MaintenanceItem[] = m.data.items ?? [];
+      setMaint(items);
+      setOdometer(m.data.odometer_km ?? 0);
+      if (user?.id) syncMaintenanceReminders(id, name, items, user.id).catch(() => {});
     } catch (err) {
       Alert.alert('Yüklenemedi', errorMessage(err));
     }
-    // Fuel logs + summary (best effort).
+    // Fuel (best effort)
     try {
       const { data } = await api.get(`/api/garage/${id}/fuel`);
       setFuelLogs(data.logs ?? []);
@@ -96,13 +105,11 @@ export default function BikeDetailScreen({ route, navigation }: Props) {
     } catch {
       // ignore
     }
-    // Maintenance schedules (best effort).
+    // Orphan service records (best effort — records not linked to any schedule)
     try {
-      const { data } = await api.get(`/api/garage/${id}/maintenance`);
-      const items = data.items ?? [];
-      setMaint(items);
-      // Schedule on-device reminders for time-based items (best effort).
-      if (user?.id) syncMaintenanceReminders(id, name, items, user.id).catch(() => {});
+      const { data } = await api.get(`/api/garage/${id}/services`);
+      const all: ServiceRecord[] = data.records ?? [];
+      setOrphans(all.filter((r) => !r.maintenance_schedule_id));
     } catch {
       // ignore
     }
@@ -124,7 +131,6 @@ export default function BikeDetailScreen({ route, navigation }: Props) {
       const { data } = await api.put(`/api/garage/${id}`, values);
       setMoto(data);
       setEditing(false);
-      // Dates may have changed → refresh the on-device reminders.
       if (user?.id) {
         const { data: g } = await api.get('/api/garage');
         syncGarageReminders(g.motorcycles ?? [], user.id).catch(() => {});
@@ -137,7 +143,7 @@ export default function BikeDetailScreen({ route, navigation }: Props) {
   }
 
   function confirmDeleteMoto() {
-    Alert.alert('Motoru sil', `"${moto?.name ?? name}" ve tüm servis kayıtları silinsin mi?`, [
+    Alert.alert('Motoru sil', `"${moto?.name ?? name}" ve tüm kayıtları silinsin mi?`, [
       { text: 'Vazgeç', style: 'cancel' },
       {
         text: 'Sil',
@@ -154,35 +160,7 @@ export default function BikeDetailScreen({ route, navigation }: Props) {
     ]);
   }
 
-  function openAddRecord() {
-    setRecTitle('');
-    setRecNote('');
-    setRecKm('');
-    setRecCost('');
-    setAddingRecord(true);
-  }
-
-  async function saveRecord() {
-    if (!recTitle.trim()) {
-      Alert.alert('Başlık gerekli', 'Yapılan işlemi yaz (örn. "Yağ + filtre").');
-      return;
-    }
-    try {
-      setSavingRecord(true);
-      const { data } = await api.post(`/api/garage/${id}/services`, {
-        title: recTitle.trim(),
-        note: recNote.trim(),
-        odometer_km: parseInt(recKm, 10) || 0,
-        cost: parseFloat(recCost.replace(',', '.')) || 0,
-      });
-      setRecords((prev) => [data, ...prev]);
-      setAddingRecord(false);
-    } catch (err) {
-      Alert.alert('Eklenemedi', errorMessage(err));
-    } finally {
-      setSavingRecord(false);
-    }
-  }
+  // ── Fuel ────────────────────────────────────────────────────────────────────
 
   function openAddFuel() {
     setFLiters('');
@@ -208,7 +186,7 @@ export default function BikeDetailScreen({ route, navigation }: Props) {
         is_full_tank: fFull,
       });
       setAddingFuel(false);
-      await load(); // refresh logs, summary and the bike's derived consumption
+      await load();
     } catch (err) {
       Alert.alert('Eklenemedi', errorMessage(err));
     } finally {
@@ -233,6 +211,8 @@ export default function BikeDetailScreen({ route, navigation }: Props) {
       },
     ]);
   }
+
+  // ── Maintenance ──────────────────────────────────────────────────────────────
 
   function openAddMaint() {
     setMItem('');
@@ -268,17 +248,33 @@ export default function BikeDetailScreen({ route, navigation }: Props) {
     }
   }
 
-  async function markMaintDone(m: MaintenanceItem) {
+  function openDoneSheet(m: MaintenanceItem) {
+    setDoneFor(m);
+    setDoneKm(odometer > 0 ? String(odometer) : '');
+    setDoneCost('');
+    setDoneNote('');
+  }
+
+  async function saveDone() {
+    if (!doneFor) return;
     try {
-      await api.post(`/api/garage/${id}/maintenance/${m.id}/done`);
+      setSavingDone(true);
+      await api.post(`/api/garage/${id}/maintenance/${doneFor.id}/done`, {
+        odometer_km: parseInt(doneKm, 10) || 0,
+        cost: parseFloat(doneCost.replace(',', '.')) || 0,
+        note: doneNote.trim(),
+      });
+      setDoneFor(null);
       await load();
     } catch (err) {
-      Alert.alert('Güncellenemedi', errorMessage(err));
+      Alert.alert('Kaydedilemedi', errorMessage(err));
+    } finally {
+      setSavingDone(false);
     }
   }
 
   function confirmDeleteMaint(m: MaintenanceItem) {
-    Alert.alert('Bakım kalemini sil', `"${m.item}" silinsin mi?`, [
+    Alert.alert('Bakım kalemini sil', `"${m.item}" ve tüm geçmişi silinsin mi?`, [
       { text: 'Vazgeç', style: 'cancel' },
       {
         text: 'Sil',
@@ -295,27 +291,17 @@ export default function BikeDetailScreen({ route, navigation }: Props) {
     ]);
   }
 
-  function confirmDeleteRecord(rec: ServiceRecord) {
-    Alert.alert('Kaydı sil', `"${rec.title}" silinsin mi?`, [
-      { text: 'Vazgeç', style: 'cancel' },
-      {
-        text: 'Sil',
-        style: 'destructive',
-        onPress: async () => {
-          try {
-            await api.delete(`/api/garage/${id}/services/${rec.id}`);
-            setRecords((prev) => prev.filter((r) => r.id !== rec.id));
-          } catch (err) {
-            Alert.alert('Silinemedi', errorMessage(err));
-          }
-        },
-      },
-    ]);
+  function toggleExpand(itemId: number) {
+    setExpanded((prev) => {
+      const next = new Set(prev);
+      next.has(itemId) ? next.delete(itemId) : next.add(itemId);
+      return next;
+    });
   }
 
   return (
     <ScrollView style={styles.container} contentContainerStyle={styles.content}>
-      {/* Documents card */}
+      {/* Documents */}
       <Card style={styles.docsCard}>
         <View style={styles.docsHead}>
           <Text style={styles.section}>Belgeler</Text>
@@ -404,122 +390,128 @@ export default function BikeDetailScreen({ route, navigation }: Props) {
         )}
       </Card>
 
-      {/* Maintenance schedules */}
+      {/* Bakım — takvim + servis geçmişi birleşik */}
       <Card style={styles.docsCard}>
         <View style={styles.docsHead}>
-          <Text style={styles.section}>Bakım Takvimi</Text>
+          <Text style={styles.section}>Bakım</Text>
           <Pressable onPress={openAddMaint} hitSlop={8} style={styles.editBtn}>
             <MaterialCommunityIcons name="plus" size={16} color={colors.primary} />
             <Text style={styles.editText}>Kalem Ekle</Text>
           </Pressable>
         </View>
+
+        {odometer > 0 && (
+          <Text style={styles.odoLine}>
+            <MaterialCommunityIcons name="counter" size={13} color={colors.textMuted} />
+            {' '}Güncel km: {odometer.toLocaleString('tr-TR')}
+          </Text>
+        )}
+
         {maint.length === 0 ? (
           <Text style={styles.muted}>
-            Yağ, lastik, zincir, fren… km ve/veya zaman aralığı ver, kalan ömrü buradan takip et.
+            Yağ, lastik, zincir, fren… km ve/veya zaman aralığı ver; kalan ömrü takip et ve her bakımı buraya kaydet.
           </Text>
         ) : (
-          maint.map((m) => {
+          maint.map((m, i) => {
             const st = maintenanceStatusInfo(m);
+            const isExpanded = expanded.has(m.id);
+            const hasHistory = m.records.length > 0;
             return (
-              <View key={m.id} style={styles.docRow}>
-                <MaterialCommunityIcons name="wrench" size={20} color={colors.primary} />
-                <View style={styles.flex}>
-                  <Text style={styles.docLabel}>{m.item}</Text>
-                  <Text style={styles.docDate}>
-                    {[m.interval_km ? `${m.interval_km.toLocaleString('tr-TR')} km` : '', m.interval_months ? `${m.interval_months} ay` : '']
-                      .filter(Boolean)
-                      .join(' / ')}
-                  </Text>
+              <View key={m.id} style={[styles.maintItem, i > 0 && styles.maintDivider]}>
+                {/* Header row */}
+                <View style={styles.maintHeader}>
+                  <View style={[styles.statusDot, { backgroundColor: st.color, marginTop: 2 }]} />
+                  <View style={styles.flex}>
+                    <Text style={styles.maintName}>{m.item}</Text>
+                    <Text style={styles.maintInterval}>
+                      {[
+                        m.interval_km ? `${m.interval_km.toLocaleString('tr-TR')} km` : '',
+                        m.interval_months ? `${m.interval_months} ayda bir` : '',
+                      ].filter(Boolean).join(' / ')}
+                    </Text>
+                  </View>
+                  <View style={[styles.statusChip, { borderColor: st.color }]}>
+                    <Text style={[styles.statusText, { color: st.color }]}>{st.text}</Text>
+                  </View>
                 </View>
-                <View style={[styles.statusChip, { borderColor: st.color }]}>
-                  <View style={[styles.statusDot, { backgroundColor: st.color }]} />
-                  <Text style={styles.statusText}>{st.text}</Text>
+
+                {/* Actions */}
+                <View style={styles.maintActions}>
+                  <Pressable style={styles.doneBtn} onPress={() => openDoneSheet(m)} hitSlop={6}>
+                    <MaterialCommunityIcons name="check-circle-outline" size={16} color={colors.success} />
+                    <Text style={styles.doneBtnText}>Yapıldı</Text>
+                  </Pressable>
+                  {hasHistory && (
+                    <Pressable style={styles.histBtn} onPress={() => toggleExpand(m.id)} hitSlop={6}>
+                      <MaterialCommunityIcons
+                        name={isExpanded ? 'chevron-up' : 'history'}
+                        size={16}
+                        color={colors.primary}
+                      />
+                      <Text style={styles.histBtnText}>
+                        {isExpanded ? 'Gizle' : `Geçmiş (${m.records.length})`}
+                      </Text>
+                    </Pressable>
+                  )}
+                  <Pressable onPress={() => confirmDeleteMaint(m)} hitSlop={8} style={styles.deleteBtn}>
+                    <MaterialCommunityIcons name="trash-can-outline" size={18} color={colors.textMuted} />
+                  </Pressable>
                 </View>
-                <Pressable onPress={() => markMaintDone(m)} hitSlop={8}>
-                  <MaterialCommunityIcons name="check-circle-outline" size={20} color={colors.success} />
-                </Pressable>
-                <Pressable onPress={() => confirmDeleteMaint(m)} hitSlop={8}>
-                  <MaterialCommunityIcons name="trash-can-outline" size={18} color={colors.textMuted} />
-                </Pressable>
+
+                {/* Inline history */}
+                {isExpanded && hasHistory && (
+                  <View style={styles.historyList}>
+                    {m.records.map((rec, ri) => (
+                      <View key={rec.id} style={[styles.historyRow, ri > 0 && styles.historyDivider]}>
+                        <MaterialCommunityIcons name="wrench-clock" size={14} color={colors.textMuted} />
+                        <View style={styles.flex}>
+                          <Text style={styles.histDate}>{formatDateTR(rec.service_date)}</Text>
+                          <Text style={styles.histMeta}>
+                            {[
+                              rec.odometer_km ? `${rec.odometer_km.toLocaleString('tr-TR')} km` : '',
+                              rec.cost ? `${rec.cost.toLocaleString('tr-TR')} ₺` : '',
+                              rec.note || '',
+                            ].filter(Boolean).join(' · ')}
+                          </Text>
+                        </View>
+                      </View>
+                    ))}
+                  </View>
+                )}
               </View>
             );
           })
         )}
-      </Card>
 
-      {/* Service log */}
-      <View style={styles.logHead}>
-        <Text style={styles.section}>Servis Defteri</Text>
-        <Pressable onPress={openAddRecord} hitSlop={8} style={styles.editBtn}>
-          <MaterialCommunityIcons name="plus" size={16} color={colors.primary} />
-          <Text style={styles.editText}>Kayıt Ekle</Text>
-        </Pressable>
-      </View>
-      {records.length === 0 ? (
-        <Card>
-          <Text style={styles.muted}>
-            Henüz servis kaydı yok. Yağ değişimi, lastik, bakım… hepsini buraya işle.
-          </Text>
-        </Card>
-      ) : (
-        records.map((rec) => (
-          <Card key={rec.id} style={styles.recCard}>
-            <View style={styles.flex}>
-              <Text style={styles.recTitle}>{rec.title}</Text>
-              <Text style={styles.recMeta}>
-                {[
-                  formatDateTR(rec.service_date),
-                  rec.odometer_km ? `${rec.odometer_km.toLocaleString('tr-TR')} km` : '',
-                  rec.cost ? `${rec.cost.toLocaleString('tr-TR')} ₺` : '',
-                ]
-                  .filter(Boolean)
-                  .join(' • ')}
-              </Text>
-              {rec.note ? <Text style={styles.recNote}>{rec.note}</Text> : null}
-            </View>
-            <Pressable onPress={() => confirmDeleteRecord(rec)} hitSlop={8}>
-              <MaterialCommunityIcons name="trash-can-outline" size={20} color={colors.textMuted} />
-            </Pressable>
-          </Card>
-        ))
-      )}
+        {/* Orphan records (created before migration or via legacy API) */}
+        {orphans.length > 0 && (
+          <View style={styles.orphanSection}>
+            <Text style={styles.orphanTitle}>Eski Kayıtlar</Text>
+            {orphans.map((rec, i) => (
+              <View key={rec.id} style={[styles.historyRow, i > 0 && styles.historyDivider]}>
+                <MaterialCommunityIcons name="file-document-outline" size={14} color={colors.textMuted} />
+                <View style={styles.flex}>
+                  <Text style={styles.histDate}>{rec.title}</Text>
+                  <Text style={styles.histMeta}>
+                    {[
+                      formatDateTR(rec.service_date),
+                      rec.odometer_km ? `${rec.odometer_km.toLocaleString('tr-TR')} km` : '',
+                      rec.cost ? `${rec.cost.toLocaleString('tr-TR')} ₺` : '',
+                    ].filter(Boolean).join(' · ')}
+                  </Text>
+                </View>
+              </View>
+            ))}
+          </View>
+        )}
+      </Card>
 
       <View style={{ height: spacing.lg }} />
       <Button title="Motoru Sil" variant="ghost" icon="trash-can-outline" onPress={confirmDeleteMoto} />
 
       <BikeFormModal visible={editing} initial={moto} saving={saving} onClose={() => setEditing(false)} onSave={saveEdit} />
 
-      {/* Add service record */}
-      <Modal
-        visible={addingRecord}
-        animationType="slide"
-        transparent
-        statusBarTranslucent
-        onRequestClose={() => setAddingRecord(false)}
-      >
-        <KeyboardAvoidingView style={styles.flex} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
-          <Pressable style={styles.backdrop} onPress={() => setAddingRecord(false)}>
-            <Pressable style={styles.sheet} onPress={() => {}}>
-              <Text style={styles.sheetTitle}>Servis Kaydı</Text>
-              <TextField label="Yapılan işlem" value={recTitle} onChangeText={setRecTitle} placeholder="Yağ + filtre değişimi" />
-              <TextField label="Not (opsiyonel)" value={recNote} onChangeText={setRecNote} placeholder="Motul 7100 10W40" />
-              <View style={styles.row}>
-                <View style={styles.flex}>
-                  <TextField label="Kilometre" value={recKm} onChangeText={setRecKm} placeholder="24500" keyboardType="number-pad" />
-                </View>
-                <View style={{ width: spacing.sm }} />
-                <View style={styles.flex}>
-                  <TextField label="Tutar (₺)" value={recCost} onChangeText={setRecCost} placeholder="1450" keyboardType="decimal-pad" />
-                </View>
-              </View>
-              <View style={{ height: spacing.sm }} />
-              <Button title="Kaydet" icon="content-save" onPress={saveRecord} loading={savingRecord} />
-            </Pressable>
-          </Pressable>
-        </KeyboardAvoidingView>
-      </Modal>
-
-      {/* Add fuel log */}
+      {/* Yakıt ekle */}
       <Modal visible={addingFuel} animationType="slide" transparent statusBarTranslucent onRequestClose={() => setAddingFuel(false)}>
         <KeyboardAvoidingView style={styles.flex} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
           <Pressable style={styles.backdrop} onPress={() => setAddingFuel(false)}>
@@ -551,7 +543,7 @@ export default function BikeDetailScreen({ route, navigation }: Props) {
         </KeyboardAvoidingView>
       </Modal>
 
-      {/* Add maintenance schedule */}
+      {/* Bakım kalemi ekle */}
       <Modal visible={addingMaint} animationType="slide" transparent statusBarTranslucent onRequestClose={() => setAddingMaint(false)}>
         <KeyboardAvoidingView style={styles.flex} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
           <Pressable style={styles.backdrop} onPress={() => setAddingMaint(false)}>
@@ -567,9 +559,44 @@ export default function BikeDetailScreen({ route, navigation }: Props) {
                   <TextField label="Her (ay)" value={mMonths} onChangeText={setMMonths} placeholder="12" keyboardType="number-pad" />
                 </View>
               </View>
-              <Text style={styles.hint}>En az birini doldur. Kalan ömür, son bakımdan ve motorun güncel kilometresinden hesaplanır.</Text>
+              <Text style={styles.hint}>En az birini doldur. Kalan ömür son bakımdan ve motorun güncel kilometresinden hesaplanır.</Text>
               <View style={{ height: spacing.sm }} />
               <Button title="Kaydet" icon="content-save" onPress={saveMaint} loading={savingMaint} />
+            </Pressable>
+          </Pressable>
+        </KeyboardAvoidingView>
+      </Modal>
+
+      {/* Bakım tamamlandı */}
+      <Modal
+        visible={doneFor !== null}
+        animationType="slide"
+        transparent
+        statusBarTranslucent
+        onRequestClose={() => setDoneFor(null)}
+      >
+        <KeyboardAvoidingView style={styles.flex} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+          <Pressable style={styles.backdrop} onPress={() => setDoneFor(null)}>
+            <Pressable style={styles.sheet} onPress={() => {}}>
+              <Text style={styles.sheetTitle}>
+                {doneFor?.item} — Yapıldı
+              </Text>
+              <Text style={styles.muted}>Detayları doldur, kaydedince takvim sıfırlanır ve geçmişe eklenir.</Text>
+              <TextField
+                label="Kilometre"
+                value={doneKm}
+                onChangeText={setDoneKm}
+                placeholder={odometer > 0 ? String(odometer) : '24500'}
+                keyboardType="number-pad"
+              />
+              <View style={styles.row}>
+                <View style={styles.flex}>
+                  <TextField label="Tutar (₺, opsiyonel)" value={doneCost} onChangeText={setDoneCost} placeholder="1450" keyboardType="decimal-pad" />
+                </View>
+              </View>
+              <TextField label="Not (opsiyonel)" value={doneNote} onChangeText={setDoneNote} placeholder="Motul 7100 10W40" />
+              <View style={{ height: spacing.sm }} />
+              <Button title="Kaydet" icon="check-circle-outline" onPress={saveDone} loading={savingDone} />
             </Pressable>
           </Pressable>
         </KeyboardAvoidingView>
@@ -578,7 +605,6 @@ export default function BikeDetailScreen({ route, navigation }: Props) {
   );
 }
 
-// Metric is a compact icon + value + label tile used in the fuel summary row.
 function Metric({ icon, label, value }: { icon: any; label: string; value: string }) {
   return (
     <View style={styles.metric}>
@@ -615,11 +641,34 @@ const styles = StyleSheet.create({
   },
   statusDot: { width: 7, height: 7, borderRadius: 4 },
   statusText: { color: colors.text, fontSize: 11, fontWeight: '700' },
-  logHead: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: spacing.sm },
-  recCard: { flexDirection: 'row', alignItems: 'flex-start', gap: spacing.sm },
-  recTitle: { color: colors.text, fontWeight: '800' },
-  recMeta: { color: colors.primary, fontSize: 12, fontWeight: '700', marginTop: 2 },
-  recNote: { color: colors.textMuted, fontSize: 13, marginTop: 4 },
+  odoLine: { color: colors.textMuted, fontSize: 12, marginBottom: spacing.xs },
+  // Maintenance item
+  maintItem: { paddingVertical: spacing.sm },
+  maintDivider: { borderTopWidth: 1, borderTopColor: colors.border },
+  maintHeader: { flexDirection: 'row', alignItems: 'flex-start', gap: spacing.sm },
+  maintName: { color: colors.text, fontWeight: '800', fontSize: 14 },
+  maintInterval: { color: colors.textMuted, fontSize: 12, marginTop: 1 },
+  maintActions: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, marginTop: spacing.xs, marginLeft: spacing.md + 7 },
+  doneBtn: { flexDirection: 'row', alignItems: 'center', gap: 4, paddingVertical: 4, paddingHorizontal: spacing.sm, borderRadius: 999, borderWidth: 1, borderColor: colors.success },
+  doneBtnText: { color: colors.success, fontSize: 12, fontWeight: '800' },
+  histBtn: { flexDirection: 'row', alignItems: 'center', gap: 4, paddingVertical: 4, paddingHorizontal: spacing.sm, borderRadius: 999, borderWidth: 1, borderColor: colors.border },
+  histBtnText: { color: colors.primary, fontSize: 12, fontWeight: '700' },
+  deleteBtn: { marginLeft: 'auto' as any },
+  historyList: { marginTop: spacing.sm, marginLeft: spacing.md + 7, gap: 2 },
+  historyRow: { flexDirection: 'row', alignItems: 'flex-start', gap: spacing.sm, paddingVertical: 5 },
+  historyDivider: { borderTopWidth: 1, borderTopColor: colors.border },
+  histDate: { color: colors.text, fontSize: 13, fontWeight: '700' },
+  histMeta: { color: colors.textMuted, fontSize: 12, marginTop: 1 },
+  // Orphan records section
+  orphanSection: { marginTop: spacing.md, paddingTop: spacing.md, borderTopWidth: 1, borderTopColor: colors.border, gap: 2 },
+  orphanTitle: { color: colors.textMuted, fontSize: 12, fontWeight: '800', marginBottom: spacing.xs, textTransform: 'uppercase', letterSpacing: 0.5 },
+  // Fuel
+  metricRow: { flexDirection: 'row', gap: spacing.sm },
+  metric: { flex: 1, alignItems: 'center', gap: 2, backgroundColor: colors.surfaceAlt, borderRadius: radius.sm, paddingVertical: spacing.sm },
+  metricValue: { color: colors.text, fontWeight: '900', fontSize: 14 },
+  metricLabel: { color: colors.textMuted, fontSize: 11, fontWeight: '700' },
+  fuelRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.md, paddingVertical: spacing.xs },
+  // Sheet / modal
   backdrop: { flex: 1, backgroundColor: 'rgba(0,0,0,0.55)', justifyContent: 'flex-end' },
   sheet: {
     backgroundColor: colors.surface,
@@ -629,18 +678,6 @@ const styles = StyleSheet.create({
     gap: spacing.xs,
   },
   sheetTitle: { color: colors.text, fontSize: 18, fontWeight: '900', marginBottom: spacing.xs },
-  metricRow: { flexDirection: 'row', gap: spacing.sm },
-  metric: {
-    flex: 1,
-    alignItems: 'center',
-    gap: 2,
-    backgroundColor: colors.surfaceAlt,
-    borderRadius: radius.sm,
-    paddingVertical: spacing.sm,
-  },
-  metricValue: { color: colors.text, fontWeight: '900', fontSize: 14 },
-  metricLabel: { color: colors.textMuted, fontSize: 11, fontWeight: '700' },
-  fuelRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.md, paddingVertical: spacing.xs },
   toggleRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, marginTop: spacing.xs },
   toggleText: { color: colors.text, fontWeight: '700', fontSize: 14 },
   hint: { color: colors.textMuted, fontSize: 12, marginTop: 4 },

@@ -68,7 +68,7 @@ export default function SegmentDetailScreen({ route, navigation }: Props) {
   );
 
   function confirmDelete() {
-    Alert.alert('Segmenti sil', `"${seg?.name ?? name}" ve tüm denemeler silinsin mi?`, [
+    Alert.alert('Kapışmayı sil', `"${seg?.name ?? name}" ve tüm denemeler silinsin mi?`, [
       { text: 'Vazgeç', style: 'cancel' },
       {
         text: 'Sil',
@@ -123,7 +123,7 @@ export default function SegmentDetailScreen({ route, navigation }: Props) {
               <Text style={styles.prText}>Senin rekorun: {fmtSeconds(seg.my_best_seconds)}</Text>
             </View>
           ) : (
-            <Text style={styles.muted}>Bu segmentten geçen bir sürüşün yok. Buradan geç, otomatik sıralanırsın.</Text>
+            <Text style={styles.muted}>Bu kapışmadan geçen bir sürüşün yok. Buradan geç, otomatik sıralanırsın.</Text>
           )}
         </Card>
 
@@ -148,7 +148,7 @@ export default function SegmentDetailScreen({ route, navigation }: Props) {
         {isOwner && (
           <>
             <View style={{ height: spacing.md }} />
-            <Button title="Segmenti Sil" variant="ghost" icon="trash-can-outline" onPress={confirmDelete} loading={deleting} />
+            <Button title="Kapışmayı Sil" variant="ghost" icon="trash-can-outline" onPress={confirmDelete} loading={deleting} />
           </>
         )}
       </ScrollView>

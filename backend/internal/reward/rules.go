@@ -146,8 +146,8 @@ var rules = []rule{
 	{Badge{"pack_10", "10 kişilik grupla sürüş", TierSilver}, func(s Stats) bool { return s.MaxGroupSize >= 10 }},
 
 	// Segments (timed efforts posted on rider-defined stretches of road).
-	{Badge{"segment_first", "İlk segment denemesi", TierBronze}, func(s Stats) bool { return s.SegmentEfforts >= 1 }},
-	{Badge{"segment_10", "10 segmentte deneme", TierSilver}, func(s Stats) bool { return s.SegmentEfforts >= 10 }},
+	{Badge{"segment_first", "İlk kapışma denemesi", TierBronze}, func(s Stats) bool { return s.SegmentEfforts >= 1 }},
+	{Badge{"segment_10", "10 kapışmada deneme", TierSilver}, func(s Stats) bool { return s.SegmentEfforts >= 10 }},
 }
 
 // Evaluate returns every badge earned for the given stats, in rule order.

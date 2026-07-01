@@ -22,6 +22,7 @@ export type ServiceRecord = {
   odometer_km: number;
   cost: number;
   service_date: string;
+  maintenance_schedule_id?: number;
 };
 
 // Fuel log + summary, matching internal/ride/fuel.go.
@@ -55,6 +56,7 @@ export type MaintenanceItem = {
   due_in_km?: number; // negative = overdue
   due_in_days?: number;
   status: 'ok' | 'soon' | 'overdue';
+  records: ServiceRecord[]; // history of completions, newest first
 };
 
 // Tank range in km from capacity (L) and consumption (L/100km); null when unknown.

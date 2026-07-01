@@ -3,6 +3,7 @@ import { Alert, FlatList, Pressable, StyleSheet, Text, View } from 'react-native
 import { useFocusEffect } from '@react-navigation/native';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
+import * as Location from 'expo-location';
 
 import { ProfileStackParams } from '../navigation/RootNavigator';
 import { Card } from '../components/ui';
@@ -19,7 +20,14 @@ export default function SegmentsScreen({ navigation }: Props) {
 
   const load = useCallback(async (which: Tab) => {
     try {
-      const { data } = await api.get(which === 'mine' ? '/api/segments' : '/api/segments/explore');
+      let url = which === 'mine' ? '/api/segments' : '/api/segments/explore';
+      // Explore is far more useful sorted by proximity — send our position when
+      // the user has already granted location (never prompt just for this list).
+      if (which === 'explore') {
+        const near = await nearbyCoords();
+        if (near) url += `?lat=${near.lat}&lon=${near.lon}`;
+      }
+      const { data } = await api.get(url);
       setSegments(data.segments ?? []);
     } catch (err) {
       Alert.alert('Yüklenemedi', errorMessage(err));
@@ -41,32 +49,22 @@ export default function SegmentsScreen({ navigation }: Props) {
   return (
     <View style={styles.container}>
       <View style={styles.tabs}>
-        <TabButton label="Segmentlerim" active={tab === 'mine'} onPress={() => switchTab('mine')} />
+        <TabButton label="Kapışmalarım" active={tab === 'mine'} onPress={() => switchTab('mine')} />
         <TabButton label="Keşfet" active={tab === 'explore'} onPress={() => switchTab('explore')} />
       </View>
       <FlatList
         data={segments}
         keyExtractor={(s) => String(s.id)}
         contentContainerStyle={styles.list}
-        ListEmptyComponent={
-          <Card>
-            <Text style={styles.muted}>
-              {tab === 'mine'
-                ? 'Henüz segmentin yok. Bir sürüş detayından "Segment oluştur" ile yol parçanı kaydet.'
-                : 'Keşfedilecek herkese açık segment yok.'}
-            </Text>
-          </Card>
-        }
+        ListHeaderComponent={<IntroCard />}
+        ListEmptyComponent={<EmptyState tab={tab} />}
         renderItem={({ item }) => (
           <Pressable onPress={() => navigation.navigate('SegmentDetail', { id: item.id, name: item.name })}>
             <Card style={styles.row}>
               <MaterialCommunityIcons name="flag-checkered" size={22} color={colors.primary} />
               <View style={styles.flex}>
                 <Text style={styles.name}>{item.name}</Text>
-                <Text style={styles.meta}>
-                  {item.distance.toFixed(1)} km
-                  {item.my_best_seconds ? ' · PR var' : ''}
-                </Text>
+                <Text style={styles.meta}>{rowMeta(item)}</Text>
               </View>
               <MaterialCommunityIcons name="chevron-right" size={22} color={colors.textMuted} />
             </Card>
@@ -75,6 +73,64 @@ export default function SegmentsScreen({ navigation }: Props) {
       />
     </View>
   );
+}
+
+// IntroCard explains the feature so it does not sit unexplained in a corner of
+// the app. Shown above both tabs.
+function IntroCard() {
+  return (
+    <Card style={styles.intro}>
+      <View style={styles.introHead}>
+        <MaterialCommunityIcons name="flag-checkered" size={20} color={colors.primary} />
+        <Text style={styles.introTitle}>Kapışma nedir?</Text>
+      </View>
+      <Text style={styles.introBody}>
+        Sevdiğin bir yol parçasını kapışma olarak kaydet. Oradan her geçişinde süren otomatik ölçülür,
+        diğer sürücülerle sıralanır ve rekor kırdıkça rozet kazanırsın.
+      </Text>
+      <Text style={styles.introHint}>
+        Bir sürüşün detayından “Bu sürüşten kapışma oluştur” ile başla.
+      </Text>
+    </Card>
+  );
+}
+
+function EmptyState({ tab }: { tab: Tab }) {
+  return (
+    <Card style={styles.empty}>
+      <MaterialCommunityIcons name="map-marker-path" size={28} color={colors.textMuted} />
+      <Text style={styles.emptyText}>
+        {tab === 'mine'
+          ? 'Henüz kapışman yok. Bir sürüş detayından "Bu sürüşten kapışma oluştur" ile ilk yol parçanı kaydet.'
+          : 'Yakında herkese açık kapışma yok. İlk kapışmayı sen oluştur, arkadaşların da yarışsın!'}
+      </Text>
+    </Card>
+  );
+}
+
+// rowMeta builds "3.4 km · 5 sürücü · +2 benzer · PR var" from whichever stats
+// are present. "+N benzer" shows how many overlapping kapışmalar this row stands
+// in for, so the deduped Keşfet list is transparent about the merge.
+function rowMeta(s: Segment): string {
+  const parts = [`${s.distance.toFixed(1)} km`];
+  if (s.rider_count > 0) parts.push(`${s.rider_count} sürücü`);
+  if (s.effort_count > 0) parts.push(`${s.effort_count} deneme`);
+  if (s.variant_count > 0) parts.push(`+${s.variant_count} benzer`);
+  if (s.my_best_seconds) parts.push('PR var');
+  return parts.join(' · ');
+}
+
+// nearbyCoords returns the device position only if permission is already
+// granted, so opening the Keşfet tab never triggers a permission prompt.
+async function nearbyCoords(): Promise<{ lat: number; lon: number } | null> {
+  try {
+    const { status } = await Location.getForegroundPermissionsAsync();
+    if (status !== 'granted') return null;
+    const loc = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
+    return { lat: loc.coords.latitude, lon: loc.coords.longitude };
+  } catch {
+    return null;
+  }
 }
 
 function TabButton({ label, active, onPress }: { label: string; active: boolean; onPress: () => void }) {
@@ -105,5 +161,11 @@ const styles = StyleSheet.create({
   row: { flexDirection: 'row', alignItems: 'center', gap: spacing.md },
   name: { color: colors.text, fontWeight: '800', fontSize: 15 },
   meta: { color: colors.textMuted, fontSize: 12, marginTop: 2 },
-  muted: { color: colors.textMuted },
+  intro: { gap: spacing.xs, marginBottom: spacing.sm },
+  introHead: { flexDirection: 'row', alignItems: 'center', gap: spacing.xs },
+  introTitle: { color: colors.text, fontWeight: '900', fontSize: 15 },
+  introBody: { color: colors.textMuted, fontSize: 13, lineHeight: 19 },
+  introHint: { color: colors.primary, fontSize: 12, fontWeight: '700', marginTop: 2 },
+  empty: { alignItems: 'center', gap: spacing.sm, paddingVertical: spacing.lg },
+  emptyText: { color: colors.textMuted, textAlign: 'center', lineHeight: 20 },
 });

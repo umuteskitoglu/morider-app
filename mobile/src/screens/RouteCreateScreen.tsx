@@ -111,11 +111,14 @@ export default function RouteCreateScreen({ navigation }: Props) {
       Alert.alert('Yetersiz nokta', 'Hesaplamak için en az 2 nokta seç.');
       return;
     }
+    // Guard against being wired straight to an onPress handler, which would pass
+    // a gesture event here instead of a number.
+    const level = typeof curvinessOverride === 'number' ? curvinessOverride : curviness;
     try {
       setPlanning(true);
       const { data } = await api.post('/api/routes/plan', {
         waypoints: points.map((p) => ({ lat: p.latitude, lon: p.longitude })),
-        curviness: curvinessOverride ?? curviness,
+        curviness: level,
       });
       setSnapped(
         (data.points ?? []).map((p: { lat: number; lon: number }) => ({
@@ -273,7 +276,7 @@ export default function RouteCreateScreen({ navigation }: Props) {
           </View>
           <View style={{ width: spacing.sm }} />
           <View style={styles.flex}>
-            <Button title="Hesapla" variant="ghost" icon="map-search-outline" onPress={computeRoute} loading={planning} />
+            <Button title="Hesapla" variant="ghost" icon="map-search-outline" onPress={() => computeRoute()} loading={planning} />
           </View>
         </View>
         <View style={{ height: spacing.sm }} />

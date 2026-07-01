@@ -1,5 +1,17 @@
 import React, { useCallback, useLayoutEffect, useRef, useState } from 'react';
-import { ActivityIndicator, Alert, Modal, Pressable, ScrollView, Share, StyleSheet, Text, View } from 'react-native';
+import {
+  ActivityIndicator,
+  Alert,
+  KeyboardAvoidingView,
+  Modal,
+  Platform,
+  Pressable,
+  ScrollView,
+  Share,
+  StyleSheet,
+  Text,
+  View,
+} from 'react-native';
 import MapView, { Marker, Polyline, Region } from 'react-native-maps';
 import { useFocusEffect } from '@react-navigation/native';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
@@ -23,7 +35,9 @@ import {
   toCoords,
   TrackPoint,
 } from '../lib/rideStats';
-import { Effort, fmtSeconds, thin } from '../lib/segments';
+import axios from 'axios';
+
+import { Effort, fmtSeconds, Segment, thin } from '../lib/segments';
 import { api, errorMessage } from '../api/client';
 import { colors, radius, shadow, spacing } from '../theme';
 
@@ -277,19 +291,26 @@ export default function RideDetailScreen({ route, navigation }: Props) {
     ]);
   }
 
-  async function saveSegment() {
+  function saveSegment() {
     if (!segName.trim()) {
-      Alert.alert('İsim gerekli', 'Segmente bir isim ver (örn. "Sahil düzlüğü").');
+      Alert.alert('İsim gerekli', 'Kapışmaya bir isim ver (örn. "Sahil düzlüğü").');
       return;
     }
     if (trackPts.length < 2) {
-      Alert.alert('Yetersiz veri', 'Bu sürüşte segment oluşturacak kadar iz yok.');
+      Alert.alert('Yetersiz veri', 'Bu sürüşte kapışma oluşturacak kadar iz yok.');
       return;
     }
+    submitSegment(false);
+  }
+
+  // submitSegment posts the new kapışma. force=false lets the server reject an
+  // overlap (409) so we can offer the existing one instead; force=true is the
+  // "yine de oluştur" path after the rider has seen that prompt.
+  async function submitSegment(force: boolean) {
     try {
       setSavingSeg(true);
       const points = thin(trackPts, 60).map((p) => ({ lat: p.lat, lon: p.lon }));
-      await api.post('/api/segments', { name: segName.trim(), points, visibility: 'public' });
+      await api.post('/api/segments', { name: segName.trim(), points, visibility: 'public', force });
       setCreatingSeg(false);
       setSegName('');
       // Re-match so this ride immediately shows an effort on the new segment.
@@ -299,12 +320,45 @@ export default function RideDetailScreen({ route, navigation }: Props) {
       } catch {
         // ignore
       }
-      Alert.alert('Segment oluşturuldu', 'Bu yol artık herkesin sıralandığı bir segment.');
+      Alert.alert('Kapışma oluşturuldu', 'Bu yol artık herkesin sıralandığı bir kapışma.');
     } catch (err) {
+      const existing = overlapConflict(err);
+      if (existing) {
+        promptOverlap(existing);
+        return;
+      }
       Alert.alert('Oluşturulamadı', errorMessage(err));
     } finally {
       setSavingSeg(false);
     }
+  }
+
+  // overlapConflict pulls the pre-existing kapışma out of a 409 overlap response.
+  function overlapConflict(err: unknown): Segment | null {
+    if (axios.isAxiosError(err) && err.response?.status === 409) {
+      return (err.response.data as { existing?: Segment })?.existing ?? null;
+    }
+    return null;
+  }
+
+  // promptOverlap steers the rider toward the existing kapışma rather than
+  // spawning a duplicate, but still lets them force it.
+  function promptOverlap(existing: Segment) {
+    Alert.alert(
+      'Bu yolda zaten kapışma var',
+      `"${existing.name}" bu yola çok benziyor. Buradan geçen her sürüşün zaten ona göre sıralanır — yeni bir kapışma oluşturmana gerek yok.`,
+      [
+        { text: 'Vazgeç', style: 'cancel' },
+        {
+          text: 'Kapışmayı Gör',
+          onPress: () => {
+            setCreatingSeg(false);
+            navigation.navigate('SegmentDetail', { id: existing.id, name: existing.name });
+          },
+        },
+        { text: 'Yine de Oluştur', onPress: () => submitSegment(true) },
+      ],
+    );
   }
 
   const initialRegion: Region = coords[0]
@@ -431,7 +485,7 @@ export default function RideDetailScreen({ route, navigation }: Props) {
 
           {efforts.length > 0 && (
             <View style={styles.segWrap}>
-              <Text style={styles.segHead}>Segmentler</Text>
+              <Text style={styles.segHead}>Kapışmalar</Text>
               {efforts.map((e) => (
                 <Pressable
                   key={e.segment_id}
@@ -455,7 +509,7 @@ export default function RideDetailScreen({ route, navigation }: Props) {
           )}
 
           <View style={{ height: spacing.md }} />
-          <Button title="Bu Sürüşten Segment Oluştur" variant="ghost" icon="flag-checkered" onPress={() => setCreatingSeg(true)} />
+          <Button title="Bu Sürüşten Kapışma Oluştur" variant="ghost" icon="flag-checkered" onPress={() => setCreatingSeg(true)} />
           <View style={{ height: spacing.sm }} />
           <Button title="Paylaş" variant="ghost" icon="share-variant" onPress={share} />
           <View style={{ height: spacing.sm }} />
@@ -466,9 +520,10 @@ export default function RideDetailScreen({ route, navigation }: Props) {
       </ScrollView>
 
       <Modal visible={editing} animationType="slide" transparent statusBarTranslucent onRequestClose={() => setEditing(false)}>
-        <Pressable style={styles.backdrop} onPress={() => setEditing(false)}>
-          <Pressable style={styles.modalSheet} onPress={() => {}}>
-            <Text style={styles.modalTitle}>Sürüşü Düzenle</Text>
+        <KeyboardAvoidingView style={styles.flexFill} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+          <Pressable style={styles.backdrop} onPress={() => setEditing(false)}>
+            <Pressable style={styles.modalSheet} onPress={() => {}}>
+              <Text style={styles.modalTitle}>Sürüşü Düzenle</Text>
             <TextField label="Başlık" value={editTitle} onChangeText={setEditTitle} placeholder="Sabah turu" />
             <TextField label="Not" value={editNotes} onChangeText={setEditNotes} placeholder="Hava güzeldi…" multiline />
             <Text style={styles.fieldLabel}>Motor</Text>
@@ -491,23 +546,26 @@ export default function RideDetailScreen({ route, navigation }: Props) {
             </View>
             <View style={{ height: spacing.md }} />
             <Button title="Kaydet" icon="check" onPress={saveEdit} loading={saving} />
+            </Pressable>
           </Pressable>
-        </Pressable>
+        </KeyboardAvoidingView>
       </Modal>
 
       <Modal visible={creatingSeg} animationType="slide" transparent statusBarTranslucent onRequestClose={() => setCreatingSeg(false)}>
-        <Pressable style={styles.backdrop} onPress={() => setCreatingSeg(false)}>
-          <Pressable style={styles.modalSheet} onPress={() => {}}>
-            <Text style={styles.modalTitle}>Segment Oluştur</Text>
-            <Text style={styles.muted}>
-              Bu sürüşün izinden herkese açık bir segment yaratılır. Buradan geçen herkes otomatik sıralanır.
-            </Text>
-            <View style={{ height: spacing.sm }} />
-            <TextField label="İsim" value={segName} onChangeText={setSegName} placeholder="Sahil düzlüğü" />
-            <View style={{ height: spacing.md }} />
-            <Button title="Oluştur" icon="flag-checkered" onPress={saveSegment} loading={savingSeg} />
+        <KeyboardAvoidingView style={styles.flexFill} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+          <Pressable style={styles.backdrop} onPress={() => setCreatingSeg(false)}>
+            <Pressable style={styles.modalSheet} onPress={() => {}}>
+              <Text style={styles.modalTitle}>Kapışma Oluştur</Text>
+              <Text style={styles.muted}>
+                Bu sürüşün izinden herkese açık bir kapışma yaratılır. Buradan geçen herkes otomatik sıralanır.
+              </Text>
+              <View style={{ height: spacing.sm }} />
+              <TextField label="İsim" value={segName} onChangeText={setSegName} placeholder="Sahil düzlüğü" />
+              <View style={{ height: spacing.md }} />
+              <Button title="Oluştur" icon="flag-checkered" onPress={saveSegment} loading={savingSeg} />
+            </Pressable>
           </Pressable>
-        </Pressable>
+        </KeyboardAvoidingView>
       </Modal>
     </View>
   );
@@ -546,6 +604,7 @@ const styles = StyleSheet.create({
   notes: { color: colors.text, marginTop: spacing.sm, lineHeight: 20 },
   leanRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, marginTop: spacing.md },
   leanText: { color: colors.text, fontWeight: '700' },
+  flexFill: { flex: 1 },
   backdrop: { flex: 1, backgroundColor: 'rgba(0,0,0,0.6)', justifyContent: 'flex-end' },
   modalSheet: {
     backgroundColor: colors.surface,

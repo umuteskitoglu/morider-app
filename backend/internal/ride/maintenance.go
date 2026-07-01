@@ -27,17 +27,18 @@ const (
 
 // MaintenanceItem is the API representation of a schedule with its derived state.
 type MaintenanceItem struct {
-	ID             int64  `json:"id"`
-	Item           string `json:"item"`
-	IntervalKm     int    `json:"interval_km"`
-	IntervalMonths int    `json:"interval_months"`
-	LastDoneKm     int    `json:"last_done_km"`
-	LastDoneAt     string `json:"last_done_at"`
+	ID             int64           `json:"id"`
+	Item           string          `json:"item"`
+	IntervalKm     int             `json:"interval_km"`
+	IntervalMonths int             `json:"interval_months"`
+	LastDoneKm     int             `json:"last_done_km"`
+	LastDoneAt     string          `json:"last_done_at"`
 	// Derived. DueInKm/DueInDays are nil when the matching interval is not set.
 	// Negative means overdue by that much.
-	DueInKm   *int   `json:"due_in_km,omitempty"`
-	DueInDays *int   `json:"due_in_days,omitempty"`
-	Status    string `json:"status"` // ok | soon | overdue
+	DueInKm   *int          `json:"due_in_km,omitempty"`
+	DueInDays *int          `json:"due_in_days,omitempty"`
+	Status    string        `json:"status"`  // ok | soon | overdue
+	Records   []ServiceRecord `json:"records"` // history of completions, newest first
 }
 
 func registerMaintenanceRoutes(g *gin.RouterGroup, h *handler) {
@@ -146,6 +147,7 @@ func (h *handler) listMaintenance(c *gin.Context) {
 
 	now := time.Now()
 	items := make([]MaintenanceItem, 0)
+	idxByID := map[int64]int{} // maintenance_schedule id → index in items slice
 	for rows.Next() {
 		var m MaintenanceItem
 		var doneAt *time.Time
@@ -155,12 +157,46 @@ func (h *handler) listMaintenance(c *gin.Context) {
 		}
 		m.LastDoneAt = fmtDate(doneAt)
 		m.DueInKm, m.DueInDays, m.Status = maintenanceStatus(m.IntervalKm, m.LastDoneKm, odo, m.IntervalMonths, doneAt, now)
+		m.Records = make([]ServiceRecord, 0)
+		idxByID[m.ID] = len(items)
 		items = append(items, m)
 	}
 	if rows.Err() != nil {
 		httpx.Internal(c, "could not read maintenance schedules")
 		return
 	}
+
+	// Embed service record history for each item (newest first, capped at 20).
+	if len(items) > 0 {
+		rrows, err := h.d.DB.Query(c,
+			`SELECT id, COALESCE(title,''), COALESCE(note,''), COALESCE(odometer_km,0),
+			        COALESCE(cost,0), service_date, maintenance_schedule_id
+			 FROM service_records
+			 WHERE motorcycle_id = $1 AND maintenance_schedule_id IS NOT NULL
+			 ORDER BY service_date DESC, id DESC
+			 LIMIT 200`, motoID)
+		if err == nil {
+			defer rrows.Close()
+			counts := map[int64]int{}
+			for rrows.Next() {
+				var r ServiceRecord
+				var when time.Time
+				if err := rrows.Scan(&r.ID, &r.Title, &r.Note, &r.OdometerKm, &r.Cost, &when, &r.MaintenanceScheduleID); err != nil {
+					break
+				}
+				r.ServiceDate = when.Format(dateLayout)
+				if r.MaintenanceScheduleID == nil {
+					continue
+				}
+				mid := *r.MaintenanceScheduleID
+				if idx, ok := idxByID[mid]; ok && counts[mid] < 20 {
+					items[idx].Records = append(items[idx].Records, r)
+					counts[mid]++
+				}
+			}
+		}
+	}
+
 	c.JSON(http.StatusOK, gin.H{"items": items, "odometer_km": odo})
 }
 
@@ -223,30 +259,76 @@ func (h *handler) removeMaintenance(c *gin.Context) {
 	c.Status(http.StatusNoContent)
 }
 
-// markMaintenanceDone advances a schedule's baseline to "serviced now": today's
-// date and the bike's current odometer. This is the one-tap "I just did this".
+type doneReq struct {
+	OdometerKm int     `json:"odometer_km"`
+	Cost       float64 `json:"cost"`
+	Note       string  `json:"note" binding:"max=500"`
+}
+
+// markMaintenanceDone advances the schedule baseline and atomically appends a
+// linked service record so the history is captured in one request.
 func (h *handler) markMaintenanceDone(c *gin.Context) {
 	motoID, mid, ok := h.maintenanceIDs(c)
 	if !ok {
 		return
 	}
-	odo, err := h.currentOdometer(c, motoID)
-	if err != nil {
-		httpx.Internal(c, "could not read odometer")
+	var req doneReq
+	_ = c.ShouldBindJSON(&req) // body is optional — all fields default to zero
+
+	// Use caller-supplied odometer or fall back to the bike's current reading.
+	odo := req.OdometerKm
+	if odo == 0 {
+		var err error
+		odo, err = h.currentOdometer(c, motoID)
+		if err != nil {
+			httpx.Internal(c, "could not read odometer")
+			return
+		}
+	}
+
+	// Fetch item name (also verifies ownership).
+	var item string
+	err := h.d.DB.QueryRow(c,
+		`SELECT ms.item FROM maintenance_schedules ms
+		 JOIN motorcycles m ON m.id = ms.motorcycle_id
+		 WHERE ms.id = $1 AND ms.motorcycle_id = $2 AND m.user_id = $3`,
+		mid, motoID, authpkg.UserID(c),
+	).Scan(&item)
+	if errors.Is(err, pgx.ErrNoRows) {
+		httpx.Error(c, http.StatusNotFound, "maintenance schedule not found")
 		return
 	}
-	tag, err := h.d.DB.Exec(c,
-		`UPDATE maintenance_schedules ms
-		 SET last_done_km = $4, last_done_at = CURRENT_DATE
-		 FROM motorcycles m
-		 WHERE ms.id = $1 AND ms.motorcycle_id = $2 AND m.id = ms.motorcycle_id AND m.user_id = $3`,
-		mid, motoID, authpkg.UserID(c), odo)
 	if err != nil {
+		httpx.Internal(c, "could not load maintenance item")
+		return
+	}
+
+	tx, err := h.d.DB.Begin(c)
+	if err != nil {
+		httpx.Internal(c, "could not begin transaction")
+		return
+	}
+	defer tx.Rollback(c)
+
+	if _, err = tx.Exec(c,
+		`UPDATE maintenance_schedules SET last_done_km = $3, last_done_at = CURRENT_DATE
+		 WHERE id = $1 AND motorcycle_id = $2`,
+		mid, motoID, odo); err != nil {
 		httpx.Internal(c, "could not update maintenance schedule")
 		return
 	}
-	if tag.RowsAffected() == 0 {
-		httpx.Error(c, http.StatusNotFound, "maintenance schedule not found")
+
+	if _, err = tx.Exec(c,
+		`INSERT INTO service_records
+		   (motorcycle_id, title, note, odometer_km, cost, service_date, maintenance_schedule_id)
+		 VALUES ($1, $2, $3, $4, $5, CURRENT_DATE, $6)`,
+		motoID, item, req.Note, odo, nullableFloat(req.Cost), mid); err != nil {
+		httpx.Internal(c, "could not create service record")
+		return
+	}
+
+	if err = tx.Commit(c); err != nil {
+		httpx.Internal(c, "could not commit")
 		return
 	}
 	c.Status(http.StatusNoContent)

@@ -10,8 +10,10 @@ import { PostDetail, DetailPost } from '../components/PostDetail';
 import { AvatarViewer } from '../components/AvatarViewer';
 import FollowButton from '../components/FollowButton';
 import { CreateChallengeModal } from '../components/CreateChallengeModal';
-import { Button } from '../components/ui';
-import { tierMeta } from '../lib/rewards';
+import { Button, Card } from '../components/ui';
+import { ProgressBar } from '../components/ProgressBar';
+import { LevelInfoButton } from '../components/LevelInfoButton';
+import { tierMeta, RiderLevel } from '../lib/rewards';
 import { useAuth } from '../store/auth';
 import { RiderChips } from '../components/RiderChips';
 import { ProfileStackParams } from '../navigation/RootNavigator';
@@ -21,6 +23,8 @@ import { colors, gradients, radius, shadow, spacing } from '../theme';
 type Badge = { id: number; type: string; description: string; tier?: string };
 type PublicMoto = { id: number; name: string; year: number };
 type PublicRoute = { id: number; name: string; distance: number };
+type RecapStat = { week_start: string; distance: number; duration_seconds: number; avg_speed: number; ride_count: number };
+type Recap = { week: RecapStat; prev_week: RecapStat };
 
 // Stack-agnostic props: this screen is registered in both the Feed and Profile
 // stacks. It only needs the route params and setOptions, so we avoid binding it
@@ -42,6 +46,8 @@ export default function UserProfileScreen({ route, navigation }: Props) {
   const [badges, setBadges] = useState<Badge[]>([]);
   const [garage, setGarage] = useState<PublicMoto[]>([]);
   const [routes, setRoutes] = useState<PublicRoute[]>([]);
+  const [recap, setRecap] = useState<Recap | null>(null);
+  const [level, setLevel] = useState<RiderLevel | null>(null);
   const [viewer, setViewer] = useState<DetailPost | null>(null);
   const [refreshing, setRefreshing] = useState(false);
   const [following, setFollowing] = useState(false);
@@ -83,13 +89,15 @@ export default function UserProfileScreen({ route, navigation }: Props) {
         return null;
       }
     };
-    const [u, p, b, g, r, s] = await Promise.all([
+    const [u, p, b, g, r, s, rc, lv] = await Promise.all([
       settle(api.get(`/api/users/${userId}`)),
       settle(api.get(`/api/feed/user/${userId}`)),
       settle(api.get(`/api/rewards/user/${userId}`)),
       settle(api.get(`/api/garage/user/${userId}`)),
       settle(api.get(`/api/routes/user/${userId}`)),
       isSelf ? Promise.resolve(null) : settle(api.get(`/api/follows/status/${userId}`)),
+      settle(api.get(`/api/rides/recap/${userId}`)),
+      settle(api.get(`/api/rewards/summary/${userId}`)),
     ]);
     if (u) {
       setAvatarUrl(u.data.avatar_url ?? '');
@@ -107,6 +115,8 @@ export default function UserProfileScreen({ route, navigation }: Props) {
     setBadges(b?.data.rewards ?? []);
     setGarage(g?.data.motorcycles ?? []);
     setRoutes(r?.data.routes ?? []);
+    setRecap(rc?.data ?? null);
+    setLevel(lv?.data ?? null);
     if (s) {
       setFollowing(s.data.following ?? false);
       setFollowedBy(s.data.followed_by ?? false);
@@ -200,6 +210,49 @@ export default function UserProfileScreen({ route, navigation }: Props) {
           </>
         )}
 
+        <View style={styles.sectionRow}>
+          <MaterialCommunityIcons name="chart-box" size={18} color={colors.primary} />
+          <Text style={styles.sectionTitle}>Haftalık Özet</Text>
+        </View>
+        <Card>
+          {recap && (recap.week.ride_count > 0 || recap.prev_week.ride_count > 0) ? (
+            <RecapBody recap={recap} />
+          ) : (
+            <Text style={styles.muted}>Bu hafta henüz sürüş kaydı yok.</Text>
+          )}
+        </Card>
+
+        {level && (
+          <View>
+            <View style={styles.levelHeader}>
+              <View style={styles.titleGroup}>
+                <MaterialCommunityIcons name="star-four-points" size={18} color={colors.primary} />
+                <Text style={styles.sectionTitle}>Seviye</Text>
+              </View>
+              <LevelInfoButton />
+            </View>
+            <Card style={styles.levelCard}>
+              <View style={styles.levelBadge}>
+                <Text style={styles.levelNum}>{level.level}</Text>
+                <Text style={styles.levelNumLabel}>SVY</Text>
+              </View>
+              <View style={styles.flex}>
+                <View style={styles.levelTopRow}>
+                  <Text style={styles.levelXp}>{level.xp} XP</Text>
+                  <Text style={styles.seasonXp}>Sezon: {level.season_xp} XP</Text>
+                </View>
+                <ProgressBar
+                  fraction={level.level_span > 0 ? level.level_into / level.level_span : 0}
+                  color={colors.accent}
+                />
+                <Text style={styles.levelHint}>
+                  Sonraki seviyeye {Math.max(0, level.level_span - level.level_into)} XP
+                </Text>
+              </View>
+            </Card>
+          </View>
+        )}
+
         {posts.length === 0 ? (
           <Text style={styles.empty}>Bu kullanıcının henüz paylaşımı yok.</Text>
         ) : (
@@ -265,8 +318,46 @@ export default function UserProfileScreen({ route, navigation }: Props) {
   );
 }
 
+// fmtDuration renders a second count as a compact Turkish "Xs Ydk" string.
+function fmtDuration(seconds: number): string {
+  const h = Math.floor(seconds / 3600);
+  const m = Math.round((seconds % 3600) / 60);
+  if (h > 0) return `${h}s ${m}dk`;
+  return `${m}dk`;
+}
+
+// RecapBody shows the rider's four headline metrics for this week plus a glance
+// at last week. Mirrors the weekly recap on the owner's own profile.
+function RecapBody({ recap }: { recap: Recap }) {
+  const w = recap.week;
+  const p = recap.prev_week;
+  const tiles: { icon: any; label: string; value: string }[] = [
+    { icon: 'map-marker-distance', label: 'Mesafe', value: `${w.distance.toFixed(1)} km` },
+    { icon: 'clock-outline', label: 'Süre', value: fmtDuration(w.duration_seconds) },
+    { icon: 'speedometer', label: 'Ort. Hız', value: `${w.avg_speed.toFixed(0)} km/s` },
+    { icon: 'motorbike', label: 'Sürüş', value: String(w.ride_count) },
+  ];
+  return (
+    <>
+      <View style={styles.recapGrid}>
+        {tiles.map((t) => (
+          <View key={t.label} style={styles.recapTile}>
+            <MaterialCommunityIcons name={t.icon} size={20} color={colors.primary} />
+            <Text style={styles.recapValue}>{t.value}</Text>
+            <Text style={styles.recapLabel}>{t.label}</Text>
+          </View>
+        ))}
+      </View>
+      <Text style={styles.recapCompare}>
+        Geçen hafta: {p.distance.toFixed(1)} km • {p.ride_count} sürüş
+      </Text>
+    </>
+  );
+}
+
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: colors.bg },
+  flex: { flex: 1 },
   content: { padding: spacing.md, gap: spacing.md },
   header: {
     alignItems: 'center',
@@ -308,6 +399,8 @@ const styles = StyleSheet.create({
   chipText: { color: colors.text, fontWeight: '700', fontSize: 12 },
   empty: { color: colors.textMuted, textAlign: 'center', marginTop: spacing.xl },
   sectionRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.xs, marginBottom: spacing.sm },
+  levelHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: spacing.sm },
+  titleGroup: { flexDirection: 'row', alignItems: 'center', gap: spacing.xs },
   sectionTitle: { color: colors.text, fontWeight: '800', fontSize: 15, letterSpacing: 0.3 },
   listCard: {
     backgroundColor: colors.surface,
@@ -324,4 +417,28 @@ const styles = StyleSheet.create({
   gridItem: { borderRadius: radius.sm, overflow: 'hidden', backgroundColor: colors.surface },
   gridImg: { width: '100%', height: '100%' },
   multi: { position: 'absolute', top: 4, right: 4 },
+  // Weekly recap card.
+  recapGrid: { flexDirection: 'row', flexWrap: 'wrap' },
+  recapTile: { width: '50%', alignItems: 'center', gap: 2, paddingVertical: spacing.sm },
+  recapValue: { color: colors.text, fontWeight: '900', fontSize: 18 },
+  recapLabel: { color: colors.textMuted, fontSize: 12, fontWeight: '600' },
+  recapCompare: { color: colors.textMuted, fontSize: 12, textAlign: 'center', marginTop: spacing.xs },
+  // Level card.
+  levelCard: { flexDirection: 'row', alignItems: 'center', gap: spacing.md },
+  levelBadge: {
+    width: 56,
+    height: 56,
+    borderRadius: 28,
+    backgroundColor: colors.surfaceAlt,
+    borderWidth: 2,
+    borderColor: colors.accent,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  levelNum: { color: colors.accent, fontSize: 22, fontWeight: '900', lineHeight: 24 },
+  levelNumLabel: { color: colors.textMuted, fontSize: 9, fontWeight: '800', letterSpacing: 1 },
+  levelTopRow: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 6 },
+  levelXp: { color: colors.text, fontWeight: '900', fontSize: 15 },
+  seasonXp: { color: colors.textMuted, fontWeight: '700', fontSize: 12 },
+  levelHint: { color: colors.textMuted, fontSize: 11, marginTop: 4 },
 });

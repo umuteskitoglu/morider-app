@@ -66,6 +66,7 @@ func registerRoutes(d *server.Deps, h *handler) {
 	g.POST("/rewards", h.award)
 	g.PUT("/rewards/showcase", h.showcase)
 	g.GET("/rewards/user/:uid", h.userBadges)
+	g.GET("/rewards/summary/:uid", h.userSummary)
 	g.GET("/leaderboard/top", h.leaderboard)
 	g.GET("/leaderboard/following", h.leaderboardFollowing)
 	g.GET("/leaderboard/season", h.seasonLeaderboard)
@@ -138,7 +139,20 @@ type LevelSummary struct {
 
 // summary returns the caller's XP, level and season XP for the profile header.
 func (h *handler) summary(c *gin.Context) {
-	uid := authpkg.UserID(c)
+	h.summaryFor(c, authpkg.UserID(c))
+}
+
+// userSummary returns another rider's XP standing for their public profile.
+func (h *handler) userSummary(c *gin.Context) {
+	uid, err := strconv.ParseInt(c.Param("uid"), 10, 64)
+	if err != nil {
+		httpx.BadRequest(c, "invalid user id")
+		return
+	}
+	h.summaryFor(c, uid)
+}
+
+func (h *handler) summaryFor(c *gin.Context, uid int64) {
 	var s LevelSummary
 	if err := h.d.DB.QueryRow(c,
 		`SELECT COALESCE(SUM(xp), 0), COUNT(*),

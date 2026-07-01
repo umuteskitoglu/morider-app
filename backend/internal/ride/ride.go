@@ -47,6 +47,7 @@ func registerRoutes(d *server.Deps, h *handler) {
 	g.POST("", h.create)
 	g.GET("", h.list)
 	g.GET("/recap", h.recap)
+	g.GET("/recap/:uid", h.userRecap)
 	g.GET("/:id", h.get)
 	g.GET("/:id/track", h.track)
 	g.PATCH("/:id", h.update)
@@ -181,6 +182,20 @@ type recapStat struct {
 // week so the client can show week-over-week change. Weeks are ISO (Mon-start)
 // in the server timezone, matching date_trunc('week', ...).
 func (h *handler) recap(c *gin.Context) {
+	h.recapFor(c, authpkg.UserID(c))
+}
+
+// userRecap returns another rider's weekly recap for their public profile.
+func (h *handler) userRecap(c *gin.Context) {
+	uid, err := strconv.ParseInt(c.Param("uid"), 10, 64)
+	if err != nil {
+		httpx.BadRequest(c, "invalid user id")
+		return
+	}
+	h.recapFor(c, uid)
+}
+
+func (h *handler) recapFor(c *gin.Context, userID int64) {
 	// is_current is computed in SQL so the bucketing matches date_trunc exactly,
 	// regardless of how the server and DB timezones line up.
 	rows, err := h.d.DB.Query(c,
@@ -191,7 +206,7 @@ func (h *handler) recap(c *gin.Context) {
 		 FROM rides
 		 WHERE user_id = $1 AND start_time IS NOT NULL
 		   AND start_time >= date_trunc('week', now()) - interval '1 week'
-		 GROUP BY is_current`, authpkg.UserID(c))
+		 GROUP BY is_current`, userID)
 	if err != nil {
 		httpx.Internal(c, "could not load recap")
 		return

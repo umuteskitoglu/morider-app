@@ -40,12 +40,13 @@ type Motorcycle struct {
 
 // ServiceRecord is one maintenance log entry.
 type ServiceRecord struct {
-	ID          int64   `json:"id"`
-	Title       string  `json:"title"`
-	Note        string  `json:"note"`
-	OdometerKm  int     `json:"odometer_km"`
-	Cost        float64 `json:"cost"`
-	ServiceDate string  `json:"service_date"`
+	ID                    int64   `json:"id"`
+	Title                 string  `json:"title"`
+	Note                  string  `json:"note"`
+	OdometerKm            int     `json:"odometer_km"`
+	Cost                  float64 `json:"cost"`
+	ServiceDate           string  `json:"service_date"`
+	MaintenanceScheduleID *int64  `json:"maintenance_schedule_id,omitempty"`
 }
 
 func registerGarageRoutes(d *server.Deps, h *handler) {
@@ -374,7 +375,8 @@ func (h *handler) listServiceRecords(c *gin.Context) {
 		return
 	}
 	rows, err := h.d.DB.Query(c,
-		`SELECT id, title, COALESCE(note, ''), COALESCE(odometer_km, 0), COALESCE(cost, 0), service_date
+		`SELECT id, title, COALESCE(note, ''), COALESCE(odometer_km, 0), COALESCE(cost, 0), service_date,
+		        maintenance_schedule_id
 		 FROM service_records WHERE motorcycle_id = $1
 		 ORDER BY service_date DESC, id DESC`, motoID)
 	if err != nil {
@@ -386,7 +388,7 @@ func (h *handler) listServiceRecords(c *gin.Context) {
 	for rows.Next() {
 		var r ServiceRecord
 		var when time.Time
-		if err := rows.Scan(&r.ID, &r.Title, &r.Note, &r.OdometerKm, &r.Cost, &when); err != nil {
+		if err := rows.Scan(&r.ID, &r.Title, &r.Note, &r.OdometerKm, &r.Cost, &when, &r.MaintenanceScheduleID); err != nil {
 			httpx.Internal(c, "could not read service records")
 			return
 		}
