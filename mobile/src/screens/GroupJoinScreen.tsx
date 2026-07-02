@@ -4,6 +4,7 @@ import { useFocusEffect } from '@react-navigation/native';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { CameraView, useCameraPermissions } from 'expo-camera';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { RideStackParams } from '../navigation/RootNavigator';
 import { Button, Card, TextField } from '../components/ui';
@@ -25,6 +26,7 @@ export function codeFromQR(raw: string): string | null {
 }
 
 export default function GroupJoinScreen({ route, navigation }: Props) {
+  const insets = useSafeAreaInsets();
   const [code, setCode] = useState(route.params?.code?.toUpperCase() ?? '');
   const [creating, setCreating] = useState(false);
   const [joining, setJoining] = useState(false);
@@ -113,7 +115,15 @@ export default function GroupJoinScreen({ route, navigation }: Props) {
   }
 
   return (
-    <ScrollView style={styles.container} contentContainerStyle={styles.content}>
+    <View style={styles.container}>
+      <View style={[styles.header, { paddingTop: insets.top + spacing.sm }]}>
+        <Pressable onPress={() => navigation.goBack()} hitSlop={10} style={styles.headerBack}>
+          <MaterialCommunityIcons name="chevron-left" size={26} color={colors.primary} />
+        </Pressable>
+        <Text style={styles.headerTitle}>Grup Sürüşü</Text>
+        <View style={styles.headerBack} />
+      </View>
+      <ScrollView contentContainerStyle={styles.content}>
       <Card style={styles.hero}>
         <MaterialCommunityIcons name="map-marker-radius" size={40} color={colors.primary} />
         <Text style={styles.heroTitle}>Birlikte Sür</Text>
@@ -182,12 +192,22 @@ export default function GroupJoinScreen({ route, navigation }: Props) {
           </Pressable>
         </View>
       </Modal>
-    </ScrollView>
+      </ScrollView>
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: colors.bg },
+  header: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: spacing.sm,
+    paddingBottom: spacing.sm,
+  },
+  headerBack: { width: 36, height: 36, alignItems: 'center', justifyContent: 'center' },
+  headerTitle: { color: colors.text, fontSize: 17, fontWeight: '800' },
   content: { padding: spacing.md, gap: spacing.md },
   hero: { alignItems: 'center', gap: spacing.xs, paddingVertical: spacing.lg },
   heroTitle: { color: colors.text, fontSize: 20, fontWeight: '900' },

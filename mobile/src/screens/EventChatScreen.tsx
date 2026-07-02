@@ -90,7 +90,18 @@ export default function EventChatScreen({ navigation, route }: Props) {
           return (
             <View style={[styles.msgRow, mine && styles.msgRowMine]}>
               <View style={[styles.msgBubble, mine ? styles.msgBubbleMine : styles.msgBubbleOther]}>
-                {!mine ? <Text style={styles.msgAuthor}>{m.name}</Text> : null}
+                {!mine ? (
+                  <Pressable
+                    onPress={() =>
+                      (navigation.getParent() as any)?.navigate('Profile', {
+                        screen: 'UserProfile',
+                        params: { userId: m.user_id, name: m.name },
+                      })
+                    }
+                  >
+                    <Text style={styles.msgAuthor}>{m.name}</Text>
+                  </Pressable>
+                ) : null}
                 <Text style={styles.msgBody}>{m.body}</Text>
                 <Text style={styles.msgTime}>{formatTime(m.created_at)}</Text>
               </View>

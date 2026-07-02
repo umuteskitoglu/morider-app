@@ -175,6 +175,10 @@ func (h *handler) create(c *gin.Context) {
 type planReq struct {
 	Waypoints []Point  `json:"waypoints" binding:"required,min=2"`
 	Curviness *float64 `json:"curviness" binding:"omitempty,min=0,max=1"`
+	// Alternatives asks for the engine's other route options too (top-level
+	// `alternatives` array), so the client can offer a Google-Maps-style
+	// choice. Only produced between exactly two waypoints.
+	Alternatives bool `json:"alternatives"`
 }
 
 // plan returns a road-snapped route for the given waypoints without persisting
@@ -185,7 +189,9 @@ func (h *handler) plan(c *gin.Context) {
 		httpx.BadRequest(c, err.Error())
 		return
 	}
-	result, err := h.router.Plan(c, req.Waypoints, planOpts(req.Curviness))
+	opts := planOpts(req.Curviness)
+	opts.Alternatives = req.Alternatives
+	result, err := h.router.Plan(c, req.Waypoints, opts)
 	if err != nil {
 		httpx.Error(c, http.StatusBadGateway, "routing failed: "+err.Error())
 		return

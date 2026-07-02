@@ -20,6 +20,11 @@ type RoutePlan struct {
 	Curviness float64 `json:"curviness"`
 	Points    []Point `json:"points"`
 	Steps     []Step  `json:"steps"`
+	// Alternatives holds the other routes the engine offered for the same
+	// waypoints (only filled when requested, and only between exactly two
+	// waypoints — OSRM does not produce alternatives through via-points).
+	// Their own Alternatives fields are always empty.
+	Alternatives []RoutePlan `json:"alternatives,omitempty"`
 }
 
 // Step is a single turn-by-turn instruction. Lat/Lon is the maneuver point
@@ -33,6 +38,10 @@ type Step struct {
 	Lon         float64 `json:"lon"`
 	Type        string  `json:"type"`
 	Modifier    string  `json:"modifier"`
+	// Exit is the roundabout exit number (1-based); 0 when not applicable.
+	Exit int `json:"exit,omitempty"`
+	// Ref is the road's signed reference ("D-100", "E-5") when OSM knows it.
+	Ref string `json:"ref,omitempty"`
 }
 
 // PlanOptions tunes route planning.
@@ -46,6 +55,10 @@ type PlanOptions struct {
 	// UseCurviness is true. OSRM only produces alternatives between exactly 2
 	// waypoints; with via-points the single route is returned as-is.
 	Curviness float64
+	// Alternatives, when true, also returns the engine's other route options in
+	// RoutePlan.Alternatives so the client can offer a choice (Google-Maps
+	// style). Only effective between exactly two waypoints.
+	Alternatives bool
 }
 
 // Router turns an ordered list of waypoints into a road-following RoutePlan.
@@ -77,13 +90,18 @@ func (r *OSRMRouter) Plan(ctx context.Context, waypoints []Point, opts PlanOptio
 		return RoutePlan{}, fmt.Errorf("routing needs at least 2 waypoints")
 	}
 	if opts.UseCurviness {
-		return r.planCurvy(ctx, waypoints, opts.Curviness)
+		return r.planCurvy(ctx, waypoints, opts.Curviness, opts.Alternatives)
 	}
-	plans, err := r.fetchRoutes(ctx, waypoints, false)
+	wantAlts := opts.Alternatives && len(waypoints) == 2
+	plans, err := r.fetchRoutes(ctx, waypoints, wantAlts)
 	if err != nil {
 		return RoutePlan{}, err
 	}
-	return plans[0], nil
+	main := plans[0]
+	if wantAlts {
+		main.Alternatives = plans[1:]
+	}
+	return main, nil
 }
 
 // planCurvy honours the curviness preference. OSRM only returns alternatives
@@ -91,13 +109,21 @@ func (r *OSRMRouter) Plan(ctx context.Context, waypoints []Point, opts PlanOptio
 // leg — each consecutive pair is requested with alternatives, the leg matching
 // the requested twistiness is chosen, and the chosen legs are stitched back
 // together. With two waypoints it's a single alternatives request.
-func (r *OSRMRouter) planCurvy(ctx context.Context, waypoints []Point, level float64) (RoutePlan, error) {
+func (r *OSRMRouter) planCurvy(ctx context.Context, waypoints []Point, level float64, alternatives bool) (RoutePlan, error) {
 	if len(waypoints) == 2 {
 		plans, err := r.fetchRoutes(ctx, waypoints, true)
 		if err != nil {
 			return RoutePlan{}, err
 		}
-		return pickByCurviness(plans, level), nil
+		main := pickByCurviness(plans, level)
+		if alternatives {
+			for _, p := range plans {
+				if p.Curviness != main.Curviness || p.Distance != main.Distance {
+					main.Alternatives = append(main.Alternatives, p)
+				}
+			}
+		}
+		return main, nil
 	}
 	var merged RoutePlan
 	for i := 0; i+1 < len(waypoints); i++ {
@@ -170,11 +196,15 @@ type osrmResponse struct {
 		} `json:"geometry"`
 		Legs []struct {
 			Steps []struct {
-				Name     string  `json:"name"`
-				Distance float64 `json:"distance"` // meters
-				Maneuver struct {
+				Name         string  `json:"name"`
+				Ref          string  `json:"ref"`          // road number ("D-100")
+				Destinations string  `json:"destinations"` // motorway signage ("Ankara, Bolu")
+				RotaryName   string  `json:"rotary_name"`
+				Distance     float64 `json:"distance"` // meters
+				Maneuver     struct {
 					Type     string    `json:"type"`
 					Modifier string    `json:"modifier"`
+					Exit     int       `json:"exit"`     // roundabout exit number
 					Location []float64 `json:"location"` // [lon, lat]
 				} `json:"maneuver"`
 			} `json:"steps"`
@@ -219,12 +249,26 @@ func parseOSRMRoutes(body []byte) ([]RoutePlan, error) {
 		}
 		for _, leg := range route.Legs {
 			for _, s := range leg.Steps {
+				// Display label: road name, else its number, else the signage
+				// destinations (motorway entries often have no name at all).
+				label := s.Name
+				if label == "" && s.RotaryName != "" {
+					label = s.RotaryName
+				}
+				if label == "" {
+					label = s.Ref
+				}
+				if label == "" && s.Destinations != "" {
+					label = s.Destinations + " yönü"
+				}
 				step := Step{
-					Instruction: maneuverText(s.Maneuver.Type, s.Maneuver.Modifier, s.Name),
-					Name:        s.Name,
+					Instruction: maneuverText(s.Maneuver.Type, s.Maneuver.Modifier, label, s.Maneuver.Exit),
+					Name:        label,
 					Distance:    s.Distance,
 					Type:        s.Maneuver.Type,
 					Modifier:    s.Maneuver.Modifier,
+					Exit:        s.Maneuver.Exit,
+					Ref:         s.Ref,
 				}
 				if len(s.Maneuver.Location) >= 2 {
 					step.Lon, step.Lat = s.Maneuver.Location[0], s.Maneuver.Location[1]
@@ -232,15 +276,53 @@ func parseOSRMRoutes(body []byte) ([]RoutePlan, error) {
 				plan.Steps = append(plan.Steps, step)
 			}
 		}
+		plan.Steps = dropNoiseSteps(plan.Steps)
 		plan.Curviness = curvinessScore(plan.Points)
 		plans = append(plans, plan)
 	}
 	return plans, nil
 }
 
-// maneuverText renders an OSRM maneuver (type + modifier) as a short Turkish
-// instruction. Unknown types fall back to the modifier direction.
-func maneuverText(typ, modifier, name string) string {
+// dropNoiseSteps removes instructions Google-style navigation would not
+// announce: the road changing name while going straight, and plain
+// "continue straight" through a junction. They add banner/voice churn without
+// telling the rider to do anything. The dropped step's length is folded into
+// the previous kept step so distances still sum to the route total. The first
+// (depart) and last (arrive) steps are always kept.
+func dropNoiseSteps(steps []Step) []Step {
+	if len(steps) <= 2 {
+		return steps
+	}
+	kept := make([]Step, 0, len(steps))
+	kept = append(kept, steps[0])
+	for i := 1; i < len(steps)-1; i++ {
+		s := steps[i]
+		noTurn := s.Modifier == "" || s.Modifier == "straight"
+		if (s.Type == "new name" || s.Type == "continue") && noTurn {
+			kept[len(kept)-1].Distance += s.Distance
+			continue
+		}
+		kept = append(kept, s)
+	}
+	return append(kept, steps[len(steps)-1])
+}
+
+// side classifies an OSRM modifier as left (-1), right (+1) or neither (0).
+func side(modifier string) int {
+	switch modifier {
+	case "left", "slight left", "sharp left":
+		return -1
+	case "right", "slight right", "sharp right":
+		return 1
+	}
+	return 0
+}
+
+// maneuverText renders an OSRM maneuver as a short Turkish instruction,
+// Google-Maps style: roundabouts carry their exit number, forks/ramps/road
+// ends get purpose-built phrasing instead of a generic "turn". Unknown types
+// fall back to the modifier direction.
+func maneuverText(typ, modifier, name string, exit int) string {
 	on := ""
 	if name != "" {
 		on = " - " + name
@@ -249,13 +331,59 @@ func maneuverText(typ, modifier, name string) string {
 	case "depart":
 		return "Yola çık" + on
 	case "arrive":
+		switch side(modifier) {
+		case -1:
+			return "Varış noktası solda" + on
+		case 1:
+			return "Varış noktası sağda" + on
+		}
 		return "Varış noktası" + on
 	case "roundabout", "rotary":
+		if exit > 0 {
+			return fmt.Sprintf("Dönel kavşaktan %d. çıkışa çık", exit) + on
+		}
 		return "Dönel kavşağa gir" + on
+	case "exit roundabout", "exit rotary":
+		return "Dönel kavşaktan çık" + on
+	case "fork":
+		switch side(modifier) {
+		case -1:
+			return "Çatalda solda kal" + on
+		case 1:
+			return "Çatalda sağda kal" + on
+		}
+		return "Çatalda düz devam et" + on
+	case "end of road":
+		if side(modifier) == -1 {
+			return "Yolun sonunda sola dön" + on
+		}
+		return "Yolun sonunda sağa dön" + on
+	case "on ramp":
+		switch side(modifier) {
+		case -1:
+			return "Soldan bağlantı yoluna gir" + on
+		case 1:
+			return "Sağdan bağlantı yoluna gir" + on
+		}
+		return "Bağlantı yoluna gir" + on
+	case "off ramp":
+		switch side(modifier) {
+		case -1:
+			return "Soldaki çıkışı kullan" + on
+		case 1:
+			return "Sağdaki çıkışı kullan" + on
+		}
+		return "Çıkışı kullan" + on
 	case "merge":
+		switch side(modifier) {
+		case -1:
+			return "Sola katıl" + on
+		case 1:
+			return "Sağa katıl" + on
+		}
 		return "Katıl" + on
 	}
-	// turn / continue / new name / fork etc. → use the direction modifier.
+	// turn / continue / new name etc. → use the direction modifier.
 	switch modifier {
 	case "left":
 		return "Sola dön" + on

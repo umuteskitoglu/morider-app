@@ -110,10 +110,12 @@ export default function RouteDetailScreen({ route, navigation }: Props) {
     }, [load]),
   );
 
-  function rideThisRoute() {
+  // reverse=true rides B→A; omitted lets the map screen pick the sensible
+  // direction from where the rider currently stands (and offers a flip chip).
+  function rideThisRoute(reverse?: boolean) {
     navigation
       .getParent<BottomTabNavigationProp<AppTabParams>>()
-      ?.navigate('Ride', { screen: 'RideMain', params: { followRouteId: id } });
+      ?.navigate('Ride', { screen: 'RideMain', params: { followRouteId: id, followReverse: reverse } });
   }
 
   async function startGroupRide() {
@@ -203,6 +205,22 @@ export default function RouteDetailScreen({ route, navigation }: Props) {
     <View style={styles.container}>
       <MapView ref={mapRef} style={StyleSheet.absoluteFill} initialRegion={initialRegion}>
         {coords.length > 1 && <Polyline coordinates={coords} strokeColor={colors.primary} strokeWidth={5} />}
+        {/* A = saved start, B = saved end, so the route's direction is obvious
+            before choosing which way to ride it. */}
+        {coords.length > 1 && (
+          <>
+            <Marker coordinate={coords[0]} anchor={{ x: 0.5, y: 0.5 }} tracksViewChanges={false}>
+              <View style={[styles.abPin, styles.aPin]}>
+                <Text style={styles.abPinText}>A</Text>
+              </View>
+            </Marker>
+            <Marker coordinate={coords[coords.length - 1]} anchor={{ x: 0.5, y: 0.5 }} tracksViewChanges={false}>
+              <View style={[styles.abPin, styles.bPin]}>
+                <Text style={styles.abPinText}>B</Text>
+              </View>
+            </Marker>
+          </>
+        )}
         {pois.map((p) => (
           <Marker
             key={`poi-${p.id}`}
@@ -255,7 +273,9 @@ export default function RouteDetailScreen({ route, navigation }: Props) {
         )}
 
         <View style={{ height: spacing.md }} />
-        <Button title="Bu Rotada Sür" icon="motorbike" onPress={rideThisRoute} />
+        <Button title="Bu Rotada Sür" icon="motorbike" onPress={() => rideThisRoute()} />
+        <View style={{ height: spacing.sm }} />
+        <Button title="Ters Yönde Sür (B → A)" variant="ghost" icon="swap-horizontal" onPress={() => rideThisRoute(true)} />
         <View style={{ height: spacing.sm }} />
         <Button title="Grup Sürüşü Başlat" variant="ghost" icon="account-group" onPress={startGroupRide} loading={startingGroup} />
         <View style={{ height: spacing.sm }} />
@@ -302,4 +322,17 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     ...shadow.card,
   },
+  abPin: {
+    width: 26,
+    height: 26,
+    borderRadius: 13,
+    borderWidth: 2,
+    borderColor: '#fff',
+    alignItems: 'center',
+    justifyContent: 'center',
+    ...shadow.card,
+  },
+  aPin: { backgroundColor: '#2E9E5B' },
+  bPin: { backgroundColor: '#D93F33' },
+  abPinText: { color: '#fff', fontWeight: '900', fontSize: 13 },
 });

@@ -10,7 +10,6 @@ import {
   View,
 } from 'react-native';
 import MapView, { MapPressEvent, Marker, Polyline } from 'react-native-maps';
-import Slider from '@react-native-community/slider';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import * as Location from 'expo-location';
@@ -24,6 +23,8 @@ import { colors, radius, spacing } from '../theme';
 
 type Coord = { latitude: number; longitude: number };
 type PlanInfo = { distance: number; duration: number; steps: number; curviness: number };
+// An alternative route offered by the engine for the same two endpoints.
+type AltPlan = PlanInfo & { coords: Coord[] };
 type Props = NativeStackScreenProps<ProfileStackParams, 'RouteCreate'>;
 
 // Old Android needs an explicit opt-in for LayoutAnimation.
@@ -39,18 +40,25 @@ function curvinessText(score: number): string {
   return 'çok virajlı';
 }
 
-// Human label for the requested curviness preference (the slider's 0..1 value).
-function prefLabel(v: number): string {
-  if (v < 0.33) return 'Düz yollar';
-  if (v < 0.66) return 'Dengeli';
-  return 'Virajlı yollar';
-}
+// Curviness preference as three tap targets. The old slider was fiddly over
+// the map (gesture conflicts, thumb snapping back on Android) — riders
+// literally couldn't pick a value. The backend takes any 0..1, and it selects
+// among at most a handful of engine alternatives anyway, so three levels
+// express the full real range.
+const CURVY_OPTIONS = [
+  { v: 0, icon: 'arrow-expand-horizontal', label: 'Düz' },
+  { v: 0.5, icon: 'vector-curve', label: 'Dengeli' },
+  { v: 1, icon: 'sine-wave', label: 'Virajlı' },
+] as const;
 
 export default function RouteCreateScreen({ navigation }: Props) {
   const [name, setName] = useState('');
   const [points, setPoints] = useState<Coord[]>([]);
   const [snapped, setSnapped] = useState<Coord[]>([]);
   const [plan, setPlan] = useState<PlanInfo | null>(null);
+  // Alternative routes for the same endpoints (only offered between exactly
+  // two waypoints); drawn in gray, tap to swap with the main route.
+  const [alts, setAlts] = useState<AltPlan[]>([]);
   const [planning, setPlanning] = useState(false);
   const [saving, setSaving] = useState(false);
   const [visibility, setVisibility] = useState<'private' | 'friends' | 'public'>('private');
@@ -89,6 +97,7 @@ export default function RouteCreateScreen({ navigation }: Props) {
     setPoints(next);
     setSnapped([]);
     setPlan(null);
+    setAlts([]);
   }
 
   function onMapPress(e: MapPressEvent) {
@@ -106,11 +115,29 @@ export default function RouteCreateScreen({ navigation }: Props) {
     setWaypoints(points.slice(0, -1));
   }
 
+  // Reverse start/finish: A↔B swap; the auto-preview recomputes the new
+  // direction (one-way roads can make it a genuinely different route).
+  function reverseWaypoints() {
+    if (points.length < 2) return;
+    setWaypoints([...points].reverse());
+  }
+
+  function moveWaypoint(i: number, coord: Coord) {
+    const next = points.slice();
+    next[i] = coord;
+    setWaypoints(next);
+  }
+
+  function removeWaypoint(i: number) {
+    const label = i === 0 ? 'A (başlangıç)' : i === points.length - 1 ? 'B (bitiş)' : `${i + 1}. nokta`;
+    Alert.alert(label, 'Bu nokta silinsin mi?', [
+      { text: 'Vazgeç', style: 'cancel' },
+      { text: 'Sil', style: 'destructive', onPress: () => setWaypoints(points.filter((_, j) => j !== i)) },
+    ]);
+  }
+
   async function computeRoute(curvinessOverride?: number) {
-    if (points.length < 2) {
-      Alert.alert('Yetersiz nokta', 'Hesaplamak için en az 2 nokta seç.');
-      return;
-    }
+    if (points.length < 2) return;
     // Guard against being wired straight to an onPress handler, which would pass
     // a gesture event here instead of a number.
     const level = typeof curvinessOverride === 'number' ? curvinessOverride : curviness;
@@ -119,24 +146,42 @@ export default function RouteCreateScreen({ navigation }: Props) {
       const { data } = await api.post('/api/routes/plan', {
         waypoints: points.map((p) => ({ lat: p.latitude, lon: p.longitude })),
         curviness: level,
+        alternatives: true,
       });
-      setSnapped(
-        (data.points ?? []).map((p: { lat: number; lon: number }) => ({
-          latitude: p.lat,
-          longitude: p.lon,
-        })),
-      );
+      const toCoords = (pts: { lat: number; lon: number }[] | undefined): Coord[] =>
+        (pts ?? []).map((p) => ({ latitude: p.lat, longitude: p.lon }));
+      setSnapped(toCoords(data.points));
       setPlan({
         distance: data.distance,
         duration: data.duration,
         steps: (data.steps ?? []).length,
         curviness: data.curviness ?? 0,
       });
+      setAlts(
+        (data.alternatives ?? []).map((a: any): AltPlan => ({
+          coords: toCoords(a.points),
+          distance: a.distance ?? 0,
+          duration: a.duration ?? 0,
+          steps: (a.steps ?? []).length,
+          curviness: a.curviness ?? 0,
+        })),
+      );
     } catch (err) {
       Alert.alert('Hesaplanamadı', errorMessage(err));
     } finally {
       setPlanning(false);
     }
+  }
+
+  // Tapping a gray alternative makes it the main route; the previous main
+  // takes its place among the alternatives so the choice stays reversible.
+  function selectAlt(i: number) {
+    const chosen = alts[i];
+    if (!chosen || !plan) return;
+    const current: AltPlan = { coords: snapped, ...plan };
+    setSnapped(chosen.coords);
+    setPlan({ distance: chosen.distance, duration: chosen.duration, steps: chosen.steps, curviness: chosen.curviness });
+    setAlts(alts.map((a, j) => (j === i ? current : a)));
   }
 
   async function save() {
@@ -151,11 +196,16 @@ export default function RouteCreateScreen({ navigation }: Props) {
     }
     try {
       setSaving(true);
+      // What you see is what you save: a computed preview (possibly a chosen
+      // alternative) is stored as-is. Only without a preview do we fall back
+      // to server-side snapping of the raw waypoints.
+      const havePreview = snapped.length > 1;
+      const geometry = havePreview ? snapped : points;
       const { data } = await api.post('/api/routes', {
         name: name.trim(),
         description: '',
-        points: points.map((p) => ({ lat: p.latitude, lon: p.longitude })),
-        snap: true,
+        points: geometry.map((p) => ({ lat: p.latitude, lon: p.longitude })),
+        snap: !havePreview,
         visibility,
         curviness,
       });
@@ -170,13 +220,21 @@ export default function RouteCreateScreen({ navigation }: Props) {
     }
   }
 
-  // Committing a new curviness (slide released) re-previews immediately when a
-  // route is already computed, so the slider visibly changes the result instead
-  // of going stale until the next manual "Hesapla".
-  function onCurvinessCommit(next: number) {
+  // Picking a curviness level re-previews immediately so the choice visibly
+  // changes the drawn route.
+  function pickCurviness(next: number) {
     setCurviness(next);
-    if (plan && points.length >= 2) void computeRoute(next);
+    if (points.length >= 2) void computeRoute(next);
   }
+
+  // Auto-preview: any waypoint change (add, drag, delete, reverse) recomputes
+  // the road-snapped route after a short pause — no manual "Hesapla" step.
+  useEffect(() => {
+    if (points.length < 2) return;
+    const t = setTimeout(() => void computeRoute(), 700);
+    return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [points]);
 
   const line = snapped.length > 1 ? snapped : points;
 
@@ -190,10 +248,39 @@ export default function RouteCreateScreen({ navigation }: Props) {
         showsUserLocation
         showsMyLocationButton
       >
-        {points.map((p, i) => (
-          <Marker key={i} coordinate={p} title={`${i + 1}`} />
-        ))}
-        {line.length > 1 && <Polyline coordinates={line} strokeColor={colors.primary} strokeWidth={4} />}
+        {points.map((p, i) => {
+          const isStart = i === 0;
+          const isEnd = i === points.length - 1 && points.length > 1;
+          return (
+            <Marker
+              key={`wp-${i}`}
+              coordinate={p}
+              anchor={{ x: 0.5, y: 0.5 }}
+              draggable
+              onDragEnd={(e) => moveWaypoint(i, e.nativeEvent.coordinate)}
+              onPress={() => removeWaypoint(i)}
+            >
+              <View style={[styles.wpPin, isStart && styles.wpStart, isEnd && styles.wpEnd]}>
+                <Text style={styles.wpText}>{isStart ? 'A' : isEnd ? 'B' : `${i + 1}`}</Text>
+              </View>
+            </Marker>
+          );
+        })}
+        {/* Gray alternatives underneath; tapping one promotes it to main. */}
+        {alts.map((a, i) =>
+          a.coords.length > 1 ? (
+            <Polyline
+              key={`alt-${i}`}
+              coordinates={a.coords}
+              strokeColor="rgba(160,160,170,0.85)"
+              strokeWidth={5}
+              tappable
+              onPress={() => selectAlt(i)}
+              zIndex={1}
+            />
+          ) : null,
+        )}
+        {line.length > 1 && <Polyline coordinates={line} strokeColor={colors.primary} strokeWidth={4} zIndex={2} />}
       </MapView>
 
       <PlaceSearch onPick={onPickPlace} near={near} placeholder="Yer ara ve nokta ekle…" style={styles.search} />
@@ -201,18 +288,28 @@ export default function RouteCreateScreen({ navigation }: Props) {
       <Card style={styles.panel}>
         <Pressable style={styles.header} onPress={() => toggleExpanded()} hitSlop={8}>
           <View style={styles.headerText}>
-            {plan ? (
+            {planning ? (
+              <Text style={styles.hint} numberOfLines={1}>
+                Rota hesaplanıyor…
+              </Text>
+            ) : plan ? (
               <Text style={styles.stats} numberOfLines={1}>
                 ≈ {plan.distance.toFixed(2)} km • {plan.duration.toFixed(0)} dk • {plan.steps} dönüş •{' '}
                 {curvinessText(plan.curviness)}
               </Text>
+            ) : points.length < 2 ? (
+              <Text style={styles.hint} numberOfLines={1}>
+                Haritaya dokunarak A ve B noktalarını ekle.
+              </Text>
             ) : (
               <Text style={styles.hint} numberOfLines={1}>
-                Haritaya dokunarak yol noktaları ekle.
+                Noktaları sürükleyerek taşı, dokunarak sil.
               </Text>
             )}
             <Text style={styles.subHint} numberOfLines={1}>
-              {name.trim() ? name.trim() : 'Rota adı yok'} • {expanded ? 'Ayarları gizle' : 'Ayarlar'}
+              {alts.length > 0
+                ? `${alts.length} alternatif var — gri çizgiye dokunarak seç`
+                : `${name.trim() ? name.trim() : 'Rota adı yok'} • ${expanded ? 'Ayarları gizle' : 'Ayarlar'}`}
             </Text>
           </View>
           <MaterialCommunityIcons
@@ -227,26 +324,24 @@ export default function RouteCreateScreen({ navigation }: Props) {
             <TextField label="Rota adı" value={name} onChangeText={setName} placeholder="Sahil turu" />
             <View style={styles.curvyHeader}>
               <Text style={styles.curvyTitle}>Virajlılık tercihi</Text>
-              <Text style={styles.curvyValue}>{prefLabel(curviness)}</Text>
             </View>
-            <View style={styles.curvyRow}>
-              <MaterialCommunityIcons name="arrow-expand-horizontal" size={16} color={colors.textMuted} />
-              <Slider
-                style={styles.slider}
-                minimumValue={0}
-                maximumValue={1}
-                step={0.05}
-                value={curviness}
-                onValueChange={setCurviness}
-                onSlidingComplete={onCurvinessCommit}
-                minimumTrackTintColor={colors.primary}
-                maximumTrackTintColor={colors.border}
-                thumbTintColor={colors.primary}
-              />
-              <MaterialCommunityIcons name="sine-wave" size={16} color={colors.primary} />
+            <View style={styles.segment}>
+              {CURVY_OPTIONS.map((opt) => {
+                const active = curviness === opt.v;
+                return (
+                  <Pressable
+                    key={opt.label}
+                    style={[styles.segmentBtn, active && styles.segmentActive]}
+                    onPress={() => pickCurviness(opt.v)}
+                  >
+                    <MaterialCommunityIcons name={opt.icon} size={15} color={active ? colors.primary : colors.textMuted} />
+                    <Text style={[styles.segmentText, active && styles.segmentTextActive]}>{opt.label}</Text>
+                  </Pressable>
+                );
+              })}
             </View>
             <Text style={styles.curvyHint}>
-              Düz yollar ↔ virajlı yollar arasında tercih. Çok duraklı rotalarda her bölüm ayrı seçilir.
+              Seçim rotayı hemen yeniden hesaplar. Çok duraklı rotalarda her bölüm ayrı seçilir.
             </Text>
             <View style={styles.segment}>
               {([
@@ -276,7 +371,7 @@ export default function RouteCreateScreen({ navigation }: Props) {
           </View>
           <View style={{ width: spacing.sm }} />
           <View style={styles.flex}>
-            <Button title="Hesapla" variant="ghost" icon="map-search-outline" onPress={() => computeRoute()} loading={planning} />
+            <Button title="Ters Çevir" variant="ghost" icon="swap-horizontal" onPress={reverseWaypoints} />
           </View>
         </View>
         <View style={{ height: spacing.sm }} />
@@ -302,10 +397,7 @@ const styles = StyleSheet.create({
     marginTop: spacing.sm,
   },
   curvyTitle: { color: colors.text, fontWeight: '600', fontSize: 13 },
-  curvyValue: { color: colors.primary, fontWeight: '700', fontSize: 13 },
-  curvyRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.xs, marginTop: spacing.xs },
-  slider: { flex: 1, height: 32 },
-  curvyHint: { color: colors.textMuted, fontSize: 11, marginBottom: spacing.sm },
+  curvyHint: { color: colors.textMuted, fontSize: 11, marginTop: -spacing.sm, marginBottom: spacing.sm },
   stats: { color: colors.primary, fontWeight: '700' },
   row: { flexDirection: 'row' },
   flex: { flex: 1 },
@@ -328,4 +420,18 @@ const styles = StyleSheet.create({
   segmentActive: { backgroundColor: colors.surfaceAlt },
   segmentText: { color: colors.textMuted, fontWeight: '700', fontSize: 13 },
   segmentTextActive: { color: colors.text },
+  wpPin: {
+    minWidth: 26,
+    height: 26,
+    borderRadius: 13,
+    paddingHorizontal: 4,
+    backgroundColor: colors.surface,
+    borderWidth: 2,
+    borderColor: colors.primary,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  wpStart: { backgroundColor: '#2E9E5B', borderColor: '#fff' },
+  wpEnd: { backgroundColor: '#D93F33', borderColor: '#fff' },
+  wpText: { color: colors.text, fontWeight: '900', fontSize: 12 },
 });

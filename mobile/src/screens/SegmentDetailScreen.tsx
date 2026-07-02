@@ -6,7 +6,7 @@ import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 
 import { ProfileStackParams } from '../navigation/RootNavigator';
-import { Button, Card } from '../components/ui';
+import { Button, Card, TouchCard } from '../components/ui';
 import { darkMapStyle } from '../lib/mapStyle';
 import { fmtSeconds, LeaderboardEntry, Segment } from '../lib/segments';
 import { useAuth } from '../store/auth';
@@ -134,14 +134,18 @@ export default function SegmentDetailScreen({ route, navigation }: Props) {
           </Card>
         ) : (
           board.map((e, i) => (
-            <Card key={e.user_id} style={[styles.boardRow, e.user_id === user?.id && styles.boardMine]}>
+            <TouchCard
+              key={e.user_id}
+              onPress={() => navigation.navigate('UserProfile', { userId: e.user_id, name: e.name })}
+              style={[styles.boardRow, e.user_id === user?.id && styles.boardMine]}
+            >
               <Text style={[styles.rank, i === 0 && { color: colors.accent }]}>{i + 1}</Text>
               <View style={styles.flex}>
                 <Text style={styles.boardName}>{e.name}</Text>
                 <Text style={styles.boardMeta}>{Math.round(e.avg_speed)} km/s ort.</Text>
               </View>
               <Text style={styles.time}>{fmtSeconds(e.elapsed_seconds)}</Text>
-            </Card>
+            </TouchCard>
           ))
         )}
 

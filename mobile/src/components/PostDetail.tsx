@@ -17,6 +17,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
+import { useNavigation } from '@react-navigation/native';
 
 import { api, apiBaseURL, errorMessage } from '../api/client';
 import { useAuth } from '../store/auth';
@@ -52,6 +53,7 @@ export function PostDetail({
 }) {
   const { width, height } = useWindowDimensions();
   const insets = useSafeAreaInsets();
+  const navigation = useNavigation<any>();
   const { user } = useAuth();
   const [idx, setIdx] = useState(0);
   const [liked, setLiked] = useState(false);
@@ -242,7 +244,12 @@ export function PostDetail({
             </View>
 
             <LinearGradient colors={['transparent', 'rgba(0,0,0,0.92)']} style={styles.overlay}>
-              <Text style={styles.author}>{post.author}</Text>
+              <Pressable
+                onPress={() => navigation.navigate('UserProfile', { userId: post.user_id, name: post.author })}
+                hitSlop={8}
+              >
+                <Text style={styles.author}>{post.author}</Text>
+              </Pressable>
               {post.caption ? <Text style={styles.caption}>{post.caption}</Text> : null}
               {post.location_name ? (
                 <View style={styles.locationRow}>

@@ -8,6 +8,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 
 import { useAuth } from '../store/auth';
+import { useChatUnread } from '../store/chatUnread';
 import { registerForPush } from '../lib/push';
 import OnboardingTour from '../components/OnboardingTour';
 import { colors, gradients, radius, shadow, spacing } from '../theme';
@@ -53,7 +54,9 @@ export type AuthStackParams = {
 
 // Group riding lives under the Ride tab — it is a way to ride, not a route list.
 export type RideStackParams = {
-  RideMain: { followRouteId?: number } | undefined;
+  // followReverse: ride the saved route end→start (B→A). Omitted = smart
+  // default (MapScreen flips automatically when the rider stands near the end).
+  RideMain: { followRouteId?: number; followReverse?: boolean } | undefined;
   // `code` arrives via deep link (morider://join/<code>) and auto-joins.
   GroupJoin: { code?: string } | undefined;
   GroupRide: { code: string };
@@ -147,22 +150,19 @@ function HeaderIconButton({ icon, onPress }: { icon: IconName; onPress: () => vo
 function RideNavigator() {
   return (
     <RideStack.Navigator
+      // headerShown stays off for every screen in this stack: mixing native
+      // headers on/off within one native-stack (as this used to do) leaves a
+      // ghost header view behind on Android when popping back to RideMain,
+      // which then bleeds through every tab until the app restarts. GroupJoin
+      // and GroupRide carry their own in-screen title/back and exit controls.
       screenOptions={{
-        headerStyle: { backgroundColor: colors.surface },
-        headerTitleStyle: { color: colors.text, fontWeight: '800' },
-        headerTintColor: colors.primary,
+        headerShown: false,
         contentStyle: { backgroundColor: colors.bg },
       }}
     >
-      <RideStack.Screen
-        name="RideMain"
-        component={MapScreen}
-        // Full-screen immersive map (Google-Maps style); the in-map search bar
-        // and bottom panel carry the chrome, and Grup is reachable from there.
-        options={{ headerShown: false }}
-      />
-      <RideStack.Screen name="GroupJoin" component={GroupJoinScreen} options={{ title: 'Grup Sürüşü' }} />
-      <RideStack.Screen name="GroupRide" component={GroupRideScreen} options={{ title: 'Grup Sürüşü' }} />
+      <RideStack.Screen name="RideMain" component={MapScreen} />
+      <RideStack.Screen name="GroupJoin" component={GroupJoinScreen} />
+      <RideStack.Screen name="GroupRide" component={GroupRideScreen} />
     </RideStack.Navigator>
   );
 }
@@ -238,14 +238,7 @@ function ChatNavigator() {
         contentStyle: { backgroundColor: colors.bg },
       }}
     >
-      <ChatStack.Screen
-        name="Conversations"
-        component={ConversationsScreen}
-        options={({ navigation }) => ({
-          title: 'Mesajlar',
-          headerRight: () => <HeaderIconButton icon="earth" onPress={() => navigation.navigate('GlobalChat')} />,
-        })}
-      />
+      <ChatStack.Screen name="Conversations" component={ConversationsScreen} options={{ title: 'Mesajlar' }} />
       <ChatStack.Screen name="GlobalChat" component={GlobalChatScreen} options={{ title: 'Topluluk Sohbeti' }} />
       <ChatStack.Screen name="ChatThread" component={ChatThreadScreen} options={{ title: 'Sohbet' }} />
     </ChatStack.Navigator>
@@ -324,7 +317,19 @@ const TAB_META: Record<keyof AppTabParams, { icon: IconName; label: string }> = 
 
 // A single tab cell. The active cell lifts its icon and fades in an ember glow
 // + label, giving the bar a lively, premium feel without extra dependencies.
-function TabCell({ focused, icon, label, onPress }: { focused: boolean; icon: IconName; label: string; onPress: () => void }) {
+function TabCell({
+  focused,
+  icon,
+  label,
+  badge,
+  onPress,
+}: {
+  focused: boolean;
+  icon: IconName;
+  label: string;
+  badge?: number;
+  onPress: () => void;
+}) {
   const anim = useRef(new Animated.Value(focused ? 1 : 0)).current;
   useEffect(() => {
     Animated.spring(anim, { toValue: focused ? 1 : 0, useNativeDriver: true, speed: 18, bounciness: 8 }).start();
@@ -338,6 +343,11 @@ function TabCell({ focused, icon, label, onPress }: { focused: boolean; icon: Ic
       <Animated.View style={[styles.tabIconWrap, focused && styles.tabIconWrapOn, { transform: [{ translateY: lift }, { scale }] }]}>
         {focused && <Animated.View style={[styles.tabGlow, { opacity: anim }]} />}
         <MaterialCommunityIcons name={icon} size={24} color={focused ? colors.primary : colors.textMuted} />
+        {!!badge && (
+          <View style={styles.tabBadge}>
+            <Text style={styles.tabBadgeText}>{badge > 9 ? '9+' : badge}</Text>
+          </View>
+        )}
       </Animated.View>
       <Text style={[styles.tabLabel, focused && styles.tabLabelOn]}>{label}</Text>
     </Pressable>
@@ -346,6 +356,7 @@ function TabCell({ focused, icon, label, onPress }: { focused: boolean; icon: Ic
 
 function CustomTabBar({ state, navigation }: BottomTabBarProps) {
   const insets = useSafeAreaInsets();
+  const { unreadCount } = useChatUnread();
 
   // Hide on immersive screens that opt out (e.g. the live group-ride map).
   const focused = state.routes[state.index];
@@ -362,7 +373,16 @@ function CustomTabBar({ state, navigation }: BottomTabBarProps) {
             const event = navigation.emit({ type: 'tabPress', target: route.key, canPreventDefault: true });
             if (!isFocused && !event.defaultPrevented) navigation.navigate(route.name);
           };
-          return <TabCell key={route.key} focused={isFocused} icon={meta.icon} label={meta.label} onPress={onPress} />;
+          return (
+            <TabCell
+              key={route.key}
+              focused={isFocused}
+              icon={meta.icon}
+              label={meta.label}
+              badge={route.name === 'Chat' ? unreadCount : undefined}
+              onPress={onPress}
+            />
+          );
         })}
       </LinearGradient>
     </View>
@@ -452,6 +472,21 @@ const styles = StyleSheet.create({
     borderRadius: radius.pill,
     backgroundColor: 'rgba(255,106,26,0.18)',
   },
+  tabBadge: {
+    position: 'absolute',
+    top: -2,
+    right: 2,
+    minWidth: 16,
+    height: 16,
+    borderRadius: 8,
+    paddingHorizontal: 3,
+    backgroundColor: colors.primary,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1.5,
+    borderColor: colors.bg,
+  },
+  tabBadgeText: { color: '#fff', fontWeight: '900', fontSize: 9 },
   tabLabel: { fontSize: 10.5, fontWeight: '700', color: colors.textMuted, letterSpacing: 0.2 },
   tabLabelOn: { color: colors.primary, fontWeight: '900' },
   headerRow: { flexDirection: 'row', alignItems: 'center', paddingRight: spacing.xs },

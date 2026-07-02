@@ -14,6 +14,8 @@ export type NavStep = {
   lon: number;
   type: string; // OSRM maneuver type (turn, depart, arrive, roundabout...)
   modifier: string; // left, right, slight left...
+  exit?: number; // roundabout exit number (1-based)
+  ref?: string; // road number ("D-100") when known
 };
 
 export type LatLon = { lat: number; lon: number };
@@ -90,8 +92,11 @@ export function formatDistanceM(m: number): string {
 export function stepIcon(type: string, modifier: string): string {
   if (type === 'arrive') return 'flag-checkered';
   if (type === 'depart') return 'ray-start-arrow';
-  if (type === 'roundabout' || type === 'rotary') return 'rotate-right';
+  if (type.includes('roundabout') || type.includes('rotary')) return 'rotate-right';
   if (type === 'merge') return 'call-merge';
+  // A straight fork has no direction arrow; sided forks/ramps fall through to
+  // the modifier arrows below, which already read naturally for them.
+  if (type === 'fork' && (modifier === '' || modifier === 'straight')) return 'call-split';
   switch (modifier) {
     case 'left':
       return 'arrow-left-top';
@@ -169,15 +174,37 @@ export function newRerouteState(): RerouteState {
   return { offCount: 0, lastAt: 0, inFlight: false };
 }
 
+// Index of the route vertex nearest to pos (and its distance in meters).
+export function nearestVertex(routePoints: LatLon[], pos: LatLon): { index: number; dist: number } {
+  let index = 0;
+  let dist = Infinity;
+  for (let i = 0; i < routePoints.length; i++) {
+    const d = distanceM(pos, routePoints[i]);
+    if (d < dist) {
+      dist = d;
+      index = i;
+    }
+  }
+  return { index, dist };
+}
+
 // Min distance from pos to the route's vertices. OSRM geometries are dense
 // (vertices every few tens of meters), so vertex distance ≈ polyline distance.
 export function distanceToRouteM(routePoints: LatLon[], pos: LatLon): number {
-  let min = Infinity;
-  for (const p of routePoints) {
-    const d = distanceM(pos, p);
-    if (d < min) min = d;
-  }
-  return min;
+  return nearestVertex(routePoints, pos).dist;
+}
+
+/**
+ * Whether a saved A→B route makes more sense ridden in reverse (B→A) from
+ * where the rider currently stands: true when the end is clearly closer than
+ * the start. The 100 m margin keeps loops (start ≈ end) and genuinely
+ * ambiguous positions on the recorded direction.
+ */
+export function shouldReverseRoute(routePoints: LatLon[], pos: LatLon): boolean {
+  if (routePoints.length < 2) return false;
+  const toStart = distanceM(pos, routePoints[0]);
+  const toEnd = distanceM(pos, routePoints[routePoints.length - 1]);
+  return toEnd + 100 < toStart;
 }
 
 /**
@@ -195,11 +222,17 @@ export function offRouteTick(state: RerouteState, routePoints: LatLon[], pos: La
 }
 
 /**
- * Initial plan when a ride starts on a followed route. If the rider is already
- * near the route it plans the route as-is. If they begin somewhere else, their
- * current position is prepended as the first waypoint so the guide leads them
- * onto the route from wherever they actually are (instead of pointing at the
- * route's original start). Returns steps + geometry for the dashed guide line.
+ * Initial plan when a ride starts on a followed route.
+ *
+ * - Rider already on the route → plan only the *remaining* part, from the
+ *   vertex nearest to them to the end. Planning the whole stored geometry
+ *   (the old behavior) made the first instruction point back toward the
+ *   route's original start whenever the rider stood anywhere but exactly
+ *   there — the main source of "navigation is telling me to go backwards".
+ * - Rider somewhere else → prepend their position so the guide leads them
+ *   onto the route instead of assuming they teleport to its start.
+ *
+ * Returns steps + geometry for the guide line.
  */
 // Result of a route plan: turn-by-turn steps, the road geometry (for the guide
 // line) and the total distance (km) / duration (min) for the ETA summary.
@@ -207,10 +240,16 @@ export type PlanResult = { steps: NavStep[]; points: LatLon[]; distance: number;
 
 export async function planInitialRoute(routePoints: LatLon[], pos: LatLon): Promise<PlanResult> {
   if (routePoints.length < 2) return { steps: [], points: [], distance: 0, duration: 0 };
-  const onRoute = distanceToRouteM(routePoints, pos) <= OFF_ROUTE_M;
-  const waypoints = onRoute
-    ? sampleWaypoints(routePoints)
-    : [pos, ...sampleWaypoints(routePoints, 24)];
+  const { index, dist } = nearestVertex(routePoints, pos);
+  let waypoints: LatLon[];
+  if (dist <= OFF_ROUTE_M) {
+    // Keep at least the final leg so a rider standing at the very end still
+    // gets a valid (short) plan instead of a single-point request.
+    const rest = routePoints.slice(Math.min(index, routePoints.length - 2));
+    waypoints = [pos, ...sampleWaypoints(rest, 24)];
+  } else {
+    waypoints = [pos, ...sampleWaypoints(routePoints, 24)];
+  }
   const { data } = await api.post('/api/routes/plan', { waypoints });
   const steps: NavStep[] = (data.steps ?? []).filter((s: NavStep) => s.lat !== 0 || s.lon !== 0);
   const points: LatLon[] = data.points ?? [];
@@ -223,15 +262,7 @@ export async function planInitialRoute(routePoints: LatLon[], pos: LatLon): Prom
  * the new steps plus the new geometry (for redrawing the guide line).
  */
 export async function rerouteFromPosition(routePoints: LatLon[], pos: LatLon): Promise<PlanResult> {
-  let nearest = 0;
-  let best = Infinity;
-  for (let i = 0; i < routePoints.length; i++) {
-    const d = distanceM(pos, routePoints[i]);
-    if (d < best) {
-      best = d;
-      nearest = i;
-    }
-  }
+  const { index: nearest } = nearestVertex(routePoints, pos);
   let skip = nearest;
   let acc = 0;
   while (skip < routePoints.length - 1 && acc < REJOIN_SKIP_M) {

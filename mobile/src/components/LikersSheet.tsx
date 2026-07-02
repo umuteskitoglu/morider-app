@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { FlatList, Modal, Pressable, StyleSheet, Text, View } from 'react-native';
+import { useNavigation } from '@react-navigation/native';
 
 import { api } from '../api/client';
 import { colors, radius, spacing } from '../theme';
@@ -10,6 +11,7 @@ type Liker = { user_id: number; name: string };
 // Pass postId to open it; null keeps it closed.
 export function LikersSheet({ postId, onClose }: { postId: number | null; onClose: () => void }) {
   const [likers, setLikers] = useState<Liker[]>([]);
+  const navigation = useNavigation<any>();
 
   useEffect(() => {
     if (postId == null) return;
@@ -34,12 +36,18 @@ export function LikersSheet({ postId, onClose }: { postId: number | null; onClos
           keyExtractor={(item) => String(item.user_id)}
           ListEmptyComponent={<Text style={styles.muted}>Henüz beğeni yok.</Text>}
           renderItem={({ item }) => (
-            <View style={styles.row}>
+            <Pressable
+              style={styles.row}
+              onPress={() => {
+                onClose();
+                navigation.navigate('UserProfile', { userId: item.user_id, name: item.name });
+              }}
+            >
               <View style={styles.avatar}>
                 <Text style={styles.avatarText}>{item.name?.charAt(0).toUpperCase() ?? 'M'}</Text>
               </View>
               <Text style={styles.name}>{item.name}</Text>
-            </View>
+            </Pressable>
           )}
         />
       </View>

@@ -30,6 +30,7 @@ import {
   offRouteTick,
   planInitialRoute,
   rerouteFromPosition,
+  shouldReverseRoute,
   speakRerouted,
   SpokenState,
   stopSpeaking,
@@ -40,6 +41,8 @@ import { computeRideStats } from '../lib/rideStats';
 import { kapismaSummary } from '../lib/segments';
 import { RideDashboard } from '../components/RideDashboard';
 import { useAuth } from '../store/auth';
+import { useBlockedUsers } from '../store/blockedUsers';
+import { blockUser } from '../lib/block';
 import { fetchNearby, goOffline, heartbeat, NearbyRider } from '../lib/presence';
 import { api, apiBaseURL, errorMessage } from '../api/client';
 import { colors, radius, shadow, spacing } from '../theme';
@@ -92,10 +95,16 @@ function haversineKm(a: Coord, b: Coord): number {
 export default function MapScreen({ route, navigation }: Props) {
   const insets = useSafeAreaInsets();
   const followRouteId = route.params?.followRouteId;
+  const followReverseParam = route.params?.followReverse;
   const [hasPermission, setHasPermission] = useState(false);
   const [recording, setRecording] = useState(false);
   const [path, setPath] = useState<Coord[]>([]);
   const [followPath, setFollowPath] = useState<Coord[]>([]);
+  // The followed route as saved (A→B). followPath is the *displayed* guide:
+  // the base in the chosen direction, later replaced by the planned geometry
+  // (which may include a lead-in from the rider's actual position).
+  const [followBase, setFollowBase] = useState<Coord[]>([]);
+  const [followReversed, setFollowReversed] = useState(false);
   // Live position for the Google-Maps-style heading arrow (puck) while riding.
   const [userCoord, setUserCoord] = useState<Coord | null>(null);
   const [distance, setDistance] = useState(0);
@@ -134,6 +143,7 @@ export default function MapScreen({ route, navigation }: Props) {
   // map is focused; a single tick both heartbeats our position and refreshes the
   // nearby list, so it costs one location fix every ~12s.
   const { user } = useAuth();
+  const { isBlocked, refresh: refreshBlocked } = useBlockedUsers();
   const shareLoc = !!user?.share_live_location;
   const [nearby, setNearby] = useState<NearbyRider[]>([]);
   const [selectedRider, setSelectedRider] = useState<NearbyRider | null>(null);
@@ -177,9 +187,15 @@ export default function MapScreen({ route, navigation }: Props) {
   }, [followPath]);
 
   // Load a saved route to follow when navigated here with followRouteId.
+  // Direction: an explicit followReverse param wins; otherwise smart default —
+  // if the rider stands near the route's *end*, follow it end→start (the
+  // "came to work on this route, now riding home" case) instead of guiding
+  // them all the way back to the original start.
   useEffect(() => {
     if (!followRouteId) {
       setFollowPath([]);
+      setFollowBase([]);
+      setFollowReversed(false);
       return;
     }
     (async () => {
@@ -189,7 +205,26 @@ export default function MapScreen({ route, navigation }: Props) {
           latitude: p.lat,
           longitude: p.lon,
         }));
-        setFollowPath(pts);
+        let reversed = followReverseParam;
+        if (reversed === undefined && pts.length > 1) {
+          try {
+            // A stale cached fix (rider moved since) would pick the wrong
+            // direction, so only trust a recent one before asking for a fresh fix.
+            const loc =
+              (await Location.getLastKnownPositionAsync({ maxAge: 60_000 })) ??
+              (await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced }));
+            reversed = shouldReverseRoute(
+              pts.map((p) => ({ lat: p.latitude, lon: p.longitude })),
+              { lat: loc.coords.latitude, lon: loc.coords.longitude },
+            );
+          } catch {
+            reversed = false;
+          }
+        }
+        const shown = reversed ? [...pts].reverse() : pts;
+        setFollowBase(pts);
+        setFollowReversed(!!reversed);
+        setFollowPath(shown);
         if (pts.length > 1) {
           setTimeout(
             () => mapRef.current?.fitToCoordinates(pts, { edgePadding: { top: 100, right: 60, bottom: 220, left: 60 }, animated: true }),
@@ -200,10 +235,22 @@ export default function MapScreen({ route, navigation }: Props) {
         // ignore – route just won't be shown as a guide
       }
     })();
-  }, [followRouteId]);
+  }, [followRouteId, followReverseParam]);
 
   function clearFollow() {
-    navigation.setParams({ followRouteId: undefined });
+    navigation.setParams({ followRouteId: undefined, followReverse: undefined });
+  }
+
+  // Flip the followed route's direction (A→B ⇄ B→A) before the ride starts.
+  function toggleFollowDirection() {
+    if (recording || followBase.length < 2) return;
+    const reversed = !followReversed;
+    setFollowReversed(reversed);
+    setFollowPath(reversed ? [...followBase].reverse() : followBase);
+    // Any previously previewed ETA belonged to the other direction.
+    setRouteKm(0);
+    setRouteMin(0);
+    setRemainingKm(0);
   }
 
   useEffect(() => {
@@ -699,6 +746,10 @@ export default function MapScreen({ route, navigation }: Props) {
   }
 
   const navigating = recording && navStep != null;
+  // A/B endpoints of the followed saved route in the chosen direction (absent
+  // for destination navigation, which has its own target marker).
+  const followStart = followBase.length > 1 ? (followReversed ? followBase[followBase.length - 1] : followBase[0]) : null;
+  const followEnd = followBase.length > 1 ? (followReversed ? followBase[0] : followBase[followBase.length - 1]) : null;
   // Keep the floating controls clear of the bottom panel/sheet, whose height
   // depends on the mode: ETA sheet (nav) < one-button panel (recording) <
   // two-button panel (idle).
@@ -740,6 +791,22 @@ export default function MapScreen({ route, navigation }: Props) {
         {path.length > 1 && (
           <Polyline coordinates={path} strokeColor={colors.primary} strokeWidth={6} lineCap="round" lineJoin="round" zIndex={3} />
         )}
+        {/* Start (A) / finish (B) of the followed saved route, in the chosen
+            direction, so the rider always sees which way the guide runs. */}
+        {followStart && (
+          <Marker coordinate={followStart} anchor={{ x: 0.5, y: 0.5 }} tracksViewChanges={false} zIndex={4}>
+            <View style={[styles.abPin, styles.aPin]}>
+              <Text style={styles.abPinText}>A</Text>
+            </View>
+          </Marker>
+        )}
+        {followEnd && (
+          <Marker coordinate={followEnd} anchor={{ x: 0.5, y: 0.5 }} tracksViewChanges={false} zIndex={4}>
+            <View style={[styles.abPin, styles.bPin]}>
+              <Text style={styles.abPinText}>B</Text>
+            </View>
+          </Marker>
+        )}
         {/* Google-Maps-style heading arrow (puck) instead of the round dot while
             riding. `flat` makes the rotation map-relative, so the arrow points
             in the true travel direction even as the chase cam rotates the map. */}
@@ -770,8 +837,10 @@ export default function MapScreen({ route, navigation }: Props) {
             </View>
           </Marker>
         ))}
-        {/* Active riders sharing their (approximate) location nearby. */}
-        {nearby.map((r) => (
+        {/* Active riders sharing their (approximate) location nearby. Blocked
+            riders are hidden client-side — a block doesn't stop them sharing
+            location server-side, it just removes them from our own view. */}
+        {nearby.filter((r) => !isBlocked(r.user_id)).map((r) => (
           <Marker
             key={`rider-${r.user_id}`}
             coordinate={{ latitude: r.lat, longitude: r.lon }}
@@ -809,17 +878,30 @@ export default function MapScreen({ route, navigation }: Props) {
           )}
 
           {destination ? (
-            <Pressable style={[styles.followChip, { top: insets.top + (recording ? 56 : 64) }]} onPress={clearDestination}>
-              <MaterialCommunityIcons name="flag-checkered" size={16} color={colors.accent} />
-              <Text style={styles.followChipText}>Hedefe gidiliyor</Text>
-              <MaterialCommunityIcons name="close" size={16} color={colors.textMuted} />
-            </Pressable>
+            <View style={[styles.followRow, { top: insets.top + (recording ? 56 : 64) }]}>
+              <Pressable style={styles.followChip} onPress={clearDestination}>
+                <MaterialCommunityIcons name="flag-checkered" size={16} color={colors.accent} />
+                <Text style={styles.followChipText}>Hedefe gidiliyor</Text>
+                <MaterialCommunityIcons name="close" size={16} color={colors.textMuted} />
+              </Pressable>
+            </View>
           ) : followPath.length > 1 ? (
-            <Pressable style={[styles.followChip, { top: insets.top + (recording ? 56 : 64) }]} onPress={clearFollow}>
-              <MaterialCommunityIcons name="map-marker-path" size={16} color={colors.accent} />
-              <Text style={styles.followChipText}>Rota takipte</Text>
-              <MaterialCommunityIcons name="close" size={16} color={colors.textMuted} />
-            </Pressable>
+            <View style={[styles.followRow, { top: insets.top + (recording ? 56 : 64) }]}>
+              {/* Direction chip: shows which way the guide runs; tap to flip
+                  (disabled mid-ride — the reroute would fight the rider). */}
+              <Pressable style={styles.followChip} onPress={toggleFollowDirection} disabled={recording}>
+                <MaterialCommunityIcons name="map-marker-path" size={16} color={colors.accent} />
+                <Text style={styles.followChipText}>
+                  {followReversed ? 'Rota: B → A (ters)' : 'Rota: A → B'}
+                </Text>
+                {!recording && <MaterialCommunityIcons name="swap-horizontal" size={16} color={colors.accent} />}
+              </Pressable>
+              {!recording && (
+                <Pressable style={styles.followClose} onPress={clearFollow} hitSlop={6}>
+                  <MaterialCommunityIcons name="close" size={16} color={colors.textMuted} />
+                </Pressable>
+              )}
+            </View>
           ) : null}
 
           {/* Recording badge — only mid free-ride; idle uses the search bar */}
@@ -876,7 +958,12 @@ export default function MapScreen({ route, navigation }: Props) {
             <Button title="Sürüşü Bitir" variant="danger" icon="stop-circle" onPress={stopRecording} loading={saving} />
           ) : (
             <>
-              <Button title={destination ? 'Navigasyonu Başlat' : 'Sürüşü Başlat'} icon="motorbike" onPress={startRecording} loading={saving} />
+              <Button
+                title={destination || followPath.length > 1 ? 'Navigasyonu Başlat' : 'Sürüşü Başlat'}
+                icon="motorbike"
+                onPress={startRecording}
+                loading={saving}
+              />
               <View style={{ height: spacing.sm }} />
               <Button title="Grup Sürüşü" variant="ghost" icon="account-group" onPress={() => navigation.navigate('GroupJoin')} />
             </>
@@ -964,6 +1051,21 @@ export default function MapScreen({ route, navigation }: Props) {
             <Text style={styles.poiSub}>Yakında aktif sürücü</Text>
             <View style={{ height: spacing.sm }} />
             <Button
+              title="Profili Gör"
+              icon="account"
+              variant="ghost"
+              onPress={() => {
+                const r = selectedRider;
+                setSelectedRider(null);
+                if (!r) return;
+                (navigation.getParent() as any)?.navigate('Profile', {
+                  screen: 'UserProfile',
+                  params: { userId: r.user_id, name: r.name },
+                });
+              }}
+            />
+            <View style={{ height: spacing.sm }} />
+            <Button
               title="Mesaj Gönder"
               icon="message-text"
               onPress={() => {
@@ -974,6 +1076,32 @@ export default function MapScreen({ route, navigation }: Props) {
                   screen: 'ChatThread',
                   params: { userId: r.user_id, name: r.name, avatarUrl: r.avatar_url },
                 });
+              }}
+            />
+            <View style={{ height: spacing.xs }} />
+            <Button
+              title="Engelle"
+              icon="cancel"
+              variant="ghost"
+              onPress={() => {
+                const r = selectedRider;
+                if (!r) return;
+                Alert.alert('Kullanıcıyı engelle', `${r.name} artık sana mesaj gönderemez ve haritada görünmez. Emin misin?`, [
+                  { text: 'Vazgeç', style: 'cancel' },
+                  {
+                    text: 'Engelle',
+                    style: 'destructive',
+                    onPress: async () => {
+                      setSelectedRider(null);
+                      try {
+                        await blockUser(r.user_id);
+                        await refreshBlocked();
+                      } catch {
+                        Alert.alert('Hata', 'Engellenemedi, tekrar dene.');
+                      }
+                    },
+                  },
+                ]);
               }}
             />
           </Pressable>
@@ -1025,9 +1153,14 @@ const styles = StyleSheet.create({
     ...shadow.card,
   },
   recenterText: { color: '#fff', fontWeight: '800', fontSize: 13 },
-  followChip: {
+  followRow: {
     position: 'absolute',
     alignSelf: 'center',
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.xs,
+  },
+  followChip: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: spacing.xs,
@@ -1040,6 +1173,30 @@ const styles = StyleSheet.create({
     ...shadow.card,
   },
   followChipText: { color: colors.text, fontWeight: '700', fontSize: 12 },
+  followClose: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: colors.surface,
+    borderWidth: 1,
+    borderColor: colors.border,
+    alignItems: 'center',
+    justifyContent: 'center',
+    ...shadow.card,
+  },
+  abPin: {
+    width: 26,
+    height: 26,
+    borderRadius: 13,
+    borderWidth: 2,
+    borderColor: '#fff',
+    alignItems: 'center',
+    justifyContent: 'center',
+    ...shadow.card,
+  },
+  aPin: { backgroundColor: '#2E9E5B' },
+  bPin: { backgroundColor: '#D93F33' },
+  abPinText: { color: '#fff', fontWeight: '900', fontSize: 13 },
   navPuck: {
     width: 36,
     height: 36,

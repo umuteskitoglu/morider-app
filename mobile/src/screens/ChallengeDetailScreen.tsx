@@ -5,7 +5,7 @@ import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 
 import { ProfileStackParams } from '../navigation/RootNavigator';
-import { Button, Card } from '../components/ui';
+import { Button, Card, TouchCard } from '../components/ui';
 import { ProgressBar } from '../components/ProgressBar';
 import {
   Challenge,
@@ -127,7 +127,11 @@ export default function ChallengeDetailScreen({ route, navigation }: Props) {
         </Card>
       ) : (
         standings.map((s, i) => (
-          <Card key={s.user_id} style={[styles.row, s.user_id === user?.id && styles.mine]}>
+          <TouchCard
+            key={s.user_id}
+            onPress={() => navigation.navigate('UserProfile', { userId: s.user_id, name: s.name })}
+            style={[styles.row, s.user_id === user?.id && styles.mine]}
+          >
             <Text style={[styles.rank, i === 0 && { color: colors.accent }]}>{i + 1}</Text>
             <View style={styles.flex}>
               <Text style={styles.name}>
@@ -140,7 +144,7 @@ export default function ChallengeDetailScreen({ route, navigation }: Props) {
               />
             </View>
             <Text style={styles.value}>{fmtMetric(challenge.metric, s.progress)}</Text>
-          </Card>
+          </TouchCard>
         ))
       )}
 

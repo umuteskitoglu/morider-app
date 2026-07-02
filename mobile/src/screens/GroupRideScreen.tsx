@@ -3,15 +3,18 @@ import { Alert, Animated, Easing, Modal, Pressable, ScrollView, Share, StyleShee
 import MapView, { Marker, Polyline, Region } from 'react-native-maps';
 import * as Location from 'expo-location';
 import * as Linking from 'expo-linking';
+import { activateKeepAwakeAsync, deactivateKeepAwake } from 'expo-keep-awake';
 import QRCode from 'react-native-qrcode-svg';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { RideStackParams } from '../navigation/RootNavigator';
 import { Button, Card } from '../components/ui';
 import { CrashCountdown } from '../components/CrashCountdown';
 import { NavBanner } from '../components/NavBanner';
+import { darkMapStyle } from '../lib/mapStyle';
 import { useCrashDetection } from '../lib/crashDetection';
 import { composeEmergencySMS, getEmergencyContact } from '../lib/emergency';
 import {
@@ -49,9 +52,15 @@ const INITIAL_REGION: Region = {
 // Distinct marker colors assigned per participant (own dot is the native blue).
 const MARKER_COLORS = ['#FF6A1A', '#35E0C8', '#FFB020', '#4C8AFF', '#C264FF', '#FF5E8A'];
 
+// Google-Maps navigation route colors, matching MapScreen: a bright blue fill
+// with a darker blue casing/outline drawn underneath it.
+const navRouteFill = '#4E9BFF';
+const navRouteCasing = '#1A6CD4';
+
 export default function GroupRideScreen({ route, navigation }: Props) {
   const { code } = route.params;
   const { user } = useAuth();
+  const insets = useSafeAreaInsets();
 
   const [participants, setParticipants] = useState<Participant[]>([]);
   const [routePath, setRoutePath] = useState<Coord[]>([]);
@@ -145,6 +154,16 @@ export default function GroupRideScreen({ route, navigation }: Props) {
   useLayoutEffect(() => {
     navigation.setOptions({ title: `Grup · ${code}` });
   }, [navigation, code]);
+
+  // Maps-style: keep the screen on for the whole group session so it never
+  // dims/locks mid-ride. Released as soon as the screen unmounts.
+  useEffect(() => {
+    const tag = 'morider-group-ride';
+    void activateKeepAwakeAsync(tag);
+    return () => {
+      void deactivateKeepAwake(tag);
+    };
+  }, []);
 
   // Color is stable per participant id (index in the sorted participant list).
   const colorFor = useCallback(
@@ -656,18 +675,30 @@ export default function GroupRideScreen({ route, navigation }: Props) {
 
   return (
     <View style={styles.container}>
-      <MapView ref={mapRef} style={StyleSheet.absoluteFill} initialRegion={INITIAL_REGION} showsUserLocation showsMyLocationButton={false}>
+      <MapView
+        ref={mapRef}
+        style={StyleSheet.absoluteFill}
+        initialRegion={INITIAL_REGION}
+        customMapStyle={darkMapStyle}
+        userInterfaceStyle="dark"
+        showsBuildings
+        showsUserLocation
+        showsMyLocationButton={false}
+      >
+        {/* Google-Maps-style route guide, matching MapScreen: a bright blue
+            fill over a darker casing, solid with rounded caps/joins. */}
         {routePath.length > 1 && (
           <>
-            <Polyline coordinates={routePath} strokeColor={colors.accent} strokeWidth={5} lineDashPattern={[2, 8]} />
-            <Marker coordinate={routePath[0]} title="Başlangıç" anchor={{ x: 0.5, y: 0.5 }}>
-              <View style={[styles.routePin, styles.routePinStart]}>
-                <MaterialCommunityIcons name="flag" size={16} color="#fff" />
+            <Polyline coordinates={routePath} strokeColor={navRouteCasing} strokeWidth={12} lineCap="round" lineJoin="round" zIndex={1} />
+            <Polyline coordinates={routePath} strokeColor={navRouteFill} strokeWidth={8} lineCap="round" lineJoin="round" zIndex={2} />
+            <Marker coordinate={routePath[0]} anchor={{ x: 0.5, y: 0.5 }} tracksViewChanges={false} zIndex={3}>
+              <View style={[styles.abPin, styles.aPin]}>
+                <Text style={styles.abPinText}>A</Text>
               </View>
             </Marker>
-            <Marker coordinate={routePath[routePath.length - 1]} title="Bitiş" anchor={{ x: 0.5, y: 0.5 }}>
-              <View style={[styles.routePin, styles.routePinEnd]}>
-                <MaterialCommunityIcons name="flag-checkered" size={16} color="#fff" />
+            <Marker coordinate={routePath[routePath.length - 1]} anchor={{ x: 0.5, y: 0.5 }} tracksViewChanges={false} zIndex={3}>
+              <View style={[styles.abPin, styles.bPin]}>
+                <Text style={styles.abPinText}>B</Text>
               </View>
             </Marker>
           </>
@@ -695,9 +726,15 @@ export default function GroupRideScreen({ route, navigation }: Props) {
 
       {/* Turn-by-turn banner (when the session has a route) or the status badge */}
       {navStep ? (
-        <NavBanner step={navStep} distM={navDist} voiceOn={voiceOn} onToggleVoice={() => setVoiceOn((v) => !v)} />
+        <NavBanner
+          step={navStep}
+          distM={navDist}
+          voiceOn={voiceOn}
+          onToggleVoice={() => setVoiceOn((v) => !v)}
+          topInset={insets.top}
+        />
       ) : (
-        <View style={styles.badgeWrap} pointerEvents="none">
+        <View style={[styles.badgeWrap, { top: insets.top + spacing.sm }]} pointerEvents="none">
           <View style={[styles.badge, connected ? styles.badgeLive : styles.badgeIdle]}>
             <View style={[styles.dot, { backgroundColor: connected ? colors.success : colors.textMuted }]} />
             <Text style={styles.badgeText}>{connected ? 'CANLI' : 'BAĞLANIYOR…'}</Text>
@@ -904,19 +941,20 @@ const styles = StyleSheet.create({
   },
   markerText: { color: '#fff', fontWeight: '900', fontSize: 14 },
   markerSpeaking: { borderColor: colors.success, borderWidth: 3 },
-  routePin: {
-    width: 32,
-    height: 32,
-    borderRadius: 16,
+  abPin: {
+    width: 26,
+    height: 26,
+    borderRadius: 13,
     borderWidth: 2,
     borderColor: '#fff',
     alignItems: 'center',
     justifyContent: 'center',
     ...shadow.card,
   },
-  routePinStart: { backgroundColor: colors.success },
-  routePinEnd: { backgroundColor: colors.danger },
-  badgeWrap: { position: 'absolute', top: spacing.lg, left: 0, right: 0, alignItems: 'center' },
+  aPin: { backgroundColor: '#2E9E5B' },
+  bPin: { backgroundColor: '#D93F33' },
+  abPinText: { color: '#fff', fontWeight: '900', fontSize: 13 },
+  badgeWrap: { position: 'absolute', left: 0, right: 0, alignItems: 'center' },
   badge: {
     flexDirection: 'row',
     alignItems: 'center',

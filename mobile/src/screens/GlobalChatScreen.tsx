@@ -10,10 +10,12 @@ import {
   View,
 } from 'react-native';
 import { useHeaderHeight } from '@react-navigation/elements';
+import { useNavigation } from '@react-navigation/native';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 
 import { EmptyState } from '../components/ui';
 import { useAuth } from '../store/auth';
+import { useBlockedUsers } from '../store/blockedUsers';
 import { fetchGlobalMessages, GlobalMsg, SlowmodeFrame } from '../lib/chat';
 import { useChatSocket } from '../lib/useChatSocket';
 import { formatTime } from '../lib/datetime';
@@ -21,7 +23,9 @@ import { colors, radius, shadow, spacing } from '../theme';
 
 export default function GlobalChatScreen() {
   const { user } = useAuth();
+  const { isBlocked } = useBlockedUsers();
   const headerHeight = useHeaderHeight();
+  const navigation = useNavigation();
 
   const [messages, setMessages] = useState<GlobalMsg[]>([]);
   const [draft, setDraft] = useState('');
@@ -79,7 +83,7 @@ export default function GlobalChatScreen() {
     if (sendFrame({ body })) setDraft('');
   }
 
-  const data = messages.slice().reverse();
+  const data = messages.filter((m) => !isBlocked(m.user_id)).slice().reverse();
 
   return (
     <KeyboardAvoidingView
@@ -103,7 +107,18 @@ export default function GlobalChatScreen() {
           return (
             <View style={[styles.msgRow, mine && styles.msgRowMine]}>
               <View style={[styles.msgBubble, mine ? styles.msgBubbleMine : styles.msgBubbleOther]}>
-                {!mine ? <Text style={styles.msgAuthor}>{m.name}</Text> : null}
+                {!mine ? (
+                  <Pressable
+                    onPress={() =>
+                      (navigation.getParent() as any)?.navigate('Profile', {
+                        screen: 'UserProfile',
+                        params: { userId: m.user_id, name: m.name },
+                      })
+                    }
+                  >
+                    <Text style={styles.msgAuthor}>{m.name}</Text>
+                  </Pressable>
+                ) : null}
                 <Text style={styles.msgBody}>{m.body}</Text>
                 <Text style={styles.msgTime}>{formatTime(m.created_at)}</Text>
               </View>

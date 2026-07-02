@@ -114,11 +114,24 @@ make osrm-up
 - İçe aktarılan rota **private** oluşturulur; dışa aktarma görünürlük kuralları `GET /api/routes/:id` ile aynıdır (sahip / public / karşılıklı takip).
 - **Mobil UX:** Rotalarım'da tek **"Dosyadan İçe Aktar"**; rota detayında tek **"Dosya Olarak Dışa Aktar"** — dokununca format seçimi çıkar ve her formatın yanında nerede kullanılacağı yazar ("GPX — Strava, Garmin, REVER…", "KML — Google Earth, My Maps…").
 
+## Tarif kalitesi (Google-Maps tarzı)
+
+- **Zengin manevra metinleri:** OSRM'in `exit`, `ref`, `destinations`, `rotary_name` alanları artık kullanılır. Dönel kavşaklar çıkış numarasıyla söylenir ("Dönel kavşaktan 2. çıkışa çık"), çatal/rampa/yol sonu manevraları amaca özel ifade alır ("Çatalda sağda kal", "Sağdaki çıkışı kullan", "Yolun sonunda sola dön"), varışta taraf belirtilir ("Varış noktası sağda"). Adı olmayan yollar için etiket `ref` ("D-100") veya tabela yönüne ("Ankara yönü") düşer. (`maneuverText`, [`routing.go`](../backend/internal/route/routing.go))
+- **Gürültü adımları elenir:** yol adının değiştiği ("new name") ve düz geçilen ("continue straight") manevralar — Google'ın da duyurmadıkları — adım listesinden çıkarılır; elenen adımın mesafesi önceki adıma katılır (`dropNoiseSteps`). Banner/ses gereksiz "Devam et" komutlarıyla dolmaz.
+- **Adım yanıtı:** her `step` artık opsiyonel `exit` (dönel kavşak çıkış no) ve `ref` alanlarını da taşır.
+
+## Alternatif rotalar
+
+- `POST /api/routes/plan` gövdesine `"alternatives": true` eklenirse yanıt, ana planın yanında `alternatives` dizisini de döner (her biri tam bir plan: geometri + mesafe/süre/virajlılık). OSRM alternatifleri yalnız **2 nokta** arasında üretir; ara noktalı istekte dizi boş kalır. Virajlılık tercihiyle birlikte kullanılırsa ana rota tercihe göre seçilir, kalanlar alternatif olarak döner.
+- **Mobil (Yeni Rota):** alternatifler haritada gri çizgi olarak ana rotanın altına çizilir; dokununca ana rotayla yer değiştirir (seçim geri alınabilir). Kaydet artık **önizlenen geometriyi olduğu gibi** saklar (`snap:false`) — seçilen alternatif kaybolmaz; önizleme yoksa eski davranış (ham noktalar + `snap:true`) korunur.
+
 ## Adım adım navigasyon
 
 - Plan yanıtındaki her `step` artık **manevra noktasını** (`lat`/`lon`) ve OSRM `type`/`modifier` alanlarını taşır; istemci ok ikonunu ve "şuraya dön" mantığını bunlarla kurar.
 - **Adım kaynağı:** kayıtlı/yüklenen rota geometrisi en fazla 25 noktaya seyreltilip `POST /api/routes/plan`'a verilir ([`navigation.ts`](../mobile/src/lib/navigation.ts) `fetchRouteSteps`). Bu yüzden GPX'ten gelen veya eski rotalarda da çalışır; yeni uç/migration gerekmez.
 - **İlerleme:** sıradaki manevra noktasına ~30 m kala adım tamamlanır; GPS atlaması olduysa bir sonraki adıma açıkça daha yakın olmak da adımı geçirir (`advanceStep`).
+- **Başlangıç planı konumdan:** sürüş başlarken plan her zaman sürücünün **gerçek konumundan** kurulur; rotanın üzerindeyse geçilmiş kısım atlanır (en yakın tepe noktasından ileriye planlanır), değilse konum ilk waypoint olarak eklenir (`planInitialRoute`). Böylece rota ortasından/sonundan başlayan sürücüye "başa dön" komutu verilmez.
+- **Ters yön (B→A):** kayıtlı rota iki yönde sürülebilir. Rota detayında "Ters Yönde Sür (B → A)" düğmesi vardır; düz "Bu Rotada Sür" ise akıllı varsayılan kullanır — sürücü bitişe başlangıçtan belirgin (100 m marj) daha yakınsa rota otomatik ters açılır (`shouldReverseRoute`), harita ekranındaki yön çipiyle (A→B ⇄ B→A) sürüş öncesi elle de çevrilebilir. Haritada yeşil **A** / kırmızı **B** işaretçileri yönü gösterir.
 - **Mobil UX:** rota takipli solo sürüşte eğimli takip kamerası (pitch 55, zoom 17.5, GPS yönüne dönen kamera) + üstte talimat banner'ı; grup sürüşünde yalnız banner (harita grubu izlemek için serbest kalır). Sesli yönlendirme `expo-speech` (tr-TR) ile 250 m ve 50 m kala; banner'daki hoparlör ikonuyla kapatılır.
 - **Re-route:** rotaya uzaklık art arda 2 GPS örneğinde 100 m'yi aşarsa, mevcut konumdan rotaya ~150 m **ileride** katılan yeni bir plan istenir (20 sn soğuma ile). Solo sürüşte kesikli rehber çizgi de yeni geometriyle çizilir; grup sürüşünde ortak rota çizgisi korunur, yalnız sürücünün kendi talimatları yenilenir. Başarıda "Rota yeniden hesaplandı" sesli bildirimi.
 

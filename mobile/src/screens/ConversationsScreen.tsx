@@ -8,35 +8,28 @@ import { MaterialCommunityIcons } from '@expo/vector-icons';
 
 import { EmptyState } from '../components/ui';
 import { ChatStackParams } from '../navigation/RootNavigator';
-import { ConversationItem, fetchConversations } from '../lib/chat';
+import { ConversationItem } from '../lib/chat';
+import { useChatUnread } from '../store/chatUnread';
 import { apiBaseURL } from '../api/client';
 import { formatTime } from '../lib/datetime';
 import { colors, gradients, radius, spacing } from '../theme';
 
 export default function ConversationsScreen() {
   const navigation = useNavigation<NativeStackNavigationProp<ChatStackParams>>();
-  const [items, setItems] = useState<ConversationItem[]>([]);
+  const { conversations: items, refresh } = useChatUnread();
   const [refreshing, setRefreshing] = useState(false);
-
-  const load = useCallback(async () => {
-    try {
-      setItems(await fetchConversations());
-    } catch {
-      // best effort — keep whatever is on screen
-    }
-  }, []);
 
   useFocusEffect(
     useCallback(() => {
-      load();
-    }, [load]),
+      refresh();
+    }, [refresh]),
   );
 
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
-    await load();
+    await refresh();
     setRefreshing(false);
-  }, [load]);
+  }, [refresh]);
 
   const requests = items.filter((c) => c.is_request);
   const primary = items.filter((c) => !c.is_request);
@@ -55,6 +48,20 @@ export default function ConversationsScreen() {
       contentContainerStyle={styles.content}
       refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.primary} />}
     >
+      <Pressable
+        style={({ pressed }) => [styles.globalCard, pressed && styles.rowPressed]}
+        onPress={() => navigation.navigate('GlobalChat')}
+      >
+        <LinearGradient colors={gradients.primary} style={styles.globalIcon}>
+          <MaterialCommunityIcons name="earth" size={22} color="#fff" />
+        </LinearGradient>
+        <View style={styles.flex}>
+          <Text style={styles.globalTitle}>Topluluk Sohbeti</Text>
+          <Text style={styles.globalHint}>Tüm sürücülerle aynı odada canlı sohbet et</Text>
+        </View>
+        <MaterialCommunityIcons name="chevron-right" size={22} color={colors.textMuted} />
+      </Pressable>
+
       {items.length === 0 ? (
         <View style={styles.empty}>
           <EmptyState
@@ -122,6 +129,20 @@ const styles = StyleSheet.create({
   content: { padding: spacing.md, gap: spacing.xs, paddingBottom: spacing.xl },
   empty: { flex: 1, minHeight: 400, alignItems: 'center', justifyContent: 'center' },
   sectionTitle: { color: colors.textMuted, fontWeight: '800', fontSize: 12, letterSpacing: 0.5, textTransform: 'uppercase', marginTop: spacing.md, marginBottom: spacing.xs },
+  globalCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+    padding: spacing.sm,
+    backgroundColor: colors.surface,
+    borderRadius: radius.lg,
+    borderWidth: 1,
+    borderColor: colors.border,
+    marginBottom: spacing.xs,
+  },
+  globalIcon: { width: 44, height: 44, borderRadius: 22, alignItems: 'center', justifyContent: 'center' },
+  globalTitle: { color: colors.text, fontWeight: '800', fontSize: 15 },
+  globalHint: { color: colors.textMuted, fontSize: 12, marginTop: 2 },
   row: {
     flexDirection: 'row',
     alignItems: 'center',

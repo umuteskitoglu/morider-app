@@ -58,6 +58,12 @@ func registerRoutes(d *server.Deps) {
 	f.GET("/status/:userId", h.followStatus)
 	f.PUT("/:userId", h.follow)
 	f.DELETE("/:userId", h.unfollow)
+
+	bl := d.Engine.Group("/api/blocks", d.JWT.Middleware())
+	bl.GET("", h.listBlocked)
+	bl.GET("/status/:userId", h.blockStatus)
+	bl.PUT("/:userId", h.blockUser)
+	bl.DELETE("/:userId", h.unblockUser)
 }
 
 type handler struct{ d *server.Deps }

@@ -77,6 +77,16 @@ func (h *handler) startConversation(c *gin.Context) {
 		return
 	}
 
+	blocked, err := h.blocked(c, me, req.UserID)
+	if err != nil {
+		httpx.Internal(c, "could not verify block")
+		return
+	}
+	if blocked {
+		httpx.Error(c, http.StatusForbidden, "blocked")
+		return
+	}
+
 	a, b := me, req.UserID
 	if a > b {
 		a, b = b, a
@@ -125,6 +135,19 @@ func (h *handler) areMutual(ctx context.Context, a, b int64) (bool, error) {
 		    AND EXISTS(SELECT 1 FROM follows WHERE follower_id = $2 AND followee_id = $1)`,
 		a, b).Scan(&mutual)
 	return mutual, err
+}
+
+// blocked reports whether a has blocked b or b has blocked a, in either
+// direction — a block always stops contact both ways.
+func (h *handler) blocked(ctx context.Context, a, b int64) (bool, error) {
+	var block bool
+	err := h.d.DB.QueryRow(ctx,
+		`SELECT EXISTS(
+		    SELECT 1 FROM user_blocks
+		    WHERE (blocker_id = $1 AND blocked_id = $2)
+		       OR (blocker_id = $2 AND blocked_id = $1))`,
+		a, b).Scan(&block)
+	return block, err
 }
 
 type conversationItem struct {
@@ -346,6 +369,12 @@ func (h *handler) dmWS(c *gin.Context) {
 	}
 	other := cv.other(me)
 
+	blocked, err := h.blocked(c, me, other)
+	if err != nil {
+		httpx.Internal(c, "could not verify block")
+		return
+	}
+
 	var name string
 	if err := h.d.DB.QueryRow(c, `SELECT name FROM users WHERE id = $1`, me).Scan(&name); err != nil {
 		httpx.Internal(c, "could not load user")
@@ -357,6 +386,11 @@ func (h *handler) dmWS(c *gin.Context) {
 		return
 	}
 	defer conn.Close()
+
+	if blocked {
+		_ = conn.WriteJSON(gin.H{"type": "blocked"})
+		return
+	}
 
 	client := &wsClient{send: make(chan []byte, 32), done: make(chan struct{})}
 	h.dmHub.add(convID, client)

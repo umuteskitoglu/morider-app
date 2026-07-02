@@ -9,6 +9,7 @@ import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { PostDetail, DetailPost } from '../components/PostDetail';
 import { AvatarViewer } from '../components/AvatarViewer';
 import FollowButton from '../components/FollowButton';
+import BlockButton from '../components/BlockButton';
 import { CreateChallengeModal } from '../components/CreateChallengeModal';
 import { Button, Card } from '../components/ui';
 import { ProgressBar } from '../components/ProgressBar';
@@ -207,6 +208,16 @@ export default function UserProfileScreen({ route, navigation }: Props) {
               }}
             />
             <Button title="Meydan Oku" variant="ghost" icon="flag-checkered" onPress={() => setChallengeOpen(true)} />
+            <BlockButton
+              userId={userId}
+              name={name}
+              onChange={(blocking) => {
+                if (blocking) {
+                  setFollowing(false);
+                  setFollowedBy(false);
+                }
+              }}
+            />
           </>
         )}
 

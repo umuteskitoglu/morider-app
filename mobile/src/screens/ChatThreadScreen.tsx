@@ -27,6 +27,8 @@ import {
   fetchDmMessages,
   startConversation,
 } from '../lib/chat';
+import { blockUser } from '../lib/block';
+import { useBlockedUsers } from '../store/blockedUsers';
 import { useChatSocket } from '../lib/useChatSocket';
 import { formatTime } from '../lib/datetime';
 import { colors, radius, shadow, spacing } from '../theme';
@@ -35,6 +37,7 @@ type Props = NativeStackScreenProps<ChatStackParams, 'ChatThread'>;
 
 export default function ChatThreadScreen({ navigation, route }: Props) {
   const { user } = useAuth();
+  const { refresh: refreshBlocked } = useBlockedUsers();
   const headerHeight = useHeaderHeight();
   const paramConvId = route.params.conversationId != null ? Number(route.params.conversationId) : undefined;
   const userId = route.params.userId;
@@ -45,10 +48,44 @@ export default function ChatThreadScreen({ navigation, route }: Props) {
   const [draft, setDraft] = useState('');
   const [loading, setLoading] = useState(true);
   const [sendingLoc, setSendingLoc] = useState(false);
+  const [blocked, setBlocked] = useState(false);
+
+  function confirmBlock() {
+    if (userId == null) return;
+    Alert.alert(
+      'Kullanıcıyı engelle',
+      `${route.params.name ?? 'Bu kullanıcı'} artık sana mesaj gönderemeyecek. Emin misin?`,
+      [
+        { text: 'Vazgeç', style: 'cancel' },
+        {
+          text: 'Engelle',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              await blockUser(userId);
+              await refreshBlocked();
+              navigation.goBack();
+            } catch {
+              Alert.alert('Hata', 'Engellenemedi, tekrar dene.');
+            }
+          },
+        },
+      ],
+    );
+  }
 
   useLayoutEffect(() => {
-    navigation.setOptions({ title: route.params.name ?? 'Sohbet' });
-  }, [navigation, route.params.name]);
+    navigation.setOptions({
+      title: route.params.name ?? 'Sohbet',
+      headerRight: () =>
+        userId != null ? (
+          <Pressable onPress={confirmBlock} hitSlop={12} style={{ paddingHorizontal: spacing.sm }}>
+            <MaterialCommunityIcons name="dots-vertical" size={22} color={colors.text} />
+          </Pressable>
+        ) : null,
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [navigation, route.params.name, userId]);
 
   const loadMessages = useCallback(async (id: number) => {
     try {
@@ -91,9 +128,13 @@ export default function ChatThreadScreen({ navigation, route }: Props) {
   const { connected, send: sendFrame } = useChatSocket({
     path: convId != null ? `/api/dm/${convId}/ws` : '',
     enabled: convId != null,
-    onMessage: (m: DmMsg) => {
+    onMessage: (m: any) => {
+      if (m?.type === 'blocked') {
+        setBlocked(true);
+        return;
+      }
       if (m?.id == null) return;
-      setMessages((prev) => (prev.some((x) => x.id === m.id) ? prev : [...prev, m]));
+      setMessages((prev) => (prev.some((x: DmMsg) => x.id === m.id) ? prev : [...prev, m]));
       // Any inbound message on a pending thread means it's now live.
       setStatus((s) => (s === 'pending' ? 'accepted' : s));
     },
@@ -218,36 +259,42 @@ export default function ChatThreadScreen({ navigation, route }: Props) {
         }}
       />
 
-      {!connected && (
+      {!connected && !blocked && (
         <View style={styles.connBar}>
           <Text style={styles.connText}>Bağlanıyor…</Text>
         </View>
       )}
 
-      <View style={styles.composer}>
-        <Pressable style={styles.locBtn} onPress={sendLocation} disabled={sendingLoc}>
-          {sendingLoc ? (
-            <ActivityIndicator size="small" color={colors.primary} />
-          ) : (
-            <MaterialCommunityIcons name="map-marker-radius" size={22} color={colors.primary} />
-          )}
-        </Pressable>
-        <TextInput
-          style={styles.composerInput}
-          value={draft}
-          onChangeText={setDraft}
-          placeholder="Mesaj yaz…"
-          placeholderTextColor={colors.textMuted}
-          multiline
-          maxLength={1000}
-          autoCorrect={false}
-          autoComplete="off"
-          spellCheck={false}
-        />
-        <Pressable style={[styles.sendBtn, !draft.trim() && styles.sendBtnOff]} onPress={send} disabled={!draft.trim()}>
-          <MaterialCommunityIcons name="send" size={20} color="#fff" />
-        </Pressable>
-      </View>
+      {blocked ? (
+        <View style={styles.connBar}>
+          <Text style={styles.connText}>Bu kullanıcıyla artık mesajlaşamıyorsun.</Text>
+        </View>
+      ) : (
+        <View style={styles.composer}>
+          <Pressable style={styles.locBtn} onPress={sendLocation} disabled={sendingLoc}>
+            {sendingLoc ? (
+              <ActivityIndicator size="small" color={colors.primary} />
+            ) : (
+              <MaterialCommunityIcons name="map-marker-radius" size={22} color={colors.primary} />
+            )}
+          </Pressable>
+          <TextInput
+            style={styles.composerInput}
+            value={draft}
+            onChangeText={setDraft}
+            placeholder="Mesaj yaz…"
+            placeholderTextColor={colors.textMuted}
+            multiline
+            maxLength={1000}
+            autoCorrect={false}
+            autoComplete="off"
+            spellCheck={false}
+          />
+          <Pressable style={[styles.sendBtn, !draft.trim() && styles.sendBtnOff]} onPress={send} disabled={!draft.trim()}>
+            <MaterialCommunityIcons name="send" size={20} color="#fff" />
+          </Pressable>
+        </View>
+      )}
     </KeyboardAvoidingView>
   );
 }
