@@ -444,7 +444,14 @@ export default function ProfileScreen() {
                 return <Text style={styles.muted}>Bu ay henüz XP kazanan yok.</Text>;
               }
               return seasonLeaders.map((l, i) => (
-                <SeasonRow key={l.user_id} entry={l} rank={i} isLast={i === seasonLeaders.length - 1} isMe={l.user_id === user?.id} />
+                <SeasonRow
+                  key={l.user_id}
+                  entry={l}
+                  rank={i}
+                  isLast={i === seasonLeaders.length - 1}
+                  isMe={l.user_id === user?.id}
+                  onPress={() => navigation.navigate('UserProfile', { userId: l.user_id, name: l.name })}
+                />
               ));
             }
             const list = lbScope === 'following' ? following : leaders;
@@ -452,7 +459,14 @@ export default function ProfileScreen() {
               return <Text style={styles.muted}>Veri yok.</Text>;
             }
             return list.map((l, i) => (
-              <LeaderRow key={l.user_id} entry={l} rank={i} isLast={i === list.length - 1} isMe={l.user_id === user?.id} />
+              <LeaderRow
+                key={l.user_id}
+                entry={l}
+                rank={i}
+                isLast={i === list.length - 1}
+                isMe={l.user_id === user?.id}
+                onPress={() => navigation.navigate('UserProfile', { userId: l.user_id, name: l.name })}
+              />
             ));
           })()}
         </Card>
@@ -494,7 +508,7 @@ export default function ProfileScreen() {
             <MaterialCommunityIcons name="compass-outline" size={22} color={colors.primary} />
             <View style={styles.flex}>
               <Text style={styles.emTitle}>Uygulama Turu</Text>
-              <Text style={styles.muted}>Sekmeleri ve ana özellikleri tanıtan turu tekrar izle</Text>
+              <Text style={styles.muted}>Ana özellikleri ekran üzerinde adım adım tekrar gör</Text>
             </View>
             <MaterialCommunityIcons name="chevron-right" size={22} color={colors.textMuted} />
           </Card>
@@ -685,9 +699,25 @@ function SegBtn({ label, active, onPress }: { label: string; active: boolean; on
 }
 
 // LeaderRow renders a single ranked rider; the caller's own row is highlighted.
-function LeaderRow({ entry, rank, isLast, isMe }: { entry: LeaderEntry; rank: number; isLast: boolean; isMe: boolean }) {
+function LeaderRow({
+  entry,
+  rank,
+  isLast,
+  isMe,
+  onPress,
+}: {
+  entry: LeaderEntry;
+  rank: number;
+  isLast: boolean;
+  isMe: boolean;
+  onPress: () => void;
+}) {
   return (
-    <View style={[styles.leaderRow, !isLast && styles.leaderDivider, isMe && styles.leaderMe]}>
+    <Pressable
+      style={[styles.leaderRow, !isLast && styles.leaderDivider, isMe && styles.leaderMe]}
+      onPress={onPress}
+      disabled={isMe}
+    >
       <View style={[styles.rankBadge, { backgroundColor: MEDALS[rank] ?? colors.surfaceAlt }]}>
         <Text style={[styles.rankText, rank > 2 && { color: colors.textMuted }]}>{rank + 1}</Text>
       </View>
@@ -705,14 +735,30 @@ function LeaderRow({ entry, rank, isLast, isMe }: { entry: LeaderEntry; rank: nu
         <Text style={styles.leaderSub}>{entry.ride_count} sürüş</Text>
       </View>
       <Text style={styles.leaderDist}>{entry.total_distance.toFixed(1)} km</Text>
-    </View>
+    </Pressable>
   );
 }
 
 // SeasonRow ranks a rider by XP earned this calendar month.
-function SeasonRow({ entry, rank, isLast, isMe }: { entry: SeasonEntry; rank: number; isLast: boolean; isMe: boolean }) {
+function SeasonRow({
+  entry,
+  rank,
+  isLast,
+  isMe,
+  onPress,
+}: {
+  entry: SeasonEntry;
+  rank: number;
+  isLast: boolean;
+  isMe: boolean;
+  onPress: () => void;
+}) {
   return (
-    <View style={[styles.leaderRow, !isLast && styles.leaderDivider, isMe && styles.leaderMe]}>
+    <Pressable
+      style={[styles.leaderRow, !isLast && styles.leaderDivider, isMe && styles.leaderMe]}
+      onPress={onPress}
+      disabled={isMe}
+    >
       <View style={[styles.rankBadge, { backgroundColor: MEDALS[rank] ?? colors.surfaceAlt }]}>
         <Text style={[styles.rankText, rank > 2 && { color: colors.textMuted }]}>{rank + 1}</Text>
       </View>
@@ -730,7 +776,7 @@ function SeasonRow({ entry, rank, isLast, isMe }: { entry: SeasonEntry; rank: nu
         <Text style={styles.leaderSub}>bu ay</Text>
       </View>
       <Text style={[styles.leaderDist, { color: colors.accent }]}>{entry.season_xp} XP</Text>
-    </View>
+    </Pressable>
   );
 }
 

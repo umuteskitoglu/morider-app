@@ -11,6 +11,8 @@ import { useAuth } from '../store/auth';
 import { useChatUnread } from '../store/chatUnread';
 import { registerForPush } from '../lib/push';
 import OnboardingTour from '../components/OnboardingTour';
+import { registerTourNode } from '../components/TourTarget';
+import { navigationRef } from './navigationRef';
 import { colors, gradients, radius, shadow, spacing } from '../theme';
 import LoginScreen from '../screens/LoginScreen';
 import SignupScreen from '../screens/SignupScreen';
@@ -323,12 +325,15 @@ function TabCell({
   label,
   badge,
   onPress,
+  tourId,
 }: {
   focused: boolean;
   icon: IconName;
   label: string;
   badge?: number;
   onPress: () => void;
+  // Registers the cell as an onboarding-tour spotlight target.
+  tourId: string;
 }) {
   const anim = useRef(new Animated.Value(focused ? 1 : 0)).current;
   useEffect(() => {
@@ -339,7 +344,7 @@ function TabCell({
   const scale = anim.interpolate({ inputRange: [0, 1], outputRange: [1, 1.12] });
 
   return (
-    <Pressable style={styles.tabCell} onPress={onPress} hitSlop={6}>
+    <Pressable ref={(node) => registerTourNode(tourId, node)} style={styles.tabCell} onPress={onPress} hitSlop={6}>
       <Animated.View style={[styles.tabIconWrap, focused && styles.tabIconWrapOn, { transform: [{ translateY: lift }, { scale }] }]}>
         {focused && <Animated.View style={[styles.tabGlow, { opacity: anim }]} />}
         <MaterialCommunityIcons name={icon} size={24} color={focused ? colors.primary : colors.textMuted} />
@@ -381,6 +386,7 @@ function CustomTabBar({ state, navigation }: BottomTabBarProps) {
               label={meta.label}
               badge={route.name === 'Chat' ? unreadCount : undefined}
               onPress={onPress}
+              tourId={`tab.${route.name}`}
             />
           );
         })}
@@ -434,11 +440,11 @@ export default function RootNavigator() {
   }
 
   return (
-    <NavigationContainer theme={navTheme} linking={linking}>
+    <NavigationContainer ref={navigationRef} theme={navTheme} linking={linking}>
       {token ? (
         <>
           <AppTabs />
-          {/* First-run welcome tour; self-hides once the rider has seen it. */}
+          {/* First-run spotlight tutorial; self-hides once the rider has seen it. */}
           <OnboardingTour />
         </>
       ) : (

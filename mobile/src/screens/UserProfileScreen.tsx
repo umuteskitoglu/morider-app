@@ -208,6 +208,17 @@ export default function UserProfileScreen({ route, navigation }: Props) {
               }}
             />
             <Button title="Meydan Oku" variant="ghost" icon="flag-checkered" onPress={() => setChallengeOpen(true)} />
+            <Button
+              title="Mesaj Gönder"
+              variant="ghost"
+              icon="message-text-outline"
+              onPress={() =>
+                (stackNav.getParent() as any)?.navigate('Chat', {
+                  screen: 'ChatThread',
+                  params: { userId, name, avatarUrl },
+                })
+              }
+            />
             <BlockButton
               userId={userId}
               name={name}

@@ -11,6 +11,7 @@ import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 
 import { RideStackParams } from '../navigation/RootNavigator';
 import { Button, TextField } from '../components/ui';
+import { TourTarget } from '../components/TourTarget';
 import { CrashCountdown } from '../components/CrashCountdown';
 import { NavBanner } from '../components/NavBanner';
 import { NavSummaryBar, SpeedPill } from '../components/NavSummaryBar';
@@ -958,14 +959,19 @@ export default function MapScreen({ route, navigation }: Props) {
             <Button title="Sürüşü Bitir" variant="danger" icon="stop-circle" onPress={stopRecording} loading={saving} />
           ) : (
             <>
-              <Button
-                title={destination || followPath.length > 1 ? 'Navigasyonu Başlat' : 'Sürüşü Başlat'}
-                icon="motorbike"
-                onPress={startRecording}
-                loading={saving}
-              />
+              {/* TourTarget ids let the onboarding tutorial spotlight these. */}
+              <TourTarget id="ride.start">
+                <Button
+                  title={destination || followPath.length > 1 ? 'Navigasyonu Başlat' : 'Sürüşü Başlat'}
+                  icon="motorbike"
+                  onPress={startRecording}
+                  loading={saving}
+                />
+              </TourTarget>
               <View style={{ height: spacing.sm }} />
-              <Button title="Grup Sürüşü" variant="ghost" icon="account-group" onPress={() => navigation.navigate('GroupJoin')} />
+              <TourTarget id="ride.group">
+                <Button title="Grup Sürüşü" variant="ghost" icon="account-group" onPress={() => navigation.navigate('GroupJoin')} />
+              </TourTarget>
             </>
           )}
         </View>
