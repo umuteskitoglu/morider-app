@@ -43,6 +43,7 @@ func Run(cfg config.Config) error {
 		{"/api/events", cfg.EventURL},
 		{"/api/chat", cfg.ChatURL},
 		{"/api/dm", cfg.ChatURL},
+		{"/api/communities", cfg.CommunityURL},
 	}
 
 	for _, r := range routes {

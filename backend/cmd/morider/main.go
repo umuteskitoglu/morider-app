@@ -18,6 +18,7 @@ import (
 
 	"github.com/morider/backend/internal/auth"
 	"github.com/morider/backend/internal/chat"
+	"github.com/morider/backend/internal/community"
 	"github.com/morider/backend/internal/event"
 	"github.com/morider/backend/internal/feed"
 	"github.com/morider/backend/internal/gateway"
@@ -33,7 +34,7 @@ import (
 )
 
 func main() {
-	service := flag.String("service", "", "service to run: all|gateway|auth|user|ride|route|reward|telemetry|feed|event|chat")
+	service := flag.String("service", "", "service to run: all|gateway|auth|user|ride|route|reward|telemetry|feed|event|chat|community")
 	flag.Parse()
 
 	// Allow selecting the service via env too (handy in containers).
@@ -67,6 +68,7 @@ func main() {
 		"feed":      feed.Run,
 		"event":     event.Run,
 		"chat":      chat.Run,
+		"community": community.Run,
 	}
 
 	if name == "all" {
@@ -78,7 +80,7 @@ func main() {
 
 	run, ok := runners[name]
 	if !ok {
-		fmt.Println("usage: morider -service=all|gateway|auth|user|ride|route|reward|telemetry|feed|event")
+		fmt.Println("usage: morider -service=all|gateway|auth|user|ride|route|reward|telemetry|feed|event|chat|community")
 		os.Exit(2)
 	}
 
@@ -97,7 +99,7 @@ func runAll(cfg config.Config, runners map[string]func(config.Config) error) err
 	// already listening by the time it starts proxying.
 	order := []string{
 		"auth", "user", "ride", "route", "reward",
-		"telemetry", "feed", "event", "chat", "gateway",
+		"telemetry", "feed", "event", "chat", "community", "gateway",
 	}
 
 	results := make(chan error, len(order))

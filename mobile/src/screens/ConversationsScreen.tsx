@@ -62,6 +62,20 @@ export default function ConversationsScreen() {
         <MaterialCommunityIcons name="chevron-right" size={22} color={colors.textMuted} />
       </Pressable>
 
+      <Pressable
+        style={({ pressed }) => [styles.globalCard, pressed && styles.rowPressed]}
+        onPress={() => navigation.navigate('Communities')}
+      >
+        <LinearGradient colors={gradients.cyan} style={styles.globalIcon}>
+          <MaterialCommunityIcons name="account-group" size={22} color="#fff" />
+        </LinearGradient>
+        <View style={styles.flex}>
+          <Text style={styles.globalTitle}>Topluluklar</Text>
+          <Text style={styles.globalHint}>Kulübüne katıl; duyuruları ve anketleri kaçırma</Text>
+        </View>
+        <MaterialCommunityIcons name="chevron-right" size={22} color={colors.textMuted} />
+      </Pressable>
+
       {items.length === 0 ? (
         <View style={styles.empty}>
           <EmptyState

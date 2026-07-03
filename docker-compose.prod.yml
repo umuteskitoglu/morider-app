@@ -87,6 +87,8 @@ services:
       TELEMETRY_SERVICE_URL: http://localhost:8086
       FEED_SERVICE_URL: http://localhost:8087
       EVENT_SERVICE_URL: http://localhost:8088
+      CHAT_SERVICE_URL: http://localhost:8089
+      COMMUNITY_SERVICE_URL: http://localhost:8090
       # Firebase service-account key for FCM push (mounted read-only below).
       FCM_CREDENTIALS_FILE: /run/secrets/fcm.json
     volumes:

@@ -29,6 +29,14 @@ type Comment = {
 
 type ReplyTarget = { id: number; author: string } | null;
 
+// CommentEndpoints lets callers point the view at a different comments API
+// (e.g. community posts) — the payload shapes must match the feed's.
+export type CommentEndpoints = {
+  list: string;
+  add: string;
+  commentLike: (commentId: number) => string;
+};
+
 // Cap visual nesting so deep threads stay readable on narrow screens.
 const MAX_INDENT_DEPTH = 6;
 const INDENT = 14;
@@ -40,11 +48,23 @@ export function CommentsView({
   postId,
   onAdded,
   keyboardOffset = 0,
+  endpoints,
 }: {
   postId: number;
   onAdded?: () => void;
   keyboardOffset?: number;
+  endpoints?: CommentEndpoints;
 }) {
+  // Default to the feed's comment API; community screens pass their own paths.
+  const paths = useMemo<CommentEndpoints>(
+    () =>
+      endpoints ?? {
+        list: `/api/posts/${postId}/comments`,
+        add: `/api/posts/${postId}/comments`,
+        commentLike: (id: number) => `/api/comments/${id}/like`,
+      },
+    [endpoints, postId],
+  );
   const insets = useSafeAreaInsets();
   const inputRef = useRef<TextInput>(null);
   const [comments, setComments] = useState<Comment[]>([]);
@@ -63,14 +83,14 @@ export function CommentsView({
   const load = useCallback(async () => {
     try {
       setLoading(true);
-      const { data } = await api.get(`/api/posts/${postId}/comments`);
+      const { data } = await api.get(paths.list);
       setComments(data.comments ?? []);
     } catch {
       // ignore; empty state will render
     } finally {
       setLoading(false);
     }
-  }, [postId]);
+  }, [paths]);
 
   useEffect(() => {
     load();
@@ -97,7 +117,7 @@ export function CommentsView({
     if (!text) return;
     try {
       setSending(true);
-      const { data } = await api.post(`/api/posts/${postId}/comments`, {
+      const { data } = await api.post(paths.add, {
         body: text,
         parent_id: replyTo?.id ?? null,
       });
@@ -122,8 +142,8 @@ export function CommentsView({
       ),
     );
     try {
-      if (next) await api.post(`/api/comments/${c.id}/like`);
-      else await api.delete(`/api/comments/${c.id}/like`);
+      if (next) await api.post(paths.commentLike(c.id));
+      else await api.delete(paths.commentLike(c.id));
     } catch {
       // revert
       setComments((list) =>

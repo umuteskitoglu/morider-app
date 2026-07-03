@@ -48,6 +48,12 @@ import EventLocationPickerScreen from '../screens/EventLocationPickerScreen';
 import ConversationsScreen from '../screens/ConversationsScreen';
 import GlobalChatScreen from '../screens/GlobalChatScreen';
 import ChatThreadScreen from '../screens/ChatThreadScreen';
+import CommunitiesScreen from '../screens/CommunitiesScreen';
+import CommunityCreateScreen from '../screens/CommunityCreateScreen';
+import CommunityDetailScreen from '../screens/CommunityDetailScreen';
+import CommunityMembersScreen from '../screens/CommunityMembersScreen';
+import CommunityPostCreateScreen from '../screens/CommunityPostCreateScreen';
+import CommunityCommentsScreen from '../screens/CommunityCommentsScreen';
 
 export type AuthStackParams = {
   Login: undefined;
@@ -70,6 +76,7 @@ export type FeedStackParams = {
   LocationPicker: undefined;
   UserProfile: { userId: number; name: string };
   UserSearch: undefined;
+  RouteDetail: { id: number; name: string };
   Comments: { postId: number };
   // Without params: the caller's own follows. With userId: that user's lists
   // (subject to the connection-based visibility rule), opened on `tab`.
@@ -118,6 +125,14 @@ export type ChatStackParams = {
   Conversations: undefined;
   GlobalChat: undefined;
   ChatThread: { conversationId?: number; userId?: number; name?: string; avatarUrl?: string };
+  // Communities (Topluluk): rider clubs where only admins broadcast posts and
+  // members comment. They live in the Chat tab next to the community room.
+  Communities: undefined;
+  CommunityCreate: undefined;
+  CommunityDetail: { id: number; name?: string };
+  CommunityMembers: { id: number; myRole: string };
+  CommunityPostCreate: { id: number };
+  CommunityComments: { postId: number };
 };
 
 export type AppTabParams = {
@@ -243,6 +258,16 @@ function ChatNavigator() {
       <ChatStack.Screen name="Conversations" component={ConversationsScreen} options={{ title: 'Mesajlar' }} />
       <ChatStack.Screen name="GlobalChat" component={GlobalChatScreen} options={{ title: 'Topluluk Sohbeti' }} />
       <ChatStack.Screen name="ChatThread" component={ChatThreadScreen} options={{ title: 'Sohbet' }} />
+      <ChatStack.Screen name="Communities" component={CommunitiesScreen} options={{ title: 'Topluluklar' }} />
+      <ChatStack.Screen name="CommunityCreate" component={CommunityCreateScreen} options={{ title: 'Yeni Topluluk' }} />
+      <ChatStack.Screen
+        name="CommunityDetail"
+        component={CommunityDetailScreen}
+        options={({ route }) => ({ title: route.params.name ?? 'Topluluk' })}
+      />
+      <ChatStack.Screen name="CommunityMembers" component={CommunityMembersScreen} options={{ title: 'Üyeler' }} />
+      <ChatStack.Screen name="CommunityPostCreate" component={CommunityPostCreateScreen} options={{ title: 'Yeni Yayın' }} />
+      <ChatStack.Screen name="CommunityComments" component={CommunityCommentsScreen} options={{ title: 'Yorumlar' }} />
     </ChatStack.Navigator>
   );
 }
@@ -261,7 +286,8 @@ function FeedNavigator() {
       <FeedStack.Screen name="CreatePost" component={CreatePostScreen} options={{ title: 'Yeni Paylaşım' }} />
       <FeedStack.Screen name="LocationPicker" component={LocationPickerScreen} options={{ title: 'Konum Seç' }} />
       <FeedStack.Screen name="UserProfile" component={UserProfileScreen} options={{ title: 'Profil' }} />
-      <FeedStack.Screen name="UserSearch" component={UserSearchScreen} options={{ title: 'Kişi Bul' }} />
+      <FeedStack.Screen name="UserSearch" component={UserSearchScreen} options={{ title: 'Ara' }} />
+      <FeedStack.Screen name="RouteDetail" component={RouteDetailScreen} options={{ title: 'Rota' }} />
       <FeedStack.Screen name="Follows" component={FollowsScreen} options={{ title: 'Takip' }} />
       <FeedStack.Screen name="Comments" component={CommentsScreen} options={{ title: 'Yorumlar' }} />
     </FeedStack.Navigator>
@@ -302,6 +328,9 @@ const linking: LinkingOptions<AppTabParams> = {
       Chat: {
         screens: {
           ChatThread: 'dm/:conversationId',
+          // morider://community/<id> opens a community (used by community push
+          // notifications: new post, join request, approval).
+          CommunityDetail: 'community/:id',
         },
       },
     },

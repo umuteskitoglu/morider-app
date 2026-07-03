@@ -75,6 +75,7 @@ type Config struct {
 	FeedURL      string
 	EventURL     string
 	ChatURL      string
+	CommunityURL string
 }
 
 // Load reads configuration from the environment, applying sane defaults so the
@@ -121,6 +122,7 @@ func Load() Config {
 		FeedURL:      getEnv("FEED_SERVICE_URL", "http://localhost:8087"),
 		EventURL:     getEnv("EVENT_SERVICE_URL", "http://localhost:8088"),
 		ChatURL:      getEnv("CHAT_SERVICE_URL", "http://localhost:8089"),
+		CommunityURL: getEnv("COMMUNITY_SERVICE_URL", "http://localhost:8090"),
 	}
 }
 
