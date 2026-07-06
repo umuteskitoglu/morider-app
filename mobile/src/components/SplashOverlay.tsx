@@ -2,8 +2,14 @@ import React, { useEffect, useRef } from 'react';
 import { Animated, Easing, StyleSheet, Text, View } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
+import { useAudioPlayer } from 'expo-audio';
 
 import { colors, gradients, spacing } from '../theme';
+
+// Engine "rev" played on cold start. Currently a real supersport recording
+// (Kawasaki ZX-6R, CC BY 3.0 — see assets/CREDITS.md). Drop a genuine S1000RR
+// clip in at the same path to swap it; keep it short (~3-4s) and m4a/mp3/wav.
+const engineSound = require('../../assets/s1000rr.m4a');
 
 const GAUGE = 168;
 const SWEEP = 118; // needle swings between -SWEEP and +SWEEP degrees
@@ -23,14 +29,25 @@ function tachZoneColor(frac: number): string {
 // into the redline: the dial ticks light up green→amber→red as the needle
 // sweeps and the engine sound climbs, then the overlay fades and calls onFinish.
 export default function SplashOverlay({ onFinish }: { onFinish: () => void }) {
+  // The exact audio setup that shipped in the last known-good build: the hook
+  // owns the native player's lifecycle. The launch-crash suspect was the
+  // startup audio-session config (setAudioModeAsync at import time), which now
+  // runs at ride start instead — not this player.
+  const player = useAudioPlayer(engineSound);
+
   const fade = useRef(new Animated.Value(1)).current; // overlay opacity (1 -> 0)
   const logoIn = useRef(new Animated.Value(0)).current; // wordmark intro
   const rev = useRef(new Animated.Value(0)).current; // tach sweep 0..1
 
   useEffect(() => {
-    // No audio here on purpose. The engine-rev sound (expo-audio) ran at the
-    // very first frames of the app and was the prime suspect in hard launch
-    // crashes on TestFlight builds — the splash is now purely visual.
+    // Audio is best-effort: a failure (no asset, silent switch, etc.) must never
+    // block the visual splash from completing.
+    try {
+      player.play();
+    } catch {
+      // ignore
+    }
+
     Animated.spring(logoIn, { toValue: 1, friction: 6, tension: 70, useNativeDriver: true }).start();
 
     // Needle sweep follows the engine curve: blip up, settle, climb into the
