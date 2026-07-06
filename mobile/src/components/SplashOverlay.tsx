@@ -2,14 +2,8 @@ import React, { useEffect, useRef } from 'react';
 import { Animated, Easing, StyleSheet, Text, View } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
-import type { AudioPlayer } from 'expo-audio';
 
 import { colors, gradients, spacing } from '../theme';
-
-// Engine "rev" played on cold start. Currently a real supersport recording
-// (Kawasaki ZX-6R, CC BY 3.0 — see assets/CREDITS.md). Drop a genuine S1000RR
-// clip in at the same path to swap it; keep it short (~3-4s) and m4a/mp3/wav.
-const engineSound = require('../../assets/s1000rr.m4a');
 
 const GAUGE = 168;
 const SWEEP = 118; // needle swings between -SWEEP and +SWEEP degrees
@@ -34,22 +28,9 @@ export default function SplashOverlay({ onFinish }: { onFinish: () => void }) {
   const rev = useRef(new Animated.Value(0)).current; // tach sweep 0..1
 
   useEffect(() => {
-    // Audio is best-effort and lazily loaded: a missing/mis-linked native audio
-    // module (or any other native audio failure — no asset, silent switch,
-    // etc.) must never block the visual splash, let alone crash the app on
-    // launch. A plain top-level `useAudioPlayer` import/hook would run before
-    // anything else renders with no way to catch a native-module load failure.
-    let player: AudioPlayer | null = null;
-    try {
-      // eslint-disable-next-line @typescript-eslint/no-var-requires
-      const { createAudioPlayer } = require('expo-audio');
-      const created: AudioPlayer = createAudioPlayer(engineSound);
-      created.play();
-      player = created;
-    } catch {
-      // ignore
-    }
-
+    // No audio here on purpose. The engine-rev sound (expo-audio) ran at the
+    // very first frames of the app and was the prime suspect in hard launch
+    // crashes on TestFlight builds — the splash is now purely visual.
     Animated.spring(logoIn, { toValue: 1, friction: 6, tension: 70, useNativeDriver: true }).start();
 
     // Needle sweep follows the engine curve: blip up, settle, climb into the
@@ -67,14 +48,7 @@ export default function SplashOverlay({ onFinish }: { onFinish: () => void }) {
       });
     }, 2300);
 
-    return () => {
-      clearTimeout(t);
-      try {
-        player?.remove();
-      } catch {
-        // ignore
-      }
-    };
+    return () => clearTimeout(t);
     // Run exactly once on mount.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);

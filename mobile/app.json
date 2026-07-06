@@ -86,10 +86,7 @@
       [
         "expo-build-properties",
         {
-          "ios": {
-            "useFrameworks": "static",
-            "forceStaticLinking": ["RNFBApp", "RNFBMessaging"]
-          }
+          "ios": { "useFrameworks": "static" }
         }
       ]
     ],

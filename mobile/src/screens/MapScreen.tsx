@@ -38,6 +38,7 @@ import {
   SpokenState,
   stopSpeaking,
 } from '../lib/navigation';
+import { configureAudioSession } from '../lib/audio';
 import { POI, POI_CATEGORIES, POI_LABELS, poiColor, poiIcon } from '../lib/poi';
 import { setRideLocationHandler, startRideLocation, stopRideLocation } from '../lib/backgroundLocation';
 import { computeRideStats } from '../lib/rideStats';
@@ -567,6 +568,10 @@ export default function MapScreen({ route, navigation }: Props) {
         'Başka bir uygulamaya geçince sürüş kaydı durabilir. Kesintisiz kayıt için konum iznini "Her zaman" yap.',
       );
     }
+
+    // Sesli yönlendirme diğer uygulamaların müziğini kesmesin (duck etsin).
+    // Açılışta değil burada: ses oturumu ancak sürüş başlayınca gerekir.
+    configureAudioSession();
 
     setPath([]);
     setDistance(0);
