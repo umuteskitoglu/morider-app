@@ -2,7 +2,7 @@ import React, { useEffect, useRef } from 'react';
 import { Animated, Easing, StyleSheet, Text, View } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
-import { useAudioPlayer } from 'expo-audio';
+import type { AudioPlayer } from 'expo-audio';
 
 import { colors, gradients, spacing } from '../theme';
 
@@ -29,17 +29,23 @@ function tachZoneColor(frac: number): string {
 // into the redline: the dial ticks light up green→amber→red as the needle
 // sweeps and the engine sound climbs, then the overlay fades and calls onFinish.
 export default function SplashOverlay({ onFinish }: { onFinish: () => void }) {
-  const player = useAudioPlayer(engineSound);
-
   const fade = useRef(new Animated.Value(1)).current; // overlay opacity (1 -> 0)
   const logoIn = useRef(new Animated.Value(0)).current; // wordmark intro
   const rev = useRef(new Animated.Value(0)).current; // tach sweep 0..1
 
   useEffect(() => {
-    // Audio is best-effort: a failure (no asset, silent switch, etc.) must never
-    // block the visual splash from completing.
+    // Audio is best-effort and lazily loaded: a missing/mis-linked native audio
+    // module (or any other native audio failure — no asset, silent switch,
+    // etc.) must never block the visual splash, let alone crash the app on
+    // launch. A plain top-level `useAudioPlayer` import/hook would run before
+    // anything else renders with no way to catch a native-module load failure.
+    let player: AudioPlayer | null = null;
     try {
-      player.play();
+      // eslint-disable-next-line @typescript-eslint/no-var-requires
+      const { createAudioPlayer } = require('expo-audio');
+      const created: AudioPlayer = createAudioPlayer(engineSound);
+      created.play();
+      player = created;
     } catch {
       // ignore
     }
@@ -61,7 +67,14 @@ export default function SplashOverlay({ onFinish }: { onFinish: () => void }) {
       });
     }, 2300);
 
-    return () => clearTimeout(t);
+    return () => {
+      clearTimeout(t);
+      try {
+        player?.remove();
+      } catch {
+        // ignore
+      }
+    };
     // Run exactly once on mount.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
