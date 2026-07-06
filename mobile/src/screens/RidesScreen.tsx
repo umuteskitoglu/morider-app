@@ -13,10 +13,20 @@ import { colors, radius, spacing } from '../theme';
 type Ride = {
   id: number;
   distance: number;
-  avg_speed: number;
-  elevation_gain: number;
+  max_speed: number | null;
   start_time: string | null;
+  end_time: string | null;
 };
+
+// fmtRideDuration renders the ride's wall-clock length as "1s 24dk" / "37dk".
+function fmtRideDuration(start: string | null, end: string | null): string {
+  if (!start || !end) return '—';
+  const ms = new Date(end).getTime() - new Date(start).getTime();
+  if (!Number.isFinite(ms) || ms <= 0) return '—';
+  const h = Math.floor(ms / 3600000);
+  const m = Math.round((ms % 3600000) / 60000);
+  return h > 0 ? `${h}s ${m}dk` : `${m}dk`;
+}
 
 export default function RidesScreen() {
   const navigation = useNavigation<NativeStackNavigationProp<ProfileStackParams>>();
@@ -114,8 +124,8 @@ function RideRow({
             <Text style={styles.date}>{item.start_time ? item.start_time.slice(0, 10) : '-'}</Text>
           </View>
           <View style={styles.row}>
-            <Meta icon="speedometer" label="Ort. hız" value={`${item.avg_speed.toFixed(0)} km/s`} />
-            <Meta icon="image-filter-hdr" label="Yükseklik" value={`${item.elevation_gain.toFixed(0)} m`} />
+            <Meta icon="speedometer" label="Max hız" value={item.max_speed != null ? `${item.max_speed.toFixed(0)} km/s` : '—'} />
+            <Meta icon="timer-outline" label="Süre" value={fmtRideDuration(item.start_time, item.end_time)} />
           </View>
         </Card>
       </Pressable>

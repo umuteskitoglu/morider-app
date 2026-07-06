@@ -24,7 +24,10 @@ import { colors, gradients, radius, shadow, spacing } from '../theme';
 type Badge = { id: number; type: string; description: string; tier?: string };
 type PublicMoto = { id: number; name: string; year: number };
 type PublicRoute = { id: number; name: string; distance: number };
-type RecapStat = { week_start: string; distance: number; duration_seconds: number; avg_speed: number; ride_count: number };
+// Ride summaries only — the backend never exposes another rider's GPS track,
+// so there is deliberately no ride detail navigation from this screen.
+type PublicRide = { id: number; distance: number; max_speed: number | null; duration_seconds: number; start_time: string | null };
+type RecapStat = { week_start: string; distance: number; duration_seconds: number; avg_speed: number; max_speed: number; ride_count: number };
 type Recap = { week: RecapStat; prev_week: RecapStat };
 
 // Stack-agnostic props: this screen is registered in both the Feed and Profile
@@ -47,6 +50,7 @@ export default function UserProfileScreen({ route, navigation }: Props) {
   const [badges, setBadges] = useState<Badge[]>([]);
   const [garage, setGarage] = useState<PublicMoto[]>([]);
   const [routes, setRoutes] = useState<PublicRoute[]>([]);
+  const [rides, setRides] = useState<PublicRide[]>([]);
   const [recap, setRecap] = useState<Recap | null>(null);
   const [level, setLevel] = useState<RiderLevel | null>(null);
   const [viewer, setViewer] = useState<DetailPost | null>(null);
@@ -90,7 +94,7 @@ export default function UserProfileScreen({ route, navigation }: Props) {
         return null;
       }
     };
-    const [u, p, b, g, r, s, rc, lv] = await Promise.all([
+    const [u, p, b, g, r, s, rc, lv, rd] = await Promise.all([
       settle(api.get(`/api/users/${userId}`)),
       settle(api.get(`/api/feed/user/${userId}`)),
       settle(api.get(`/api/rewards/user/${userId}`)),
@@ -99,6 +103,7 @@ export default function UserProfileScreen({ route, navigation }: Props) {
       isSelf ? Promise.resolve(null) : settle(api.get(`/api/follows/status/${userId}`)),
       settle(api.get(`/api/rides/recap/${userId}`)),
       settle(api.get(`/api/rewards/summary/${userId}`)),
+      settle(api.get(`/api/rides/user/${userId}`)),
     ]);
     if (u) {
       setAvatarUrl(u.data.avatar_url ?? '');
@@ -116,6 +121,7 @@ export default function UserProfileScreen({ route, navigation }: Props) {
     setBadges(b?.data.rewards ?? []);
     setGarage(g?.data.motorcycles ?? []);
     setRoutes(r?.data.routes ?? []);
+    setRides(rd?.data.rides ?? []);
     setRecap(rc?.data ?? null);
     setLevel(lv?.data ?? null);
     if (s) {
@@ -327,6 +333,30 @@ export default function UserProfileScreen({ route, navigation }: Props) {
             </View>
           </View>
         )}
+
+        {rides.length > 0 && (
+          <View>
+            <View style={styles.sectionRow}>
+              <MaterialCommunityIcons name="motorbike" size={18} color={colors.primary} />
+              <Text style={styles.sectionTitle}>Sürüşler</Text>
+            </View>
+            <View style={styles.listCard}>
+              {rides.map((r, i) => (
+                <View key={r.id} style={[styles.listRow, i > 0 && styles.listDivider]}>
+                  <MaterialCommunityIcons name="motorbike" size={20} color={colors.primary} />
+                  <View style={styles.rideInfo}>
+                    <Text style={styles.rideKm} numberOfLines={1}>{r.distance.toFixed(1)} km</Text>
+                    <Text style={styles.rideSub}>
+                      {r.start_time ? r.start_time.slice(0, 10) : '—'}
+                      {r.duration_seconds > 0 ? ` · ${fmtDuration(r.duration_seconds)}` : ''}
+                    </Text>
+                  </View>
+                  {r.max_speed != null && <Text style={styles.listMeta}>Max {r.max_speed.toFixed(0)} km/s</Text>}
+                </View>
+              ))}
+            </View>
+          </View>
+        )}
       </ScrollView>
       <PostDetail post={viewer} onClose={() => setViewer(null)} />
       <AvatarViewer uri={zoomUri} onClose={() => setZoomUri(null)} />
@@ -356,7 +386,7 @@ function RecapBody({ recap }: { recap: Recap }) {
   const tiles: { icon: any; label: string; value: string }[] = [
     { icon: 'map-marker-distance', label: 'Mesafe', value: `${w.distance.toFixed(1)} km` },
     { icon: 'clock-outline', label: 'Süre', value: fmtDuration(w.duration_seconds) },
-    { icon: 'speedometer', label: 'Ort. Hız', value: `${w.avg_speed.toFixed(0)} km/s` },
+    { icon: 'speedometer', label: 'Maks. Hız', value: `${w.max_speed.toFixed(0)} km/s` },
     { icon: 'motorbike', label: 'Sürüş', value: String(w.ride_count) },
   ];
   return (
@@ -435,6 +465,10 @@ const styles = StyleSheet.create({
   listDivider: { borderTopWidth: 1, borderTopColor: colors.border },
   listName: { color: colors.text, flex: 1, fontWeight: '700', fontSize: 14 },
   listMeta: { color: colors.primary, fontWeight: '800', fontSize: 13 },
+  // Ride summary rows.
+  rideInfo: { flex: 1, gap: 1 },
+  rideKm: { color: colors.text, fontWeight: '700', fontSize: 14 },
+  rideSub: { color: colors.textMuted, fontSize: 12 },
   grid: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.xs },
   gridItem: { borderRadius: radius.sm, overflow: 'hidden', backgroundColor: colors.surface },
   gridImg: { width: '100%', height: '100%' },

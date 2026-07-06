@@ -48,7 +48,7 @@ type LeaderEntry = {
   ride_count: number;
   avg_speed?: number;
 };
-type RecapStat = { week_start: string; distance: number; duration_seconds: number; avg_speed: number; ride_count: number };
+type RecapStat = { week_start: string; distance: number; duration_seconds: number; avg_speed: number; max_speed: number; ride_count: number };
 type Recap = { week: RecapStat; prev_week: RecapStat };
 
 export default function ProfileScreen() {
@@ -125,6 +125,7 @@ export default function ProfileScreen() {
         if ((u.data.license_type ?? '') !== (user?.license_type ?? '')) fresh.license_type = u.data.license_type || undefined;
         if ((u.data.bike_type ?? '') !== (user?.bike_type ?? '')) fresh.bike_type = u.data.bike_type || undefined;
         if (typeof u.data.show_garage === 'boolean' && u.data.show_garage !== user?.show_garage) fresh.show_garage = u.data.show_garage;
+        if (typeof u.data.show_rides === 'boolean' && u.data.show_rides !== user?.show_rides) fresh.show_rides = u.data.show_rides;
         if (typeof u.data.share_live_location === 'boolean' && u.data.share_live_location !== user?.share_live_location) fresh.share_live_location = u.data.share_live_location;
         if (Object.keys(fresh).length > 0) updateUser(fresh);
       }
@@ -648,7 +649,9 @@ function QuickTile({ icon, label, onPress }: { icon: any; label: string; onPress
   return (
     <Pressable style={({ pressed }) => [styles.quickTile, pressed && styles.quickTilePressed]} onPress={onPress}>
       <MaterialCommunityIcons name={icon} size={24} color={colors.primary} />
-      <Text style={styles.quickLabel}>{label}</Text>
+      <Text style={styles.quickLabel} numberOfLines={1} adjustsFontSizeToFit>
+        {label}
+      </Text>
     </Pressable>
   );
 }
@@ -668,7 +671,7 @@ function RecapBody({ recap }: { recap: Recap }) {
   const tiles: { icon: any; label: string; value: string }[] = [
     { icon: 'map-marker-distance', label: 'Mesafe', value: `${w.distance.toFixed(1)} km` },
     { icon: 'clock-outline', label: 'Süre', value: fmtDuration(w.duration_seconds) },
-    { icon: 'speedometer', label: 'Ort. Hız', value: `${w.avg_speed.toFixed(0)} km/s` },
+    { icon: 'speedometer', label: 'Maks. Hız', value: `${w.max_speed.toFixed(0)} km/s` },
     { icon: 'motorbike', label: 'Sürüş', value: String(w.ride_count) },
   ];
   return (
@@ -811,15 +814,17 @@ const styles = StyleSheet.create({
   quickTile: {
     flex: 1,
     alignItems: 'center',
+    justifyContent: 'center',
     gap: spacing.xs,
     paddingVertical: spacing.md,
+    paddingHorizontal: spacing.xs,
     backgroundColor: colors.surface,
     borderRadius: radius.lg,
     borderWidth: 1,
     borderColor: colors.border,
   },
   quickTilePressed: { opacity: 0.7, transform: [{ scale: 0.98 }] },
-  quickLabel: { color: colors.text, fontWeight: '700', fontSize: 13 },
+  quickLabel: { color: colors.text, fontWeight: '700', fontSize: 12, textAlign: 'center' },
   username: { color: colors.primary, fontWeight: '700', marginTop: 2 },
   email: { color: colors.textMuted, marginTop: 2 },
   bio: { color: colors.text, textAlign: 'center', marginTop: spacing.sm, paddingHorizontal: spacing.lg, lineHeight: 19 },

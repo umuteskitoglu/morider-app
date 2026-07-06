@@ -14,6 +14,7 @@ export type User = {
   license_type?: string;
   bike_type?: string;
   show_garage?: boolean;
+  show_rides?: boolean;
   share_live_location?: boolean;
 };
 

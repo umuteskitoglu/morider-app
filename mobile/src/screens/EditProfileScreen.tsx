@@ -33,8 +33,10 @@ export default function EditProfileScreen({ navigation }: Props) {
   const [bio, setBio] = useState(user?.bio ?? '');
   const [country, setCountry] = useState(user?.country ?? '');
   const [avatarUrl, setAvatarUrl] = useState(user?.avatar_url ?? '');
-  // Privacy: garage is visible on your public profile unless turned off.
+  // Privacy: garage and ride summaries are visible on your public profile
+  // unless turned off.
   const [showGarage, setShowGarage] = useState(user?.show_garage ?? true);
+  const [showRides, setShowRides] = useState(user?.show_rides ?? true);
   const [uploadingAvatar, setUploadingAvatar] = useState(false);
   const [saving, setSaving] = useState(false);
 
@@ -97,6 +99,7 @@ export default function EditProfileScreen({ navigation }: Props) {
       if (bio !== (user.bio ?? '')) body.bio = bio;
       if (country !== (user.country ?? '')) body.country = country;
       if (showGarage !== (user.show_garage ?? true)) body.show_garage = showGarage;
+      if (showRides !== (user.show_rides ?? true)) body.show_rides = showRides;
 
       if (Object.keys(body).length > 0) {
         const { data } = await api.put(`/api/users/${user.id}`, body);
@@ -106,6 +109,7 @@ export default function EditProfileScreen({ navigation }: Props) {
           bio: data.bio,
           country: data.country,
           show_garage: data.show_garage,
+          show_rides: data.show_rides,
         });
       }
       navigation.goBack();
@@ -183,6 +187,20 @@ export default function EditProfileScreen({ navigation }: Props) {
               thumbColor="#fff"
             />
           </View>
+          <View style={[styles.toggleRow, styles.toggleDivider]}>
+            <View style={styles.toggleText}>
+              <Text style={styles.toggleTitle}>Sürüşlerim profilimde görünsün</Text>
+              <Text style={styles.toggleSub}>
+                Sadece özet gösterilir: mesafe, max hız, süre ve tarih. Rotan ve harita izin hiçbir zaman başkalarıyla paylaşılmaz.
+              </Text>
+            </View>
+            <Switch
+              value={showRides}
+              onValueChange={setShowRides}
+              trackColor={{ true: colors.primary, false: colors.border }}
+              thumbColor="#fff"
+            />
+          </View>
         </Card>
 
         <Button title="Kaydet" icon="content-save" onPress={save} loading={saving} />
@@ -213,6 +231,7 @@ const styles = StyleSheet.create({
   changePhoto: { color: colors.primary, fontWeight: '800', fontSize: 14 },
   sectionLabel: { color: colors.textMuted, fontWeight: '800', fontSize: 12, letterSpacing: 0.5, textTransform: 'uppercase', marginTop: spacing.sm, marginLeft: spacing.xs },
   toggleRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.md },
+  toggleDivider: { borderTopWidth: 1, borderTopColor: colors.border, marginTop: spacing.md, paddingTop: spacing.md },
   toggleText: { flex: 1, gap: 2 },
   toggleTitle: { color: colors.text, fontWeight: '700', fontSize: 14 },
   toggleSub: { color: colors.textMuted, fontSize: 12, lineHeight: 16 },

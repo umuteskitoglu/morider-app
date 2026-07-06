@@ -36,7 +36,10 @@
       "Bash(afinfo /tmp/synth_eng.m4a)",
       "PowerShell(git add mobile/src/screens/CreatePostScreen.tsx mobile/src/screens/RouteCreateScreen.tsx)",
       "Bash(git pull *)",
-      "Bash(node -e \"console.log\\(Object.keys\\(require\\('expo-keep-awake'\\)\\)\\)\")"
+      "Bash(node -e \"console.log\\(Object.keys\\(require\\('expo-keep-awake'\\)\\)\\)\")",
+      "Bash(exit 0)",
+      "Bash(timeout 1 echo noop)",
+      "Bash(xargs grep -l \"api\\\\\\\\.get\\\\|api\\\\\\\\.post\\\\|api\\\\\\\\.delete\\\\|api\\\\\\\\.put\")"
     ]
   }
 }

@@ -39,7 +39,8 @@ Profil alanları: `name`, `username`, `country`, `avatar_url`, **`license_type`*
 |--------|------|----------|
 | POST | `/api/rides` | Yeni sürüş |
 | GET | `/api/rides` | Kullanıcının sürüşleri |
-| GET | `/api/rides/:id` | Tek sürüş |
+| GET | `/api/rides/user/:uid` | Başka kullanıcının sürüş özetleri (mesafe, max hız, süre, tarih; `users.show_rides` kapalıysa `visible: false`). İz/harita asla dönmez |
+| GET | `/api/rides/:id` | Tek sürüş (sadece sahibi) |
 
 POST gövdesi:
 ```json

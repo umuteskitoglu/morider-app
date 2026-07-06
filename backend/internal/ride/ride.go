@@ -46,6 +46,7 @@ func registerRoutes(d *server.Deps, h *handler) {
 	g := d.Engine.Group("/api/rides", d.JWT.Middleware())
 	g.POST("", h.create)
 	g.GET("", h.list)
+	g.GET("/user/:uid", h.listUserPublic)
 	g.GET("/recap", h.recap)
 	g.GET("/recap/:uid", h.userRecap)
 	g.GET("/:id", h.get)
@@ -73,6 +74,7 @@ type Ride struct {
 	EndTime        *time.Time `json:"end_time"`
 	Distance       float64    `json:"distance"`
 	AvgSpeed       float64    `json:"avg_speed"`
+	MaxSpeed       *float64   `json:"max_speed"`
 	ElevationGain  float64    `json:"elevation_gain"`
 	Title          *string    `json:"title"`
 	Notes          *string    `json:"notes"`
@@ -112,9 +114,9 @@ func (h *handler) create(c *gin.Context) {
 	err := h.d.DB.QueryRow(c,
 		`INSERT INTO rides (user_id, route_id, start_time, end_time, distance, avg_speed, elevation_gain, motorcycle_id, max_lean_right, max_lean_left, max_speed)
 		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
-		 RETURNING id, user_id, route_id, start_time, end_time, distance, avg_speed, elevation_gain, title, notes, motorcycle_id, max_lean_right, max_lean_left`,
+		 RETURNING id, user_id, route_id, start_time, end_time, distance, avg_speed, max_speed, elevation_gain, title, notes, motorcycle_id, max_lean_right, max_lean_left`,
 		userID, req.RouteID, req.StartTime, req.EndTime, req.Distance, req.AvgSpeed, req.ElevationGain, req.MotorcycleID, req.MaxLeanRight, req.MaxLeanLeft, nullableFloat(req.MaxSpeed),
-	).Scan(&r.ID, &r.UserID, &r.RouteID, &r.StartTime, &r.EndTime, &r.Distance, &r.AvgSpeed, &r.ElevationGain,
+	).Scan(&r.ID, &r.UserID, &r.RouteID, &r.StartTime, &r.EndTime, &r.Distance, &r.AvgSpeed, &r.MaxSpeed, &r.ElevationGain,
 		&r.Title, &r.Notes, &r.MotorcycleID, &r.MaxLeanRight, &r.MaxLeanLeft)
 	if err != nil {
 		httpx.Internal(c, "could not create ride")
@@ -146,7 +148,7 @@ func (h *handler) publishCompleted(r Ride) {
 func (h *handler) list(c *gin.Context) {
 	userID := authpkg.UserID(c)
 	rows, err := h.d.DB.Query(c,
-		`SELECT r.id, r.user_id, r.route_id, r.start_time, r.end_time, r.distance, r.avg_speed, r.elevation_gain,
+		`SELECT r.id, r.user_id, r.route_id, r.start_time, r.end_time, r.distance, r.avg_speed, r.max_speed, r.elevation_gain,
 		        r.title, r.notes, r.motorcycle_id, m.name, r.max_lean_right, r.max_lean_left
 		 FROM rides r LEFT JOIN motorcycles m ON m.id = r.motorcycle_id
 		 WHERE r.user_id = $1 ORDER BY r.created_at DESC LIMIT 100`, userID)
@@ -159,7 +161,7 @@ func (h *handler) list(c *gin.Context) {
 	rides := make([]Ride, 0)
 	for rows.Next() {
 		var r Ride
-		if err := rows.Scan(&r.ID, &r.UserID, &r.RouteID, &r.StartTime, &r.EndTime, &r.Distance, &r.AvgSpeed, &r.ElevationGain,
+		if err := rows.Scan(&r.ID, &r.UserID, &r.RouteID, &r.StartTime, &r.EndTime, &r.Distance, &r.AvgSpeed, &r.MaxSpeed, &r.ElevationGain,
 			&r.Title, &r.Notes, &r.MotorcycleID, &r.MotorcycleName, &r.MaxLeanRight, &r.MaxLeanLeft); err != nil {
 			httpx.Internal(c, "could not read rides")
 			return
@@ -169,12 +171,71 @@ func (h *handler) list(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"rides": rides})
 }
 
+// PublicRide is the summary of a ride shown on another rider's profile.
+// Deliberately minimal — distance, top speed, duration and date only. The GPS
+// track (and the detail view built on it) stays owner-only so a rider's
+// whereabouts (home, work, usual roads) can't be traced from their profile.
+type PublicRide struct {
+	ID              int64      `json:"id"`
+	Distance        float64    `json:"distance"`
+	MaxSpeed        *float64   `json:"max_speed"`
+	DurationSeconds float64    `json:"duration_seconds"`
+	StartTime       *time.Time `json:"start_time"`
+}
+
+// listUserPublic returns a target user's recent ride summaries for their
+// public profile, only while that user has show_rides on (mirrors the
+// show_garage flag); otherwise it responds visible=false with an empty list.
+func (h *handler) listUserPublic(c *gin.Context) {
+	uid, err := strconv.ParseInt(c.Param("uid"), 10, 64)
+	if err != nil {
+		httpx.BadRequest(c, "invalid user id")
+		return
+	}
+	var show bool
+	err = h.d.DB.QueryRow(c, `SELECT show_rides FROM users WHERE id = $1`, uid).Scan(&show)
+	if errors.Is(err, pgx.ErrNoRows) {
+		httpx.Error(c, http.StatusNotFound, "user not found")
+		return
+	}
+	if err != nil {
+		httpx.Internal(c, "could not load rides")
+		return
+	}
+	if !show {
+		c.JSON(http.StatusOK, gin.H{"visible": false, "rides": []PublicRide{}})
+		return
+	}
+	rows, err := h.d.DB.Query(c,
+		`SELECT id, distance, max_speed,
+		        COALESCE(EXTRACT(EPOCH FROM (end_time - start_time)), 0),
+		        start_time
+		 FROM rides WHERE user_id = $1 ORDER BY created_at DESC LIMIT 20`, uid)
+	if err != nil {
+		httpx.Internal(c, "could not list rides")
+		return
+	}
+	defer rows.Close()
+
+	rides := make([]PublicRide, 0)
+	for rows.Next() {
+		var r PublicRide
+		if err := rows.Scan(&r.ID, &r.Distance, &r.MaxSpeed, &r.DurationSeconds, &r.StartTime); err != nil {
+			httpx.Internal(c, "could not read rides")
+			return
+		}
+		rides = append(rides, r)
+	}
+	c.JSON(http.StatusOK, gin.H{"visible": true, "rides": rides})
+}
+
 // recapStat aggregates a single ISO week of the caller's rides.
 type recapStat struct {
 	WeekStart       time.Time `json:"week_start"`
 	Distance        float64   `json:"distance"`
 	DurationSeconds float64   `json:"duration_seconds"`
 	AvgSpeed        float64   `json:"avg_speed"`
+	MaxSpeed        float64   `json:"max_speed"`
 	RideCount       int64     `json:"ride_count"`
 }
 
@@ -202,6 +263,7 @@ func (h *handler) recapFor(c *gin.Context, userID int64) {
 		`SELECT date_trunc('week', start_time) = date_trunc('week', now()) AS is_current,
 		        COALESCE(SUM(distance), 0) AS dist,
 		        COALESCE(SUM(EXTRACT(EPOCH FROM (end_time - start_time))), 0) AS dur,
+		        COALESCE(MAX(max_speed), 0) AS max_speed,
 		        COUNT(*) AS rides
 		 FROM rides
 		 WHERE user_id = $1 AND start_time IS NOT NULL
@@ -219,7 +281,7 @@ func (h *handler) recapFor(c *gin.Context, userID int64) {
 	for rows.Next() {
 		var isCurrent bool
 		var s recapStat
-		if err := rows.Scan(&isCurrent, &s.Distance, &s.DurationSeconds, &s.RideCount); err != nil {
+		if err := rows.Scan(&isCurrent, &s.Distance, &s.DurationSeconds, &s.MaxSpeed, &s.RideCount); err != nil {
 			httpx.Internal(c, "could not read recap")
 			return
 		}
@@ -251,11 +313,11 @@ func (h *handler) get(c *gin.Context) {
 	}
 	var r Ride
 	err = h.d.DB.QueryRow(c,
-		`SELECT r.id, r.user_id, r.route_id, r.start_time, r.end_time, r.distance, r.avg_speed, r.elevation_gain,
+		`SELECT r.id, r.user_id, r.route_id, r.start_time, r.end_time, r.distance, r.avg_speed, r.max_speed, r.elevation_gain,
 		        r.title, r.notes, r.motorcycle_id, m.name, r.max_lean_right, r.max_lean_left
 		 FROM rides r LEFT JOIN motorcycles m ON m.id = r.motorcycle_id
 		 WHERE r.id = $1 AND r.user_id = $2`, id, authpkg.UserID(c),
-	).Scan(&r.ID, &r.UserID, &r.RouteID, &r.StartTime, &r.EndTime, &r.Distance, &r.AvgSpeed, &r.ElevationGain,
+	).Scan(&r.ID, &r.UserID, &r.RouteID, &r.StartTime, &r.EndTime, &r.Distance, &r.AvgSpeed, &r.MaxSpeed, &r.ElevationGain,
 		&r.Title, &r.Notes, &r.MotorcycleID, &r.MotorcycleName, &r.MaxLeanRight, &r.MaxLeanLeft)
 	if errors.Is(err, pgx.ErrNoRows) {
 		httpx.Error(c, http.StatusNotFound, "ride not found")
@@ -346,10 +408,10 @@ func (h *handler) update(c *gin.Context) {
 	err = h.d.DB.QueryRow(c,
 		`UPDATE rides SET title = COALESCE($1, title), notes = COALESCE($2, notes), motorcycle_id = $3
 		 WHERE id = $4 AND user_id = $5
-		 RETURNING id, user_id, route_id, start_time, end_time, distance, avg_speed, elevation_gain,
+		 RETURNING id, user_id, route_id, start_time, end_time, distance, avg_speed, max_speed, elevation_gain,
 		           title, notes, motorcycle_id, max_lean_right, max_lean_left`,
 		req.Title, req.Notes, req.MotorcycleID, id, authpkg.UserID(c),
-	).Scan(&r.ID, &r.UserID, &r.RouteID, &r.StartTime, &r.EndTime, &r.Distance, &r.AvgSpeed, &r.ElevationGain,
+	).Scan(&r.ID, &r.UserID, &r.RouteID, &r.StartTime, &r.EndTime, &r.Distance, &r.AvgSpeed, &r.MaxSpeed, &r.ElevationGain,
 		&r.Title, &r.Notes, &r.MotorcycleID, &r.MaxLeanRight, &r.MaxLeanLeft)
 	if errors.Is(err, pgx.ErrNoRows) {
 		httpx.Error(c, http.StatusNotFound, "ride not found")

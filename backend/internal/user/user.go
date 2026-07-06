@@ -82,6 +82,7 @@ type profile struct {
 	FollowerCount     int64  `json:"follower_count"`
 	FollowingCount    int64  `json:"following_count"`
 	ShowGarage        bool   `json:"show_garage"`
+	ShowRides         bool   `json:"show_rides"`
 	ShareLiveLocation bool   `json:"share_live_location"`
 }
 
@@ -125,10 +126,10 @@ func (h *handler) get(c *gin.Context) {
 		        (SELECT COUNT(*) FROM posts p WHERE p.user_id = u.id AND p.archived_at IS NULL),
 		        (SELECT COUNT(*) FROM follows f WHERE f.followee_id = u.id),
 		        (SELECT COUNT(*) FROM follows f WHERE f.follower_id = u.id),
-		        u.show_garage, u.share_live_location
+		        u.show_garage, u.show_rides, u.share_live_location
 		 FROM users u WHERE u.id = $1`, id,
 	).Scan(&p.ID, &p.Name, &p.Username, &p.Email, &p.Country, &p.AvatarURL, &p.Bio,
-		&p.LicenseType, &p.BikeType, &p.PostCount, &p.FollowerCount, &p.FollowingCount, &p.ShowGarage, &p.ShareLiveLocation)
+		&p.LicenseType, &p.BikeType, &p.PostCount, &p.FollowerCount, &p.FollowingCount, &p.ShowGarage, &p.ShowRides, &p.ShareLiveLocation)
 	if errors.Is(err, pgx.ErrNoRows) {
 		httpx.Error(c, http.StatusNotFound, "user not found")
 		return
@@ -155,6 +156,7 @@ type updateReq struct {
 	BikeType    string `json:"bike_type"`
 	// Privacy flags: pointer so an omitted field keeps the stored value.
 	ShowGarage        *bool `json:"show_garage"`
+	ShowRides         *bool `json:"show_rides"`
 	ShareLiveLocation *bool `json:"share_live_location"`
 }
 
@@ -202,7 +204,8 @@ func (h *handler) update(c *gin.Context) {
 		     license_type = COALESCE(NULLIF($7, ''), license_type),
 		     bike_type = COALESCE(NULLIF($8, ''), bike_type),
 		     show_garage = COALESCE($9, show_garage),
-		     share_live_location = COALESCE($10, share_live_location),
+		     show_rides = COALESCE($10, show_rides),
+		     share_live_location = COALESCE($11, share_live_location),
 		     updated_at = now()
 		 WHERE id = $1
 		 RETURNING id, name, COALESCE(username, ''), email, COALESCE(country, ''),
@@ -211,10 +214,10 @@ func (h *handler) update(c *gin.Context) {
 		           (SELECT COUNT(*) FROM posts p WHERE p.user_id = users.id AND p.archived_at IS NULL),
 		           (SELECT COUNT(*) FROM follows f WHERE f.followee_id = users.id),
 		           (SELECT COUNT(*) FROM follows f WHERE f.follower_id = users.id),
-		           show_garage, share_live_location`,
-		id, req.Name, req.Username, req.Country, req.AvatarURL, req.Bio, req.LicenseType, req.BikeType, req.ShowGarage, req.ShareLiveLocation,
+		           show_garage, show_rides, share_live_location`,
+		id, req.Name, req.Username, req.Country, req.AvatarURL, req.Bio, req.LicenseType, req.BikeType, req.ShowGarage, req.ShowRides, req.ShareLiveLocation,
 	).Scan(&p.ID, &p.Name, &p.Username, &p.Email, &p.Country, &p.AvatarURL, &p.Bio,
-		&p.LicenseType, &p.BikeType, &p.PostCount, &p.FollowerCount, &p.FollowingCount, &p.ShowGarage, &p.ShareLiveLocation)
+		&p.LicenseType, &p.BikeType, &p.PostCount, &p.FollowerCount, &p.FollowingCount, &p.ShowGarage, &p.ShowRides, &p.ShareLiveLocation)
 	if errors.Is(err, pgx.ErrNoRows) {
 		httpx.Error(c, http.StatusNotFound, "user not found")
 		return
