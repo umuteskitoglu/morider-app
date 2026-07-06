@@ -45,6 +45,74 @@ export function sampleWaypoints(points: LatLon[], max = 25): LatLon[] {
   return out;
 }
 
+// Distance in meters from p to the segment a–b (same equirectangular scale as
+// distanceM), for Douglas-Peucker deviation checks.
+function pointSegmentDistM(p: LatLon, a: LatLon, b: LatLon): number {
+  const latScale = 111_320;
+  const lonScale = 111_320 * Math.cos((a.lat * Math.PI) / 180);
+  const px = (p.lon - a.lon) * lonScale;
+  const py = (p.lat - a.lat) * latScale;
+  const bx = (b.lon - a.lon) * lonScale;
+  const by = (b.lat - a.lat) * latScale;
+  const len2 = bx * bx + by * by;
+  if (len2 === 0) return Math.hypot(px, py);
+  const t = Math.max(0, Math.min(1, (px * bx + py * by) / len2));
+  return Math.hypot(px - t * bx, py - t * by);
+}
+
+// Douglas-Peucker: keeps only vertices deviating more than toleranceM from the
+// chord between their kept neighbors (endpoints always kept).
+function douglasPeucker(points: LatLon[], toleranceM: number): LatLon[] {
+  const keep = new Array<boolean>(points.length).fill(false);
+  keep[0] = keep[points.length - 1] = true;
+  const stack: Array<[number, number]> = [[0, points.length - 1]];
+  while (stack.length > 0) {
+    const [s, e] = stack.pop() as [number, number];
+    let maxD = 0;
+    let maxI = -1;
+    for (let i = s + 1; i < e; i++) {
+      const d = pointSegmentDistM(points[i], points[s], points[e]);
+      if (d > maxD) {
+        maxD = d;
+        maxI = i;
+      }
+    }
+    if (maxD > toleranceM && maxI > 0) {
+      keep[maxI] = true;
+      stack.push([s, maxI], [maxI, e]);
+    }
+  }
+  return points.filter((_, i) => keep[i]);
+}
+
+/**
+ * Picks at most `max` shape-defining corner waypoints from a geometry
+ * (Douglas-Peucker). Every waypoint sent to the routing engine is a mandatory
+ * via-point, and a straight-road jitter vertex snapping to a parallel street
+ * can balloon the plan into a giant detour — so fewer, corner-only points are
+ * strictly safer than dense even sampling. Deliberate scenic loops survive:
+ * they deviate far from the chord. If corners alone still exceed `max`, the
+ * tolerance is doubled (dropping the least shape-defining corners first)
+ * before falling back to even sampling as the hard cap.
+ */
+export function simplifyWaypoints(points: LatLon[], toleranceM = 75, max = 12): LatLon[] {
+  if (points.length <= 2) return points;
+  let tol = toleranceM;
+  let out = douglasPeucker(points, tol);
+  for (let i = 0; i < 4 && out.length > max; i++) {
+    tol *= 2;
+    out = douglasPeucker(points, tol);
+  }
+  return sampleWaypoints(out, max);
+}
+
+// Length of a polyline in km.
+export function pathLengthKm(points: LatLon[]): number {
+  let m = 0;
+  for (let i = 0; i + 1 < points.length; i++) m += distanceM(points[i], points[i + 1]);
+  return m / 1000;
+}
+
 /**
  * Fetches turn-by-turn steps for a stored/loaded route geometry by re-planning
  * it through the routing engine. Works for any route the rider can see
@@ -53,7 +121,7 @@ export function sampleWaypoints(points: LatLon[], max = 25): LatLon[] {
  */
 export async function fetchRouteSteps(points: LatLon[]): Promise<NavStep[]> {
   if (points.length < 2) return [];
-  const { data } = await api.post('/api/routes/plan', { waypoints: sampleWaypoints(points) });
+  const { data } = await api.post('/api/routes/plan', { waypoints: simplifyWaypoints(points) });
   const steps: NavStep[] = (data.steps ?? []).filter(
     (s: NavStep) => s.lat !== 0 || s.lon !== 0,
   );
@@ -195,6 +263,42 @@ export function distanceToRouteM(routePoints: LatLon[], pos: LatLon): number {
 }
 
 /**
+ * Nearest route vertex at or ahead of the rider's known progress. A global
+ * nearest search misbehaves on self-approaching geometry (figure-8s, out-and-
+ * back roads): it can match a much later — or earlier — pass and make the
+ * remaining distance jump wildly. Searching only from `fromIdx` (minus a small
+ * slack for GPS jitter) keeps progress monotonic; among near-tied vertices the
+ * earliest index wins so a crossing never teleports progress forward.
+ */
+export function nearestVertexAhead(
+  points: LatLon[],
+  pos: LatLon,
+  fromIdx: number,
+  backSlack = 25,
+): { index: number; dist: number } {
+  const start = Math.max(0, Math.min(fromIdx, points.length - 1) - backSlack);
+  let best = Infinity;
+  for (let i = start; i < points.length; i++) {
+    const d = distanceM(pos, points[i]);
+    if (d < best) best = d;
+  }
+  for (let i = start; i < points.length; i++) {
+    if (distanceM(pos, points[i]) <= best + 20) return { index: i, dist: best };
+  }
+  return { index: start, dist: best };
+}
+
+// Distance (km) still to ride: from pos to the vertex at idx, then along the
+// remaining geometry to the end.
+export function remainingKmFrom(points: LatLon[], idx: number, pos: LatLon): number {
+  if (points.length < 2) return 0;
+  const i0 = Math.max(0, Math.min(idx, points.length - 1));
+  let m = distanceM(pos, points[i0]);
+  for (let i = i0; i < points.length - 1; i++) m += distanceM(points[i], points[i + 1]);
+  return m / 1000;
+}
+
+/**
  * Whether a saved A→B route makes more sense ridden in reverse (B→A) from
  * where the rider currently stands: true when the end is clearly closer than
  * the start. The 100 m margin keeps loops (start ≈ end) and genuinely
@@ -238,22 +342,64 @@ export function offRouteTick(state: RerouteState, routePoints: LatLon[], pos: La
 // line) and the total distance (km) / duration (min) for the ETA summary.
 export type PlanResult = { steps: NavStep[]; points: LatLon[]; distance: number; duration: number };
 
+// A plan is sane when it doesn't wildly exceed the length of the geometry it
+// is supposed to follow. The factor absorbs legitimate detours (one-way
+// systems, river crossings); the absolute slack keeps short remainders from
+// false-positiving (2 km left but a forced 8 km motorway-junction loop).
+const PLAN_SANITY_FACTOR = 1.5;
+const PLAN_SANITY_SLACK_KM = 10;
+// Retry ladder: total waypoint counts to try. Fewer via-points means fewer
+// chances for a bad road snap; the last rung is just [pos, endpoint].
+const VIA_LADDER = [12, 6, 2];
+// Only geometries at least this dense get a sanity expectation — for sparse
+// inputs (a 2-point destination search) the straight-line length is not a
+// meaningful bound on road distance.
+const MIN_DENSE_GEOMETRY = 10;
+
+export function isPlanSane(plannedKm: number, expectedKm: number): boolean {
+  return plannedKm <= Math.max(expectedKm * PLAN_SANITY_FACTOR, expectedKm + PLAN_SANITY_SLACK_KM);
+}
+
+/**
+ * Plans pos → along `rest` to its end, guarding against ballooned results.
+ * Every waypoint is a mandatory via-point for the engine, and one vertex
+ * snapping to the wrong road (opposite carriageway, parallel street) can turn
+ * a 19 km route into a 200 km detour tour — so each plan is checked against
+ * the expected distance and retried with progressively fewer via-points.
+ * Throws when no rung produces a sane plan; callers keep their previous
+ * steps/guide in that case.
+ */
+async function planSanely(pos: LatLon, rest: LatLon[], expectedKm: number | null): Promise<PlanResult> {
+  let lastErr: unknown = new Error('rota planlanamadı');
+  for (const rung of VIA_LADDER) {
+    const vias = rung <= 2 ? [rest[rest.length - 1]] : simplifyWaypoints(rest, 75, rung - 1);
+    try {
+      const { data } = await api.post('/api/routes/plan', { waypoints: [pos, ...vias] });
+      const distance: number = data.distance ?? 0;
+      if (expectedKm !== null && !isPlanSane(distance, expectedKm)) {
+        lastErr = new Error(`plan ${distance.toFixed(1)} km, beklenen ~${expectedKm.toFixed(1)} km`);
+        continue;
+      }
+      const steps: NavStep[] = (data.steps ?? []).filter((s: NavStep) => s.lat !== 0 || s.lon !== 0);
+      const points: LatLon[] = data.points ?? [];
+      return { steps, points, distance, duration: data.duration ?? 0 };
+    } catch (err) {
+      lastErr = err;
+    }
+  }
+  throw lastErr;
+}
+
 export async function planInitialRoute(routePoints: LatLon[], pos: LatLon): Promise<PlanResult> {
   if (routePoints.length < 2) return { steps: [], points: [], distance: 0, duration: 0 };
   const { index, dist } = nearestVertex(routePoints, pos);
-  let waypoints: LatLon[];
-  if (dist <= OFF_ROUTE_M) {
-    // Keep at least the final leg so a rider standing at the very end still
-    // gets a valid (short) plan instead of a single-point request.
-    const rest = routePoints.slice(Math.min(index, routePoints.length - 2));
-    waypoints = [pos, ...sampleWaypoints(rest, 24)];
-  } else {
-    waypoints = [pos, ...sampleWaypoints(routePoints, 24)];
-  }
-  const { data } = await api.post('/api/routes/plan', { waypoints });
-  const steps: NavStep[] = (data.steps ?? []).filter((s: NavStep) => s.lat !== 0 || s.lon !== 0);
-  const points: LatLon[] = data.points ?? [];
-  return { steps, points, distance: data.distance ?? 0, duration: data.duration ?? 0 };
+  // Rider already on the route → plan only the remaining part; keep at least
+  // the final leg so someone standing at the very end still gets a valid plan.
+  const rest =
+    dist <= OFF_ROUTE_M ? routePoints.slice(Math.min(index, routePoints.length - 2)) : routePoints;
+  const expectedKm =
+    rest.length >= MIN_DENSE_GEOMETRY ? pathLengthKm(rest) + distanceM(pos, rest[0]) / 1000 : null;
+  return planSanely(pos, rest, expectedKm);
 }
 
 /**
@@ -270,11 +416,9 @@ export async function rerouteFromPosition(routePoints: LatLon[], pos: LatLon): P
     skip += 1;
   }
   const rest = routePoints.slice(Math.min(skip, routePoints.length - 1));
-  const waypoints = [pos, ...sampleWaypoints(rest, 24)];
-  const { data } = await api.post('/api/routes/plan', { waypoints });
-  const steps: NavStep[] = (data.steps ?? []).filter((s: NavStep) => s.lat !== 0 || s.lon !== 0);
-  const points: LatLon[] = data.points ?? [];
-  return { steps, points, distance: data.distance ?? 0, duration: data.duration ?? 0 };
+  const expectedKm =
+    rest.length >= MIN_DENSE_GEOMETRY ? pathLengthKm(rest) + distanceM(pos, rest[0]) / 1000 : null;
+  return planSanely(pos, rest, expectedKm);
 }
 
 export function speakRerouted(enabled: boolean): void {

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -152,37 +153,88 @@ func mergeLeg(dst *RoutePlan, leg RoutePlan) {
 	dst.Steps = append(dst.Steps, leg.Steps...)
 }
 
-// fetchRoutes performs one OSRM /route request for the given waypoints and
-// returns every route it offers (main + alternatives when requested).
-func (r *OSRMRouter) fetchRoutes(ctx context.Context, waypoints []Point, alternatives bool) ([]RoutePlan, error) {
+// viaSnapRadiusM caps how far an *intermediate* via-point may snap to a road.
+// Via-points are mandatory: one vertex snapping to a parallel street or the
+// opposite carriageway of a divided road forces the route through that exact
+// edge, ballooning a short route into a giant detour tour. The first and last
+// waypoints (rider position / destination) stay unlimited — they must always
+// snap somewhere.
+const viaSnapRadiusM = 250
+
+// buildRouteURL renders the OSRM /route request URL. Pure so tests can assert
+// the exact parameters without a network.
+//
+//   - continue_straight=false lets OSRM turn around at a via-point instead of
+//     looping kilometers to approach a badly-snapped edge from the "right" side.
+//   - snapping=any allows snapping to restricted/small edges the default
+//     snapping rejects, reducing NoSegment fallout from the radius cap.
+//   - radiuses (optional) applies viaSnapRadiusM to intermediate waypoints.
+func buildRouteURL(baseURL, profile string, waypoints []Point, alternatives, withRadiuses bool) string {
 	coords := make([]string, 0, len(waypoints))
 	for _, p := range waypoints {
 		coords = append(coords, fmt.Sprintf("%g,%g", p.Lon, p.Lat))
 	}
-	url := fmt.Sprintf("%s/route/v1/%s/%s?overview=full&geometries=geojson&steps=true",
-		r.baseURL, r.profile, strings.Join(coords, ";"))
+	url := fmt.Sprintf("%s/route/v1/%s/%s?overview=full&geometries=geojson&steps=true&continue_straight=false&snapping=any",
+		baseURL, profile, strings.Join(coords, ";"))
+	if withRadiuses {
+		radii := make([]string, len(waypoints))
+		for i := range radii {
+			radii[i] = strconv.Itoa(viaSnapRadiusM)
+		}
+		radii[0] = "unlimited"
+		radii[len(radii)-1] = "unlimited"
+		url += "&radiuses=" + strings.Join(radii, ";")
+	}
 	if alternatives {
 		url += "&alternatives=3"
 	}
+	return url
+}
 
+// fetchRoutes performs the OSRM /route request for the given waypoints and
+// returns every route it offers (main + alternatives when requested). The
+// first attempt caps intermediate snap radiuses; when OSRM cannot serve it
+// (NoSegment: a via-point has no road within the radius, or NoRoute), it
+// retries once without radiuses rather than failing the plan.
+func (r *OSRMRouter) fetchRoutes(ctx context.Context, waypoints []Point, alternatives bool) ([]RoutePlan, error) {
+	plans, code, err := r.doRoute(ctx, buildRouteURL(r.baseURL, r.profile, waypoints, alternatives, true))
+	if err != nil && (code == "NoSegment" || code == "NoRoute") {
+		plans, _, err = r.doRoute(ctx, buildRouteURL(r.baseURL, r.profile, waypoints, alternatives, false))
+	}
+	return plans, err
+}
+
+// doRoute performs one OSRM round-trip and returns the parsed plans plus the
+// OSRM status code. OSRM signals routing failures (NoSegment, NoRoute...) as
+// HTTP 400 with a JSON body, so the body is parsed before the HTTP status is
+// consulted — otherwise the caller could never distinguish a retryable
+// routing failure from a broken server.
+func (r *OSRMRouter) doRoute(ctx context.Context, url string) ([]RoutePlan, string, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
-		return nil, err
+		return nil, "", err
 	}
 	resp, err := r.client.Do(req)
 	if err != nil {
-		return nil, err
+		return nil, "", err
 	}
 	defer resp.Body.Close()
 
 	body, err := io.ReadAll(io.LimitReader(resp.Body, 8<<20))
 	if err != nil {
-		return nil, err
+		return nil, "", err
 	}
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("routing server returned %d", resp.StatusCode)
+	var probe struct {
+		Code string `json:"code"`
 	}
-	return parseOSRMRoutes(body)
+	if err := json.Unmarshal(body, &probe); err != nil {
+		if resp.StatusCode != http.StatusOK {
+			return nil, "", fmt.Errorf("routing server returned %d", resp.StatusCode)
+		}
+		return nil, "", fmt.Errorf("invalid routing response: %w", err)
+	}
+	plans, err := parseOSRMRoutes(body)
+	return plans, probe.Code, err
 }
 
 // osrmResponse is the subset of the OSRM /route response we consume.

@@ -1,5 +1,5 @@
 import React, { useCallback, useLayoutEffect, useRef, useState } from 'react';
-import { Alert, Pressable, ScrollView, Share, StyleSheet, Text, View } from 'react-native';
+import { Alert, Linking, Platform, Pressable, ScrollView, Share, StyleSheet, Text, View } from 'react-native';
 import MapView, { Marker, Polyline, Region } from 'react-native-maps';
 import { useFocusEffect } from '@react-navigation/native';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
@@ -12,7 +12,7 @@ import { useAuth } from '../store/auth';
 import { api, errorMessage } from '../api/client';
 import { cancelEventReminders, scheduleEventReminders } from '../lib/eventReminders';
 import { eventDraft } from '../lib/eventDraft';
-import { formatDateTime, formatTime } from '../lib/datetime';
+import { formatDateTime, formatTime, timeUntil } from '../lib/datetime';
 import { colors, radius, spacing } from '../theme';
 
 type Participant = { id: number; name: string; rsvp: string };
@@ -53,6 +53,23 @@ const RSVP_TITLES: Record<string, string> = { going: 'Geliyor', maybe: 'Belki', 
 
 // How many recent messages to preview before the user opens the full chat.
 const PREVIEW_COUNT = 3;
+
+// Total length of a polyline in km (enough precision for a "~42 km" chip).
+function pathKm(points: Coord[]): number {
+  const R = 6371;
+  let km = 0;
+  for (let i = 1; i < points.length; i++) {
+    const a = points[i - 1];
+    const b = points[i];
+    const dLat = ((b.latitude - a.latitude) * Math.PI) / 180;
+    const dLon = ((b.longitude - a.longitude) * Math.PI) / 180;
+    const s =
+      Math.sin(dLat / 2) ** 2 +
+      Math.cos((a.latitude * Math.PI) / 180) * Math.cos((b.latitude * Math.PI) / 180) * Math.sin(dLon / 2) ** 2;
+    km += 2 * R * Math.asin(Math.sqrt(s));
+  }
+  return km;
+}
 
 export default function EventDetailScreen({ navigation, route }: Props) {
   const { code } = route.params;
@@ -150,6 +167,28 @@ export default function EventDetailScreen({ navigation, route }: Props) {
     }
   }
 
+  // Opens the meet point in the platform's maps app for turn-by-turn directions —
+  // the single most useful action before a group ride: get to the meeting spot.
+  function openDirections() {
+    if (!event) return;
+    const target =
+      event.start_lat != null && event.start_lon != null
+        ? { lat: event.start_lat, lon: event.start_lon }
+        : event.route_points?.length
+          ? { lat: event.route_points[0].lat, lon: event.route_points[0].lon }
+          : null;
+    if (!target) return;
+    const label = encodeURIComponent(event.start_name || event.title);
+    const primary =
+      Platform.OS === 'ios'
+        ? `http://maps.apple.com/?daddr=${target.lat},${target.lon}`
+        : `google.navigation:q=${target.lat},${target.lon}`;
+    const fallback = `geo:${target.lat},${target.lon}?q=${target.lat},${target.lon}(${label})`;
+    Linking.openURL(primary).catch(() =>
+      Linking.openURL(fallback).catch(() => Alert.alert('Harita açılamadı', 'Cihazında bir harita uygulaması bulunamadı.')),
+    );
+  }
+
   // The live group-ride map lives in the Ride tab, so we hop tabs via the parent.
   function openRide(rideCode: string) {
     navigation
@@ -242,6 +281,13 @@ export default function EventDetailScreen({ navigation, route }: Props) {
   // Last few messages, newest first for the preview.
   const preview = messages.slice(-PREVIEW_COUNT).reverse();
 
+  const hostName = event.participants.find((p) => p.id === event.host_id)?.name ?? '';
+  const remaining = timeUntil(event.meet_at);
+  const meetPassed = !remaining && new Date(event.meet_at).getTime() <= Date.now();
+  const routeKm = hasRoute ? pathKm(routePath) : 0;
+  // Nudge people who were invited (opened via code/link) but haven't answered yet.
+  const needsRsvp = !cancelled && !isHost && myRsvp == null;
+
   return (
     <View style={styles.container}>
       <ScrollView style={styles.scroll} contentContainerStyle={styles.content}>
@@ -254,7 +300,25 @@ export default function EventDetailScreen({ navigation, route }: Props) {
 
         <Card style={styles.headerCard}>
           <Text style={styles.title}>{event.title}</Text>
+          {hostName ? (
+            <View style={styles.hostRow}>
+              <MaterialCommunityIcons name="account-star" size={14} color={colors.textMuted} />
+              <Text style={styles.hostRowText}>{`Düzenleyen: ${hostName}${isHost ? ' (sen)' : ''}`}</Text>
+            </View>
+          ) : null}
           {event.description ? <Text style={styles.description}>{event.description}</Text> : null}
+          {!cancelled && (remaining || meetPassed) ? (
+            <View style={[styles.countdownPill, meetPassed && styles.countdownPillPassed]}>
+              <MaterialCommunityIcons
+                name={meetPassed ? 'clock-alert-outline' : 'timer-sand'}
+                size={14}
+                color={meetPassed ? colors.textMuted : colors.primary}
+              />
+              <Text style={[styles.countdownText, meetPassed && styles.countdownTextPassed]}>
+                {meetPassed ? 'Buluşma zamanı geçti' : `Buluşmaya ${remaining} kaldı`}
+              </Text>
+            </View>
+          ) : null}
           <View style={styles.timeRow}>
             <View style={styles.timeItem}>
               <MaterialCommunityIcons name="map-marker-account" size={18} color={colors.primary} />
@@ -271,7 +335,17 @@ export default function EventDetailScreen({ navigation, route }: Props) {
               </View>
             </View>
           </View>
+          <Text style={styles.timeHint}>Buluşma: toplanma yeri ve saati · Kalkış: motorların yola çıkacağı saat</Text>
         </Card>
+
+        {needsRsvp && (
+          <View style={styles.rsvpNudge}>
+            <MaterialCommunityIcons name="hand-wave" size={18} color={colors.accent} />
+            <Text style={styles.rsvpNudgeText}>
+              Bu sürüşe davetlisin! Aşağıdan katılım durumunu seç — seçince sohbete katılır ve hatırlatma alırsın.
+            </Text>
+          </View>
+        )}
 
         {(hasRoute || startCoord) && (
           <Pressable style={styles.mapWrap} onPress={handleRide}>
@@ -293,6 +367,12 @@ export default function EventDetailScreen({ navigation, route }: Props) {
                   <Text style={styles.liveBadgeText}>CANLI SÜRÜŞ</Text>
                 </View>
               ) : null}
+              {routeKm > 0.5 ? (
+                <View style={styles.distanceBadge}>
+                  <MaterialCommunityIcons name="map-marker-distance" size={13} color="#fff" />
+                  <Text style={styles.distanceBadgeText}>{`~${Math.round(routeKm)} km`}</Text>
+                </View>
+              ) : null}
               <View style={styles.mapTapHint}>
                 <MaterialCommunityIcons name="map-marker-radius" size={14} color="#fff" />
                 <Text style={styles.mapTapHintText}>{liveRide ? 'Canlı haritayı aç' : 'Sürüş için dokun'}</Text>
@@ -307,6 +387,21 @@ export default function EventDetailScreen({ navigation, route }: Props) {
           </Pressable>
         )}
 
+        {(hasRoute || startCoord) && !cancelled && (
+          <Pressable onPress={openDirections}>
+            <Card style={styles.directionsCard}>
+              <MaterialCommunityIcons name="navigation-variant" size={20} color={colors.cyan} />
+              <View style={{ flex: 1 }}>
+                <Text style={styles.directionsTitle}>Buluşma noktasına yol tarifi</Text>
+                <Text style={styles.directionsHint}>
+                  {event.start_name ? event.start_name : 'Harita uygulamasında aç'}
+                </Text>
+              </View>
+              <MaterialCommunityIcons name="open-in-new" size={18} color={colors.textMuted} />
+            </Card>
+          </Pressable>
+        )}
+
         {showRideCta && (
           <Pressable style={[styles.rideCta, ridePending && styles.rideCtaDisabled]} onPress={handleRide} disabled={ridePending}>
             <MaterialCommunityIcons name={liveRide ? 'motorbike' : 'flag-checkered'} size={20} color="#fff" />
@@ -314,9 +409,18 @@ export default function EventDetailScreen({ navigation, route }: Props) {
           </Pressable>
         )}
 
+        {!cancelled && !liveRide && !isHost && (
+          <View style={styles.rideWaitStrip}>
+            <MaterialCommunityIcons name="motorbike" size={16} color={colors.textMuted} />
+            <Text style={styles.rideWaitText}>
+              Sürüş günü düzenleyen canlı grup sürüşünü başlatınca buradan tek dokunuşla katılırsın.
+            </Text>
+          </View>
+        )}
+
         {/* RSVP */}
         {!cancelled && (
-          <Card style={styles.rsvpCard}>
+          <Card style={[styles.rsvpCard, needsRsvp && styles.rsvpCardNudge]}>
             <Text style={styles.sectionTitle}>Katılım durumun</Text>
             <View style={styles.rsvpRow}>
               {RSVP_OPTIONS.map((opt) => {
@@ -333,6 +437,12 @@ export default function EventDetailScreen({ navigation, route }: Props) {
                 );
               })}
             </View>
+            <View style={styles.reminderHintRow}>
+              <MaterialCommunityIcons name="bell-ring-outline" size={13} color={colors.textFaint} />
+              <Text style={styles.reminderHint}>
+                "Geliyorum" dersen buluşmadan 1 saat ve 15 dakika önce hatırlatma alırsın.
+              </Text>
+            </View>
           </Card>
         )}
 
@@ -341,8 +451,9 @@ export default function EventDetailScreen({ navigation, route }: Props) {
           <Card style={styles.inviteCard}>
             <MaterialCommunityIcons name="share-variant" size={20} color={colors.primary} />
             <View style={{ flex: 1 }}>
-              <Text style={styles.inviteTitle}>Davet et</Text>
+              <Text style={styles.inviteTitle}>Arkadaşlarını davet et</Text>
               <Text style={styles.inviteCode}>Kod: {code}</Text>
+              <Text style={styles.inviteHint}>Kodu gönder; arkadaşların "Kodla katıl" bölümünden girsin.</Text>
             </View>
             <MaterialCommunityIcons name="chevron-right" size={22} color={colors.textMuted} />
           </Card>
@@ -444,8 +555,37 @@ const styles = StyleSheet.create({
   cancelledText: { color: colors.danger, fontWeight: '800' },
   headerCard: { gap: spacing.sm },
   title: { color: colors.text, fontSize: 22, fontWeight: '900' },
+  hostRow: { flexDirection: 'row', alignItems: 'center', gap: 5, marginTop: -4 },
+  hostRowText: { color: colors.textMuted, fontSize: 13, fontWeight: '600' },
   description: { color: colors.textMuted, fontSize: 14, lineHeight: 20 },
+  countdownPill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    alignSelf: 'flex-start',
+    gap: 5,
+    backgroundColor: 'rgba(255,106,26,0.12)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,106,26,0.3)',
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: radius.pill,
+  },
+  countdownPillPassed: { backgroundColor: colors.surfaceAlt, borderColor: colors.border },
+  countdownText: { color: colors.primary, fontSize: 12, fontWeight: '800' },
+  countdownTextPassed: { color: colors.textMuted },
   timeRow: { flexDirection: 'row', gap: spacing.lg, marginTop: spacing.xs },
+  timeHint: { color: colors.textFaint, fontSize: 11, lineHeight: 15, marginTop: 2 },
+  rsvpNudge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+    backgroundColor: 'rgba(255,176,32,0.10)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,176,32,0.35)',
+    borderRadius: radius.md,
+    padding: spacing.sm,
+  },
+  rsvpNudgeText: { flex: 1, color: colors.text, fontSize: 13, lineHeight: 18 },
   timeItem: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
   timeLabel: { color: colors.textMuted, fontSize: 10, fontWeight: '800', letterSpacing: 1 },
   timeValue: { color: colors.text, fontSize: 14, fontWeight: '700' },
@@ -466,6 +606,19 @@ const styles = StyleSheet.create({
   },
   liveDot: { width: 7, height: 7, borderRadius: 4, backgroundColor: '#fff' },
   liveBadgeText: { color: '#fff', fontSize: 10, fontWeight: '900', letterSpacing: 0.5 },
+  distanceBadge: {
+    position: 'absolute',
+    top: spacing.sm,
+    right: spacing.sm,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    backgroundColor: 'rgba(0,0,0,0.55)',
+    paddingHorizontal: 9,
+    paddingVertical: 4,
+    borderRadius: 999,
+  },
+  distanceBadgeText: { color: '#fff', fontSize: 11, fontWeight: '800' },
   mapTapHint: {
     position: 'absolute',
     bottom: spacing.sm,
@@ -490,9 +643,22 @@ const styles = StyleSheet.create({
   },
   rideCtaDisabled: { opacity: 0.6 },
   rideCtaText: { color: '#fff', fontWeight: '900', fontSize: 15 },
+  rideWaitStrip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+    paddingHorizontal: spacing.xs,
+  },
+  rideWaitText: { flex: 1, color: colors.textMuted, fontSize: 12, lineHeight: 17 },
+  directionsCard: { flexDirection: 'row', alignItems: 'center', gap: spacing.md },
+  directionsTitle: { color: colors.text, fontSize: 15, fontWeight: '800' },
+  directionsHint: { color: colors.textMuted, fontSize: 12, marginTop: 1 },
   locNames: { padding: spacing.sm, gap: 2, backgroundColor: colors.surface },
   locName: { color: colors.text, fontSize: 13 },
   rsvpCard: { gap: spacing.sm },
+  rsvpCardNudge: { borderColor: 'rgba(255,176,32,0.45)' },
+  reminderHintRow: { flexDirection: 'row', alignItems: 'center', gap: 5 },
+  reminderHint: { flex: 1, color: colors.textFaint, fontSize: 11, lineHeight: 15 },
   sectionTitle: { color: colors.text, fontWeight: '800', fontSize: 15 },
   rsvpRow: { flexDirection: 'row', gap: spacing.sm },
   rsvpBtn: {
@@ -509,6 +675,7 @@ const styles = StyleSheet.create({
   inviteCard: { flexDirection: 'row', alignItems: 'center', gap: spacing.md },
   inviteTitle: { color: colors.text, fontSize: 15, fontWeight: '800' },
   inviteCode: { color: colors.textMuted, fontSize: 13, marginTop: 1, letterSpacing: 1 },
+  inviteHint: { color: colors.textFaint, fontSize: 11, marginTop: 2, lineHeight: 15 },
   attendCard: { gap: spacing.sm },
   attendGroup: { gap: spacing.xs },
   attendGroupTitle: {

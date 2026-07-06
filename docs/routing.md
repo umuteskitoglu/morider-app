@@ -32,10 +32,26 @@ Profil `ROUTING_PROFILE` ile ayarlanır (varsayılan `driving`).
 ### OSRM API kullanımı
 
 ```
-GET {ROUTING_URL}/route/v1/{profile}/{lon},{lat};{lon},{lat}?overview=full&geometries=geojson&steps=true
+GET {ROUTING_URL}/route/v1/{profile}/{lon},{lat};{lon},{lat}
+      ?overview=full&geometries=geojson&steps=true
+      &continue_straight=false&snapping=any
+      &radiuses=unlimited;250;...;unlimited
 ```
 
-Yanıttan `routes[0]` alınır: `distance` (m), `duration` (s), `geometry.coordinates` ([lon,lat] dizisi) ve `legs[].steps[].maneuver` (tarif üretimi için). Parser (`parseOSRMRoute`) saf bir fonksiyondur, ağ olmadan birim test edilir.
+Waypoint'ler OSRM için *zorunlu* geçiş noktalarıdır; yanlış yola yapışan tek
+bir nokta (bölünmüş yolun karşı şeridi, paralel sokak) rotayı dev bir tura
+çevirebilir. Bu yüzden:
+
+- `continue_straight=false` — via noktasında geri dönüşe izin verir; kötü
+  yapışmalar kilometrelerce tur yerine kısa bir U dönüşüne mal olur.
+- `radiuses` — ara noktalar en fazla 250 m uzağa yapışabilir (`viaSnapRadiusM`);
+  ilk/son nokta (sürücü konumu / varış) sınırsızdır. OSRM yarıçap içinde yol
+  bulamazsa (`NoSegment`/`NoRoute`, HTTP 400 + JSON `code`) istek bir kez
+  `radiuses`'sız yinelenir.
+- `snapping=any` (OSRM ≥5.21) — varsayılan yapışmanın reddettiği küçük/kısıtlı
+  kenarlara da yapışma; yarıçap kaynaklı `NoSegment`'i azaltır.
+
+Yanıttan `routes[0]` alınır: `distance` (m), `duration` (s), `geometry.coordinates` ([lon,lat] dizisi) ve `legs[].steps[].maneuver` (tarif üretimi için). URL kurucu (`buildRouteURL`) ve parser (`parseOSRMRoute`) saf fonksiyonlardır, ağ olmadan birim test edilir.
 
 ## API
 

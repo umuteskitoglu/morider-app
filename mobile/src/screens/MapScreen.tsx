@@ -27,9 +27,11 @@ import {
   LatLon,
   maybeSpeak,
   NavStep,
+  nearestVertexAhead,
   newRerouteState,
   offRouteTick,
   planInitialRoute,
+  remainingKmFrom,
   rerouteFromPosition,
   shouldReverseRoute,
   speakRerouted,
@@ -63,25 +65,6 @@ const INITIAL_REGION: Region = {
 // casing/outline drawn underneath it.
 const navRouteFill = '#4E9BFF';
 const navRouteCasing = '#1A6CD4';
-
-// Distance (km) still to drive: from the rider to the nearest guide vertex,
-// then along the remaining geometry to the end. Self-correcting (recomputed each
-// fix) so it stays right across reroutes without baseline bookkeeping.
-function remainingKmAlong(route: LatLon[], pos: LatLon): number {
-  if (route.length < 2) return 0;
-  let nearest = 0;
-  let best = Infinity;
-  for (let i = 0; i < route.length; i++) {
-    const d = distanceM(pos, route[i]);
-    if (d < best) {
-      best = d;
-      nearest = i;
-    }
-  }
-  let m = best;
-  for (let i = nearest; i < route.length - 1; i++) m += distanceM(route[i], route[i + 1]);
-  return m / 1000;
-}
 
 function haversineKm(a: Coord, b: Coord): number {
   const R = 6371;
@@ -126,6 +109,12 @@ export default function MapScreen({ route, navigation }: Props) {
   const [navNext, setNavNext] = useState<NavStep | null>(null);
   const [navDist, setNavDist] = useState(0);
   const [voiceOn, setVoiceOn] = useState(true);
+  // Turn-by-turn steps come from an async plan request that can fail or lag
+  // (flaky network, OSRM timeout, slow GPS fix) — without this, a rider who
+  // started on a route could get stuck on the plain recording panel forever.
+  // Lets them force the Google-style chase view manually while steps are
+  // still (or never) loading.
+  const [manualNavView, setManualNavView] = useState(false);
 
   // Destination navigation (Google-Maps style): a searched target the rider is
   // guided to, with the planned route's total distance/duration for the ETA bar.
@@ -182,6 +171,14 @@ export default function MapScreen({ route, navigation }: Props) {
   // checks for deviation lives in a ref kept in sync with followPath.
   const routePointsRef = useRef<LatLon[]>([]);
   const reroute = useRef(newRerouteState());
+  // The ride's *target* geometry, captured once when the ride starts and never
+  // replaced. Reroutes rejoin this, not the displayed guide: the guide is a
+  // plan output, and re-planning against a previous plan compounds any bad
+  // geometry it contains instead of healing back toward the followed route.
+  const targetPointsRef = useRef<LatLon[]>([]);
+  // Rider's progress (vertex index) along the displayed guide, so the
+  // remaining-km search only moves forward (see nearestVertexAhead).
+  const progressRef = useRef(0);
 
   useEffect(() => {
     routePointsRef.current = followPath.map((p) => ({ lat: p.latitude, lon: p.longitude }));
@@ -496,9 +493,14 @@ export default function MapScreen({ route, navigation }: Props) {
   // rejoins the route ahead, swap in its steps and redraw the dashed guide.
   function maybeReroute(pos: LatLon): void {
     if (!navSteps.current) return;
+    // Deviation is measured against the displayed guide (what the rider is
+    // told to follow) — measuring against the target would keep re-firing for
+    // the whole length of a legitimate rerouted detour. The re-plan itself
+    // targets the original route so bad geometry never compounds.
     if (!offRouteTick(reroute.current, routePointsRef.current, pos)) return;
+    const target = targetPointsRef.current.length > 1 ? targetPointsRef.current : routePointsRef.current;
     reroute.current.inFlight = true;
-    rerouteFromPosition(routePointsRef.current, pos)
+    rerouteFromPosition(target, pos)
       .then(({ steps, points, distance, duration }) => {
         if (steps.length === 0) return;
         navSteps.current = steps;
@@ -514,6 +516,7 @@ export default function MapScreen({ route, navigation }: Props) {
         reroute.current.offCount = 0;
         spoken.current = { idx: -1, far: false, near: false };
         if (points.length > 1) {
+          progressRef.current = 0; // fresh guide geometry, restart progress
           setFollowPath(points.map((p) => ({ latitude: p.lat, longitude: p.lon })));
         }
         speakRerouted(voiceRef.current);
@@ -537,6 +540,7 @@ export default function MapScreen({ route, navigation }: Props) {
       navSteps.current = null;
       setNavStep(null);
       setNavNext(null);
+      setManualNavView(false);
       return false;
     }
     const step = steps[idx];
@@ -586,11 +590,16 @@ export default function MapScreen({ route, navigation }: Props) {
     navIdx.current = 0;
     spoken.current = { idx: -1, far: false, near: false };
     reroute.current = newRerouteState();
+    progressRef.current = 0;
     setNavStep(null);
     setNavNext(null);
+    setManualNavView(false);
     setFollowCam(true);
     if (followPath.length > 1) {
       const routePts = followPath.map((p) => ({ lat: p.latitude, lon: p.longitude }));
+      // Pin the ride target now: every later reroute rejoins this geometry,
+      // never a previous plan's output (which may carry snap detours).
+      targetPointsRef.current = routePts;
       Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced })
         .then((loc) => planInitialRoute(routePts, { lat: loc.coords.latitude, lon: loc.coords.longitude }))
         .then(({ steps, points, distance, duration }) => {
@@ -602,6 +611,7 @@ export default function MapScreen({ route, navigation }: Props) {
           }
           // Redraw the guide so the lead-in from the rider's position is visible.
           if (points.length > 1) {
+            progressRef.current = 0;
             setFollowPath(points.map((p) => ({ latitude: p.lat, longitude: p.lon })));
           }
         })
@@ -632,7 +642,11 @@ export default function MapScreen({ route, navigation }: Props) {
       const navigating = updateNavigation({ lat, lon });
       if (navigating) {
         maybeReroute({ lat, lon });
-        setRemainingKm(remainingKmAlong(routePointsRef.current, { lat, lon }));
+        // Forward-only progress along the guide keeps remaining-km monotonic
+        // even when the geometry passes near itself (out-and-back, figure-8).
+        const { index } = nearestVertexAhead(routePointsRef.current, { lat, lon }, progressRef.current);
+        progressRef.current = index;
+        setRemainingKm(remainingKmFrom(routePointsRef.current, index, { lat, lon }));
       }
       // Google-Maps-style chase cam: tilted, zoomed-in, rotated to heading.
       // Pitch/zoom are set once (camPrimed); later fixes only pan + rotate so
@@ -671,8 +685,11 @@ export default function MapScreen({ route, navigation }: Props) {
     setViewMode('map');
     setSpeed(0);
     navSteps.current = null;
+    targetPointsRef.current = [];
+    progressRef.current = 0;
     setNavStep(null);
     setNavNext(null);
+    setManualNavView(false);
     setRemainingKm(0);
     setFollowCam(true);
     stopSpeaking();
@@ -746,7 +763,11 @@ export default function MapScreen({ route, navigation }: Props) {
     }
   }
 
-  const navigating = recording && navStep != null;
+  const navigating = recording && (navStep != null || manualNavView);
+  // Whether the rider is on a followed route or a searched destination — the
+  // cases where turn-by-turn *should* eventually kick in, so the manual
+  // "switch to navigation view" affordance only shows up when it's relevant.
+  const hasRouteToFollow = followPath.length > 1 || destination != null;
   // A/B endpoints of the followed saved route in the chosen direction (absent
   // for destination navigation, which has its own target marker).
   const followStart = followBase.length > 1 ? (followReversed ? followBase[followBase.length - 1] : followBase[0]) : null;
@@ -856,16 +877,26 @@ export default function MapScreen({ route, navigation }: Props) {
         ))}
       </MapView>
 
-      {/* Google-Maps-style maneuver header while navigating */}
+      {/* Google-Maps-style maneuver header while navigating. Turn-by-turn steps
+          load asynchronously and can lag or fail, so `navigating` can be true
+          (manual switch) before navStep exists — show a lightweight "hazırlanıyor"
+          strip in that gap instead of nothing. */}
       {navigating ? (
-        <NavBanner
-          step={navStep}
-          distM={navDist}
-          nextStep={navNext}
-          voiceOn={voiceOn}
-          onToggleVoice={() => setVoiceOn((v) => !v)}
-          topInset={insets.top}
-        />
+        navStep ? (
+          <NavBanner
+            step={navStep}
+            distM={navDist}
+            nextStep={navNext}
+            voiceOn={voiceOn}
+            onToggleVoice={() => setVoiceOn((v) => !v)}
+            topInset={insets.top}
+          />
+        ) : (
+          <View style={[styles.navPendingBar, { paddingTop: insets.top + spacing.sm }]}>
+            <MaterialCommunityIcons name="routes" size={20} color="#fff" />
+            <Text style={styles.navPendingText}>Rota yönlendirmesi hazırlanıyor…</Text>
+          </View>
+        )
       ) : (
         <>
           {/* Destination search (idle): pick a target to navigate to */}
@@ -952,9 +983,20 @@ export default function MapScreen({ route, navigation }: Props) {
         <View style={[styles.panel, { paddingBottom: insets.bottom + spacing.md }]}>
           <View style={styles.stats}>
             <Stat icon="map-marker-distance" label="Mesafe" value={distance.toFixed(2)} unit="km" />
+            <View style={styles.statDivider} />
             <Stat icon="speedometer" label="Hız" value={speed.toFixed(0)} unit="km/s" />
-            <Stat icon="map-marker-multiple" label="Nokta" value={`${path.length}`} unit="" />
+            <View style={styles.statDivider} />
+            <Stat icon="angle-acute" label="Yatış" value={`${Math.round(Math.abs(lean))}`} unit="°" />
           </View>
+          {recording && hasRouteToFollow && (
+            // Turn-by-turn steps load async and can lag or fail — don't force
+            // the switch, but let the rider jump into the chase/nav view
+            // themselves instead of being stuck on the plain stats panel.
+            <Pressable style={styles.switchToNavRow} onPress={() => setManualNavView(true)}>
+              <MaterialCommunityIcons name="navigation-variant" size={16} color={colors.accent} />
+              <Text style={styles.switchToNavText}>Navigasyon görünümüne geç</Text>
+            </Pressable>
+          )}
           {recording ? (
             <Button title="Sürüşü Bitir" variant="danger" icon="stop-circle" onPress={stopRecording} loading={saving} />
           ) : (
@@ -1120,7 +1162,7 @@ export default function MapScreen({ route, navigation }: Props) {
 function Stat({ icon, label, value, unit }: { icon: any; label: string; value: string; unit: string }) {
   return (
     <View style={styles.stat}>
-      <MaterialCommunityIcons name={icon} size={18} color={colors.primary} style={{ marginBottom: 4 }} />
+      <MaterialCommunityIcons name={icon} size={18} color={colors.primary} />
       <Text style={styles.statValue}>
         {value}
         {unit ? <Text style={styles.statUnit}> {unit}</Text> : null}
@@ -1214,6 +1256,35 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     ...shadow.card,
   },
+  navPendingBar: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+    backgroundColor: 'rgba(20,20,24,0.9)',
+    paddingHorizontal: spacing.lg,
+    paddingBottom: spacing.md,
+    borderBottomLeftRadius: radius.lg,
+    borderBottomRightRadius: radius.lg,
+    ...shadow.card,
+  },
+  navPendingText: { color: '#fff', fontSize: 14, fontWeight: '700' },
+  switchToNavRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: spacing.xs,
+    paddingVertical: spacing.sm,
+    marginBottom: spacing.sm,
+    borderRadius: radius.md,
+    borderWidth: 1,
+    borderColor: colors.border,
+    backgroundColor: colors.surfaceAlt,
+  },
+  switchToNavText: { color: colors.accent, fontSize: 13, fontWeight: '800' },
   controls: { position: 'absolute', right: spacing.md, alignItems: 'center', gap: spacing.sm },
   fab: {
     width: 52,
@@ -1303,9 +1374,17 @@ const styles = StyleSheet.create({
     backgroundColor: colors.surfaceAlt,
   },
   poiPillText: { color: colors.textMuted, fontWeight: '700', fontSize: 13 },
-  stats: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: spacing.md },
-  stat: { alignItems: 'center', flex: 1 },
+  stats: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: colors.surfaceAlt,
+    borderRadius: radius.lg,
+    paddingVertical: spacing.md,
+    marginBottom: spacing.lg,
+  },
+  stat: { alignItems: 'center', justifyContent: 'center', flex: 1, gap: spacing.xs },
+  statDivider: { width: StyleSheet.hairlineWidth, alignSelf: 'stretch', marginVertical: spacing.xs, backgroundColor: colors.border },
   statValue: { color: colors.text, fontSize: 22, fontWeight: '900' },
   statUnit: { color: colors.textMuted, fontSize: 12, fontWeight: '700' },
-  statLabel: { color: colors.textMuted, fontSize: 11, marginTop: 2, textTransform: 'uppercase', letterSpacing: 0.5 },
+  statLabel: { color: colors.textMuted, fontSize: 11, textTransform: 'uppercase', letterSpacing: 0.5 },
 });

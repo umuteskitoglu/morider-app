@@ -151,7 +151,7 @@ export default function GlobalChatScreen() {
           {cooldown > 0 ? (
             <Text style={styles.cooldownText}>{cooldown}</Text>
           ) : (
-            <MaterialCommunityIcons name="send" size={20} color="#fff" />
+            <MaterialCommunityIcons name="send" size={20} color="#fff" style={{ marginLeft: 2 }} />
           )}
         </Pressable>
       </View>

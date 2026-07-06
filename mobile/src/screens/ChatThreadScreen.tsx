@@ -291,7 +291,7 @@ export default function ChatThreadScreen({ navigation, route }: Props) {
             spellCheck={false}
           />
           <Pressable style={[styles.sendBtn, !draft.trim() && styles.sendBtnOff]} onPress={send} disabled={!draft.trim()}>
-            <MaterialCommunityIcons name="send" size={20} color="#fff" />
+            <MaterialCommunityIcons name="send" size={20} color="#fff" style={{ marginLeft: 2 }} />
           </Pressable>
         </View>
       )}

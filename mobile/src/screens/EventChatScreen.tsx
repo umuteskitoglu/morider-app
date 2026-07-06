@@ -130,7 +130,7 @@ export default function EventChatScreen({ navigation, route }: Props) {
           spellCheck={false}
         />
         <Pressable style={styles.sendBtn} onPress={send} disabled={!draft.trim()}>
-          <MaterialCommunityIcons name="send" size={20} color="#fff" />
+          <MaterialCommunityIcons name="send" size={20} color="#fff" style={{ marginLeft: 2 }} />
         </Pressable>
       </View>
     </KeyboardAvoidingView>

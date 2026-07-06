@@ -1,7 +1,11 @@
 package route
 
 import (
+	"context"
 	"math"
+	"net/http"
+	"net/http/httptest"
+	"strings"
 	"testing"
 )
 
@@ -119,6 +123,118 @@ func TestDropNoiseSteps(t *testing.T) {
 	}
 	if got[2].Modifier != "left" || got[3].Type != "arrive" {
 		t.Errorf("unexpected steps kept: %+v", got)
+	}
+}
+
+func TestBuildRouteURL(t *testing.T) {
+	two := []Point{{Lat: 41.0, Lon: 28.9}, {Lat: 41.1, Lon: 29.0}}
+	five := []Point{{Lat: 41.0, Lon: 28.9}, {Lat: 41.02, Lon: 28.92}, {Lat: 41.04, Lon: 28.94}, {Lat: 41.06, Lon: 28.96}, {Lat: 41.1, Lon: 29.0}}
+	cases := []struct {
+		name         string
+		waypoints    []Point
+		alternatives bool
+		withRadiuses bool
+		contains     []string
+		omits        []string
+	}{
+		{
+			name:         "two waypoints with radiuses",
+			waypoints:    two,
+			withRadiuses: true,
+			contains: []string{
+				"/route/v1/driving/28.9,41;29,41.1?", // lon,lat wire order
+				"continue_straight=false",
+				"snapping=any",
+				"radiuses=unlimited;unlimited",
+			},
+			omits: []string{"alternatives"},
+		},
+		{
+			name:         "five waypoints caps intermediates",
+			waypoints:    five,
+			withRadiuses: true,
+			contains:     []string{"radiuses=unlimited;250;250;250;unlimited"},
+		},
+		{
+			name:         "alternatives requested",
+			waypoints:    two,
+			alternatives: true,
+			withRadiuses: true,
+			contains:     []string{"alternatives=3"},
+		},
+		{
+			name:      "without radiuses",
+			waypoints: two,
+			contains:  []string{"continue_straight=false", "snapping=any"},
+			omits:     []string{"radiuses"},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			url := buildRouteURL("http://osrm:5000", "driving", tc.waypoints, tc.alternatives, tc.withRadiuses)
+			for _, want := range tc.contains {
+				if !strings.Contains(url, want) {
+					t.Errorf("url %q missing %q", url, want)
+				}
+			}
+			for _, not := range tc.omits {
+				if strings.Contains(url, not) {
+					t.Errorf("url %q should not contain %q", url, not)
+				}
+			}
+		})
+	}
+}
+
+func TestFetchRoutesRadiusFallback(t *testing.T) {
+	var urls []string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		urls = append(urls, r.URL.String())
+		if strings.Contains(r.URL.RawQuery, "radiuses") {
+			// OSRM reports a via-point with no road inside the radius as an
+			// HTTP 400 with a JSON code — the fallback must read the body.
+			w.WriteHeader(http.StatusBadRequest)
+			w.Write([]byte(`{"code":"NoSegment","message":"Could not find a matching segment"}`))
+			return
+		}
+		w.Write([]byte(osrmSample))
+	}))
+	defer srv.Close()
+
+	r := NewOSRMRouter(srv.URL, "driving")
+	plans, err := r.fetchRoutes(context.Background(), []Point{{Lat: 41.0, Lon: 28.9}, {Lat: 41.05, Lon: 28.95}, {Lat: 41.1, Lon: 29.0}}, false)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !approx(plans[0].Distance, 4.7) {
+		t.Errorf("Distance = %v km, want 4.7", plans[0].Distance)
+	}
+	if len(urls) != 2 {
+		t.Fatalf("expected 2 requests (radiuses then fallback), got %d: %v", len(urls), urls)
+	}
+	if !strings.Contains(urls[0], "radiuses=unlimited;250;unlimited") {
+		t.Errorf("first request should cap intermediates: %q", urls[0])
+	}
+	if strings.Contains(urls[1], "radiuses") {
+		t.Errorf("fallback request should drop radiuses: %q", urls[1])
+	}
+}
+
+func TestFetchRoutesHardFailure(t *testing.T) {
+	var calls int
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls++
+		w.WriteHeader(http.StatusBadRequest)
+		w.Write([]byte(`{"code":"NoRoute","message":"Impossible route between points"}`))
+	}))
+	defer srv.Close()
+
+	r := NewOSRMRouter(srv.URL, "driving")
+	if _, err := r.fetchRoutes(context.Background(), []Point{{Lat: 41.0, Lon: 28.9}, {Lat: 41.1, Lon: 29.0}}, false); err == nil {
+		t.Fatal("expected error when both attempts fail")
+	}
+	if calls != 2 {
+		t.Errorf("expected 2 attempts, got %d", calls)
 	}
 }
 

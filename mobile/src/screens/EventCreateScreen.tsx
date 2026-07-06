@@ -5,6 +5,7 @@ import {
   Platform,
   Pressable,
   ScrollView,
+  Share,
   StyleSheet,
   Text,
   View,
@@ -15,7 +16,7 @@ import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 
 import { EventsStackParams } from '../navigation/RootNavigator';
-import { Button, Card, TextField } from '../components/ui';
+import { Button, Card, Chip, TextField } from '../components/ui';
 import { api, errorMessage } from '../api/client';
 import { eventDraft } from '../lib/eventDraft';
 import { scheduleEventReminders } from '../lib/eventReminders';
@@ -31,6 +32,17 @@ function defaultMeet(): Date {
   const d = new Date();
   d.setDate(d.getDate() + 1);
   d.setHours(10, 0, 0, 0);
+  return d;
+}
+
+// Next occurrence of a weekday (0=Sunday..6=Saturday) at the given hour, always
+// in the future — used by the quick-pick chips (Yarın / Cumartesi / Pazar).
+function nextWeekday(dow: number, hour: number): Date {
+  const d = new Date();
+  d.setHours(hour, 0, 0, 0);
+  let add = (dow - d.getDay() + 7) % 7;
+  if (add === 0 && d.getTime() <= Date.now()) add = 7;
+  d.setDate(d.getDate() + add);
   return d;
 }
 
@@ -104,6 +116,20 @@ export default function EventCreateScreen({ navigation, route }: Props) {
 
   const selectedRoute = routes.find((r) => r.id === routeId) ?? null;
 
+  // Moving the meet time drags the departure along, preserving the gap between
+  // them (min 15 minutes) so the two never end up in the wrong order.
+  function changeMeet(d: Date) {
+    const gapMs = Math.max(startAt.getTime() - meetAt.getTime(), 15 * 60_000);
+    setMeetAt(d);
+    setStartAt(new Date(d.getTime() + gapMs));
+  }
+
+  const quickPicks: { label: string; date: Date }[] = [
+    { label: 'Yarın 09:00', date: (() => { const d = new Date(); d.setDate(d.getDate() + 1); d.setHours(9, 0, 0, 0); return d; })() },
+    { label: 'Cumartesi 09:00', date: nextWeekday(6, 9) },
+    { label: 'Pazar 09:00', date: nextWeekday(0, 9) },
+  ];
+
   async function submit() {
     if (!title.trim()) {
       Alert.alert('Eksik bilgi', 'Lütfen bir başlık gir.');
@@ -155,6 +181,19 @@ export default function EventCreateScreen({ navigation, route }: Props) {
         // Host attends by default → schedule local reminders for them.
         scheduleEventReminders(data.code, title.trim(), meetAt.toISOString()).catch(() => {});
         navigation.replace('EventDetail', { code: data.code });
+        // Nudge the host to invite people right away — an event with no invitees
+        // is the most common dead end.
+        Alert.alert('Etkinlik oluşturuldu 🎉', `Davet kodun: ${data.code}\nArkadaşların bu kodla katılabilir.`, [
+          { text: 'Şimdi değil', style: 'cancel' },
+          {
+            text: 'Kodu Paylaş',
+            onPress: () => {
+              Share.share({
+                message: `Morider etkinliğime katıl: ${title.trim()}\nKod: ${data.code}\nmorider://event/${data.code}`,
+              }).catch(() => {});
+            },
+          },
+        ]);
       }
     } catch (err) {
       Alert.alert(isEdit ? 'Güncellenemedi' : 'Oluşturulamadı', errorMessage(err));
@@ -165,6 +204,14 @@ export default function EventCreateScreen({ navigation, route }: Props) {
 
   return (
     <ScrollView style={styles.container} contentContainerStyle={styles.content}>
+      {!isEdit && (
+        <View style={styles.infoStrip}>
+          <MaterialCommunityIcons name="information-outline" size={16} color={colors.accent} />
+          <Text style={styles.infoStripText}>
+            Grup sürüşü planla: yer ve saati belirle, davet kodunu paylaş. Sürüş günü etkinlik canlı grup sürüşüne dönüşür.
+          </Text>
+        </View>
+      )}
       <TextField label="Başlık" icon="format-title" value={title} onChangeText={setTitle} placeholder="Pazar Sabahı Sürüşü" />
       <TextField
         label="Açıklama"
@@ -175,8 +222,20 @@ export default function EventCreateScreen({ navigation, route }: Props) {
         multiline
       />
 
-      <DateTimeField label="Buluşma" icon="map-marker-account" value={meetAt} onChange={setMeetAt} />
+      <DateTimeField label="Buluşma" icon="map-marker-account" value={meetAt} onChange={changeMeet} />
+      <View style={styles.quickRow}>
+        {quickPicks.map((q) => (
+          <Chip
+            key={q.label}
+            label={q.label}
+            icon="lightning-bolt"
+            active={meetAt.getTime() === q.date.getTime()}
+            onPress={() => changeMeet(q.date)}
+          />
+        ))}
+      </View>
       <DateTimeField label="Kalkış" icon="flag-checkered" value={startAt} onChange={setStartAt} />
+      <Text style={styles.hint}>Buluşma toplanma saatidir; kalkış, motorların birlikte yola çıkacağı saat.</Text>
 
       <Text style={styles.label}>Rota (opsiyonel)</Text>
       <Pressable onPress={() => setRoutePickerOpen(true)}>
@@ -201,6 +260,10 @@ export default function EventCreateScreen({ navigation, route }: Props) {
             kind="end"
             point={endPoint}
             onPress={() => navigation.navigate('EventLocationPicker', { target: 'end' })}
+            onClear={() => {
+              eventDraft.setEnd(null);
+              setEndPoint(null);
+            }}
           />
           <Text style={styles.hint}>Başlangıç gerekli, bitiş opsiyoneldir.</Text>
         </View>
@@ -253,7 +316,17 @@ export default function EventCreateScreen({ navigation, route }: Props) {
   );
 }
 
-function LocationButton({ kind, point, onPress }: { kind: 'start' | 'end'; point: Picked; onPress: () => void }) {
+function LocationButton({
+  kind,
+  point,
+  onPress,
+  onClear,
+}: {
+  kind: 'start' | 'end';
+  point: Picked;
+  onPress: () => void;
+  onClear?: () => void;
+}) {
   const icon = kind === 'start' ? 'flag' : 'flag-checkered';
   const label = kind === 'start' ? 'Başlangıç' : 'Bitiş';
   return (
@@ -265,7 +338,13 @@ function LocationButton({ kind, point, onPress }: { kind: 'start' | 'end'; point
             {point ? (point.name || `${point.lat.toFixed(4)}, ${point.lon.toFixed(4)}`) : `${label} konumu seç`}
           </Text>
         </View>
-        <MaterialCommunityIcons name="map-marker-plus" size={20} color={colors.textMuted} />
+        {point && onClear ? (
+          <Pressable hitSlop={8} onPress={(e) => { e.stopPropagation(); onClear(); }}>
+            <MaterialCommunityIcons name="close-circle" size={20} color={colors.textMuted} />
+          </Pressable>
+        ) : (
+          <MaterialCommunityIcons name="map-marker-plus" size={20} color={colors.textMuted} />
+        )}
       </Card>
     </Pressable>
   );
@@ -359,6 +438,19 @@ function DateTimeField({
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: colors.bg },
   content: { padding: spacing.md, gap: spacing.sm, paddingBottom: spacing.xxl },
+  infoStrip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+    backgroundColor: 'rgba(255,176,32,0.08)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,176,32,0.25)',
+    borderRadius: radius.md,
+    padding: spacing.sm,
+    marginBottom: spacing.sm,
+  },
+  infoStripText: { flex: 1, color: colors.textMuted, fontSize: 12, lineHeight: 17 },
+  quickRow: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm, marginBottom: spacing.xs },
   label: {
     color: colors.textMuted,
     marginBottom: spacing.xs,

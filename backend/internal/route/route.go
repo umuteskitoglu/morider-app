@@ -46,6 +46,7 @@ func registerRoutes(d *server.Deps, h *handler) {
 	g.GET("/geocode", h.geocode)
 	g.GET("", h.list)
 	g.GET("/explore", h.explore)
+	g.GET("/search", h.search)
 	g.GET("/user/:id", h.userRoutes)
 	g.GET("/:id", h.get)
 	g.GET("/:id/gpx", h.exportGPX)
@@ -255,18 +256,72 @@ func (h *handler) explore(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"routes": routes})
 }
 
-// userRoutes lists a single user's public routes for their profile. Only
-// 'public' routes are returned, so per-route visibility stays authoritative.
+// ilikeEscaper neutralises LIKE/ILIKE wildcards in user input so a query like
+// "50%" matches literally rather than as a pattern. Pairs with ESCAPE '\'.
+var ilikeEscaper = strings.NewReplacer(`\`, `\\`, `%`, `\%`, `_`, `\_`)
+
+// search returns up to 30 public routes whose name or description matches ?q
+// (case-insensitive substring), excluding the caller's own. Queries shorter
+// than 2 runes return empty. Same shape as explore so the client reuses it.
+func (h *handler) search(c *gin.Context) {
+	q := strings.TrimSpace(c.Query("q"))
+	if len([]rune(q)) < 2 {
+		c.JSON(http.StatusOK, gin.H{"routes": []Route{}})
+		return
+	}
+	me := authpkg.UserID(c)
+	rows, err := h.d.DB.Query(c,
+		`SELECT r.id, r.user_id, r.name, COALESCE(r.description, ''), r.distance, r.visibility, u.name,
+		        COALESCE(ag.avg, 0), COALESCE(ag.cnt, 0), COALESCE(mine.score, 0),
+		        EXISTS (SELECT 1 FROM follows f WHERE f.follower_id = $1 AND f.followee_id = r.user_id)
+		 FROM routes r
+		 JOIN users u ON u.id = r.user_id
+		 LEFT JOIN (SELECT route_id, AVG(score)::float8 AS avg, COUNT(*) AS cnt
+		            FROM route_ratings GROUP BY route_id) ag ON ag.route_id = r.id
+		 LEFT JOIN route_ratings mine ON mine.route_id = r.id AND mine.user_id = $1
+		 WHERE r.visibility = 'public' AND r.user_id <> $1
+		   AND (r.name ILIKE '%' || $2 || '%' ESCAPE '\' OR r.description ILIKE '%' || $2 || '%' ESCAPE '\')
+		 ORDER BY (r.name ILIKE $2 || '%' ESCAPE '\') DESC, r.created_at DESC
+		 LIMIT 30`,
+		me, ilikeEscaper.Replace(q))
+	if err != nil {
+		httpx.Internal(c, "could not search routes")
+		return
+	}
+	defer rows.Close()
+
+	routes := make([]Route, 0)
+	for rows.Next() {
+		var r Route
+		if err := rows.Scan(&r.ID, &r.UserID, &r.Name, &r.Description, &r.Distance, &r.Visibility, &r.OwnerName,
+			&r.AvgRating, &r.RatingCount, &r.MyRating, &r.IFollow); err != nil {
+			httpx.Internal(c, "could not read search results")
+			return
+		}
+		routes = append(routes, r)
+	}
+	c.JSON(http.StatusOK, gin.H{"routes": routes})
+}
+
+// userRoutes lists a single user's routes for their profile: public routes to
+// anyone, plus friends-only routes when the viewer and the profile owner
+// mutually follow each other. Same visibility rules as get/exportGPX/exportKML.
 func (h *handler) userRoutes(c *gin.Context) {
 	uid, err := strconv.ParseInt(c.Param("id"), 10, 64)
 	if err != nil {
 		httpx.BadRequest(c, "invalid user id")
 		return
 	}
+	viewer := authpkg.UserID(c)
 	rows, err := h.d.DB.Query(c,
 		`SELECT id, user_id, name, COALESCE(description, ''), distance, visibility
-		 FROM routes WHERE user_id = $1 AND visibility = 'public'
-		 ORDER BY created_at DESC LIMIT 100`, uid)
+		 FROM routes WHERE user_id = $1 AND (
+		     visibility = 'public'
+		     OR (visibility = 'friends'
+		         AND EXISTS (SELECT 1 FROM follows a WHERE a.follower_id = $2 AND a.followee_id = $1)
+		         AND EXISTS (SELECT 1 FROM follows b WHERE b.follower_id = $1 AND b.followee_id = $2))
+		 )
+		 ORDER BY created_at DESC LIMIT 100`, uid, viewer)
 	if err != nil {
 		httpx.Internal(c, "could not list routes")
 		return

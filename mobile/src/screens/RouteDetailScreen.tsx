@@ -1,5 +1,5 @@
 import React, { useCallback, useLayoutEffect, useRef, useState } from 'react';
-import { Alert, StyleSheet, Text, View } from 'react-native';
+import { Alert, Animated, Dimensions, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import MapView, { Marker, Polyline } from 'react-native-maps';
 import { useFocusEffect } from '@react-navigation/native';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
@@ -33,9 +33,11 @@ export default function RouteDetailScreen({ route, navigation }: Props) {
   const { user } = useAuth();
   const [coords, setCoords] = useState<Coord[]>([]);
   const [distance, setDistance] = useState(0);
+  const [description, setDescription] = useState('');
   const [ownerName, setOwnerName] = useState('');
   const [ownerId, setOwnerId] = useState<number | null>(null);
   const [visibility, setVisibility] = useState('private');
+  const [changingVisibility, setChangingVisibility] = useState(false);
   const [avgRating, setAvgRating] = useState(0);
   const [ratingCount, setRatingCount] = useState(0);
   const [myRating, setMyRating] = useState(0);
@@ -45,9 +47,22 @@ export default function RouteDetailScreen({ route, navigation }: Props) {
   const [pois, setPois] = useState<POI[]>([]);
   const [elevation, setElevation] = useState<ElevationProfile | null>(null);
   const [weather, setWeather] = useState<RouteWeather | null>(null);
+  const [expanded, setExpanded] = useState(false);
   const mapRef = useRef<MapView | null>(null);
+  const expandAnim = useRef(new Animated.Value(0)).current;
 
   const isOwner = user?.id === ownerId;
+
+  function toggleExpanded() {
+    const next = !expanded;
+    setExpanded(next);
+    Animated.timing(expandAnim, { toValue: next ? 1 : 0, duration: 220, useNativeDriver: false }).start();
+  }
+
+  const panelMaxHeight = expandAnim.interpolate({
+    inputRange: [0, 1],
+    outputRange: [0, Dimensions.get('window').height * 0.55],
+  });
 
   useLayoutEffect(() => {
     navigation.setOptions({ title: name });
@@ -62,6 +77,7 @@ export default function RouteDetailScreen({ route, navigation }: Props) {
       }));
       setCoords(pts);
       setDistance(data.distance ?? 0);
+      setDescription(data.description ?? '');
       setOwnerName(data.owner_name ?? '');
       setOwnerId(data.user_id ?? null);
       setVisibility(data.visibility ?? 'private');
@@ -165,6 +181,38 @@ export default function RouteDetailScreen({ route, navigation }: Props) {
     ]);
   }
 
+  async function changeVisibility(next: string) {
+    if (next === visibility) return;
+    const prev = visibility;
+    setVisibility(next); // optimistic
+    setChangingVisibility(true);
+    try {
+      await api.put(`/api/routes/${id}`, {
+        name,
+        description,
+        points: coords.map((c) => ({ lat: c.latitude, lon: c.longitude })),
+        visibility: next,
+      });
+    } catch (err) {
+      setVisibility(prev);
+      Alert.alert('Değiştirilemedi', errorMessage(err));
+    } finally {
+      setChangingVisibility(false);
+    }
+  }
+
+  // Owner-only: tapping the badge offers the same three tiers used at
+  // creation time, so visibility isn't stuck with whatever was picked then.
+  function chooseVisibility() {
+    if (!isOwner || changingVisibility) return;
+    Alert.alert('Kimler Görebilir?', 'Bu rotayı kimler görebilsin?', [
+      { text: VISIBILITY.private.label, onPress: () => changeVisibility('private') },
+      { text: VISIBILITY.friends.label, onPress: () => changeVisibility('friends') },
+      { text: VISIBILITY.public.label, onPress: () => changeVisibility('public') },
+      { text: 'Vazgeç', style: 'cancel' },
+    ]);
+  }
+
   async function rate(score: number) {
     setMyRating(score); // optimistic
     try {
@@ -237,12 +285,21 @@ export default function RouteDetailScreen({ route, navigation }: Props) {
       </MapView>
 
       <Card style={styles.panel}>
+        <Pressable onPress={toggleExpanded} style={styles.handleWrap} hitSlop={8}>
+          <View style={styles.handleBar} />
+        </Pressable>
+
         <View style={styles.headRow}>
           <Text style={styles.distance}>{distance.toFixed(2)} km</Text>
-          <View style={styles.visBadge}>
+          <Pressable
+            style={styles.visBadge}
+            onPress={chooseVisibility}
+            disabled={!isOwner || changingVisibility}
+          >
             <MaterialCommunityIcons name={vis.icon} size={13} color={colors.textMuted} />
             <Text style={styles.visText}>{vis.label}</Text>
-          </View>
+            {isOwner && <MaterialCommunityIcons name="chevron-down" size={13} color={colors.textMuted} />}
+          </Pressable>
         </View>
         <View style={styles.metaRow}>
           <MaterialCommunityIcons name="account-circle-outline" size={15} color={colors.textMuted} />
@@ -258,34 +315,46 @@ export default function RouteDetailScreen({ route, navigation }: Props) {
           )}
         </View>
 
-        {weather && <RouteWeatherCard weather={weather} />}
-        {elevation && <ElevationChart profile={elevation} />}
+        <Animated.View style={{ maxHeight: panelMaxHeight, overflow: 'hidden' }}>
+          <ScrollView showsVerticalScrollIndicator={false} nestedScrollEnabled>
+            {weather && <RouteWeatherCard weather={weather} />}
+            {elevation && <ElevationChart profile={elevation} />}
 
-        <View style={styles.ratingRow}>
-          <Stars value={avgRating} count={ratingCount} />
-          {avgRating > 0 ? <Text style={styles.avgText}>{avgRating.toFixed(1)}</Text> : <Text style={styles.muted}>Henüz puan yok</Text>}
-        </View>
-        {visibility === 'public' && (
-          <View style={styles.myRateRow}>
-            <Text style={styles.muted}>Senin puanın:</Text>
-            <Stars value={myRating} size={22} onRate={rate} />
-          </View>
-        )}
+            <View style={styles.ratingRow}>
+              <Stars value={avgRating} count={ratingCount} />
+              {avgRating > 0 ? <Text style={styles.avgText}>{avgRating.toFixed(1)}</Text> : <Text style={styles.muted}>Henüz puan yok</Text>}
+            </View>
+            {visibility === 'public' && (
+              <View style={styles.myRateRow}>
+                <Text style={styles.muted}>Senin puanın:</Text>
+                <Stars value={myRating} size={22} onRate={rate} />
+              </View>
+            )}
 
-        <View style={{ height: spacing.md }} />
-        <Button title="Bu Rotada Sür" icon="motorbike" onPress={() => rideThisRoute()} />
-        <View style={{ height: spacing.sm }} />
-        <Button title="Ters Yönde Sür (B → A)" variant="ghost" icon="swap-horizontal" onPress={() => rideThisRoute(true)} />
-        <View style={{ height: spacing.sm }} />
-        <Button title="Grup Sürüşü Başlat" variant="ghost" icon="account-group" onPress={startGroupRide} loading={startingGroup} />
-        <View style={{ height: spacing.sm }} />
-        <Button title="Dosya Olarak Dışa Aktar" variant="ghost" icon="download-outline" onPress={chooseExport} loading={exporting} />
-        {isOwner ? (
-          <>
+            <View style={{ height: spacing.md }} />
+            <Button title="Bu Rotada Sür" icon="motorbike" onPress={() => rideThisRoute()} />
             <View style={{ height: spacing.sm }} />
-            <Button title="Rotayı Sil" variant="ghost" icon="trash-can-outline" onPress={confirmDelete} loading={deleting} />
-          </>
-        ) : null}
+            <Button title="Ters Yönde Sür (B → A)" variant="ghost" icon="swap-horizontal" onPress={() => rideThisRoute(true)} />
+            <View style={{ height: spacing.sm }} />
+            <Button title="Grup Sürüşü Başlat" variant="ghost" icon="account-group" onPress={startGroupRide} loading={startingGroup} />
+            <View style={{ height: spacing.sm }} />
+            <Button title="Dosya Olarak Dışa Aktar" variant="ghost" icon="download-outline" onPress={chooseExport} loading={exporting} />
+            {isOwner ? (
+              <>
+                <View style={{ height: spacing.sm }} />
+                <Button title="Rotayı Sil" variant="ghost" icon="trash-can-outline" onPress={confirmDelete} loading={deleting} />
+              </>
+            ) : null}
+            <View style={{ height: spacing.sm }} />
+          </ScrollView>
+        </Animated.View>
+
+        {!expanded && (
+          <Pressable onPress={toggleExpanded} style={styles.moreRow}>
+            <Text style={styles.moreText}>Detaylar ve seçenekler</Text>
+            <MaterialCommunityIcons name="chevron-down" size={18} color={colors.primary} />
+          </Pressable>
+        )}
       </Card>
     </View>
   );
@@ -294,6 +363,16 @@ export default function RouteDetailScreen({ route, navigation }: Props) {
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: colors.bg },
   panel: { position: 'absolute', left: spacing.md, right: spacing.md, bottom: spacing.lg },
+  handleWrap: { alignItems: 'center', paddingBottom: spacing.xs },
+  handleBar: { width: 36, height: 4, borderRadius: 2, backgroundColor: colors.border },
+  moreRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 4,
+    marginTop: spacing.sm,
+  },
+  moreText: { color: colors.primary, fontWeight: '700', fontSize: 13 },
   headRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
   distance: { color: colors.primary, fontSize: 26, fontWeight: '900' },
   visBadge: {

@@ -25,6 +25,34 @@ export function formatTime(value: string | Date): string {
   return `${pad(d.getHours())}:${pad(d.getMinutes())}`;
 }
 
+// Remaining time until a future moment: "45 dk", "3 sa", "2 sa 30 dk", "5 gün".
+// Returns '' when the moment has passed (or the value is invalid).
+export function timeUntil(value: string | Date): string {
+  const d = typeof value === 'string' ? new Date(value) : value;
+  if (isNaN(d.getTime())) return '';
+  const diffMin = Math.round((d.getTime() - Date.now()) / 60_000);
+  if (diffMin <= 0) return '';
+  if (diffMin < 60) return `${diffMin} dk`;
+  if (diffMin < 24 * 60) {
+    const h = Math.floor(diffMin / 60);
+    const m = diffMin % 60;
+    return h < 6 && m > 0 ? `${h} sa ${m} dk` : `${h} sa`;
+  }
+  return `${Math.round(diffMin / (24 * 60))} gün`;
+}
+
+// "Bugün" / "Yarın" for near dates, otherwise null (caller falls back to the
+// full date).
+export function dayLabel(value: string | Date): 'Bugün' | 'Yarın' | null {
+  const d = typeof value === 'string' ? new Date(value) : value;
+  if (isNaN(d.getTime())) return null;
+  const startOfDay = (x: Date) => new Date(x.getFullYear(), x.getMonth(), x.getDate()).getTime();
+  const diffDays = Math.round((startOfDay(d) - startOfDay(new Date())) / 86_400_000);
+  if (diffDays === 0) return 'Bugün';
+  if (diffDays === 1) return 'Yarın';
+  return null;
+}
+
 // "12 Haziran 2026 Çarşamba" style long date for headers.
 export function formatLongDate(value: string | Date): string {
   const long = [

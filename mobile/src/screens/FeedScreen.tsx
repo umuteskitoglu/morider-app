@@ -13,7 +13,6 @@ import {
   useWindowDimensions,
   View,
 } from 'react-native';
-import { Image } from 'expo-image';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useFocusEffect } from '@react-navigation/native';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
@@ -23,6 +22,7 @@ import { MaterialCommunityIcons } from '@expo/vector-icons';
 
 import { FeedStackParams } from '../navigation/RootNavigator';
 import { LikersSheet } from '../components/LikersSheet';
+import { ZoomableImage } from '../components/ZoomableImage';
 import { EmptyState } from '../components/ui';
 import { api, apiBaseURL, errorMessage } from '../api/client';
 import { colors, gradients, spacing } from '../theme';
@@ -155,6 +155,7 @@ export default function FeedScreen({ navigation }: Props) {
               post={item}
               width={width}
               height={height}
+              insets={insets}
               onOpenProfile={(userId, name) => navigation.navigate('UserProfile', { userId, name })}
               onOpenComments={(postId) => navigation.navigate('Comments', { postId })}
               onOpenLikers={(postId) => setLikersPostId(postId)}
@@ -168,7 +169,7 @@ export default function FeedScreen({ navigation }: Props) {
         onPress={() => navigation.navigate('UserSearch')}
         hitSlop={8}
       >
-        <MaterialCommunityIcons name="account-search" size={22} color="#fff" />
+        <MaterialCommunityIcons name="magnify" size={22} color="#fff" />
       </Pressable>
 
       <Pressable style={styles.fab} onPress={() => navigation.navigate('CreatePost')}>
@@ -184,6 +185,7 @@ function PostItem({
   post,
   width,
   height,
+  insets,
   onOpenProfile,
   onOpenComments,
   onOpenLikers,
@@ -191,6 +193,7 @@ function PostItem({
   post: Post;
   width: number;
   height: number;
+  insets: { top: number };
   onOpenProfile: (userId: number, name: string) => void;
   onOpenComments: (postId: number) => void;
   onOpenLikers: (postId: number) => void;
@@ -262,13 +265,7 @@ function PostItem({
         onMomentumScrollEnd={onScroll}
         renderItem={({ item }) => (
           <Pressable onPress={onPhotoTap}>
-            <Image
-              source={apiBaseURL() + item}
-              style={{ width, height }}
-              contentFit="contain"
-              cachePolicy="memory-disk"
-              transition={150}
-            />
+            <ZoomableImage uri={apiBaseURL() + item} width={width} height={height} style={{ width, height }} />
           </Pressable>
         )}
       />
@@ -284,7 +281,7 @@ function PostItem({
       </Animated.View>
 
       {post.photos.length > 1 && (
-        <View style={styles.counter}>
+        <View style={[styles.counter, { top: insets.top + spacing.sm }]}>
           <Text style={styles.counterText}>
             {idx + 1}/{post.photos.length}
           </Text>
