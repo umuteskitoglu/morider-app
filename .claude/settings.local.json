@@ -39,7 +39,8 @@
       "Bash(node -e \"console.log\\(Object.keys\\(require\\('expo-keep-awake'\\)\\)\\)\")",
       "Bash(exit 0)",
       "Bash(timeout 1 echo noop)",
-      "Bash(xargs grep -l \"api\\\\\\\\.get\\\\|api\\\\\\\\.post\\\\|api\\\\\\\\.delete\\\\|api\\\\\\\\.put\")"
+      "Bash(xargs grep -l \"api\\\\\\\\.get\\\\|api\\\\\\\\.post\\\\|api\\\\\\\\.delete\\\\|api\\\\\\\\.put\")",
+      "PowerShell(Set-Location C:\\\\Projects\\\\morider-app\\\\mobile; $b = npx eas-cli build:list --platform ios --limit 3 --non-interactive --json 2>$null | ConvertFrom-Json; foreach \\($x in $b\\) { \"build $\\($x.appBuildVersion\\) | $\\($x.status\\) | commit $\\($x.gitCommitHash.Substring\\(0,7\\)\\) | $\\($x.createdAt\\)\" })"
     ]
   }
 }

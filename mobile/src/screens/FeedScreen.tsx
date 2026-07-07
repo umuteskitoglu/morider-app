@@ -201,8 +201,23 @@ function PostItem({
   const [idx, setIdx] = useState(0);
   const [liked, setLiked] = useState(post.liked);
   const [likeCount, setLikeCount] = useState(post.like_count);
+  const [zooming, setZooming] = useState(false);
   const lastTap = useRef(0);
   const heart = useRef(new Animated.Value(0)).current;
+  // Backdrop dim while pinch-zooming: fade a black sheet over the overlays so the
+  // photo appears lifted above everything, then fade it back out on release.
+  const dim = useRef(new Animated.Value(0)).current;
+
+  function onPinchStart() {
+    setZooming(true);
+    Animated.timing(dim, { toValue: 1, duration: 140, useNativeDriver: true }).start();
+  }
+
+  function onPinchEnd() {
+    Animated.timing(dim, { toValue: 0, duration: 200, useNativeDriver: true }).start(() =>
+      setZooming(false),
+    );
+  }
 
   function onScroll(e: NativeSyntheticEvent<NativeScrollEvent>) {
     setIdx(Math.round(e.nativeEvent.contentOffset.x / width));
@@ -256,16 +271,30 @@ function PostItem({
 
   return (
     <View style={{ width, height, backgroundColor: '#000' }}>
+      {/* Black sheet that dims the caption/counter/dots while a pinch is active,
+          so the zoomed photo reads as floating above the rest of the post. */}
+      <Animated.View pointerEvents="none" style={[styles.zoomBackdrop, { opacity: dim }]} />
+
       <FlatList
+        // Lift the photo above the backdrop and the gradient overlay while zooming.
+        style={{ zIndex: zooming ? 3 : 0 }}
         data={post.photos}
         keyExtractor={(_, i) => String(i)}
         horizontal
         pagingEnabled
+        scrollEnabled={!zooming}
         showsHorizontalScrollIndicator={false}
         onMomentumScrollEnd={onScroll}
         renderItem={({ item }) => (
           <Pressable onPress={onPhotoTap}>
-            <ZoomableImage uri={apiBaseURL() + item} width={width} height={height} style={{ width, height }} />
+            <ZoomableImage
+              uri={apiBaseURL() + item}
+              width={width}
+              height={height}
+              style={{ width, height }}
+              onPinchStart={onPinchStart}
+              onPinchEnd={onPinchEnd}
+            />
           </Pressable>
         )}
       />
@@ -336,6 +365,9 @@ function PostItem({
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: colors.bg },
+  // Sits above the gradient overlay/counter (zIndex 0) but below the lifted
+  // photo (zIndex 3) so only the background dims during a pinch.
+  zoomBackdrop: { ...StyleSheet.absoluteFillObject, backgroundColor: '#000', zIndex: 2 },
   empty: { alignItems: 'center', justifyContent: 'center', gap: spacing.md, paddingHorizontal: spacing.xl },
   emptyText: { color: colors.textMuted, textAlign: 'center', lineHeight: 22 },
   fab: {

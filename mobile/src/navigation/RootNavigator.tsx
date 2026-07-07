@@ -474,9 +474,7 @@ export default function RootNavigator() {
         <>
           <AppTabs />
           {/* First-run spotlight tutorial; self-hides once the rider has seen it. */}
-          {/* GEÇİCİ: açılış crash'i teşhisi için kapatıldı — build açılırsa suçlu
-              budur, sonra geri açılacak. */}
-          {/* <OnboardingTour /> */}
+          <OnboardingTour />
         </>
       ) : (
         <AuthFlow />

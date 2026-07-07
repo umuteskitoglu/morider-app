@@ -93,10 +93,11 @@ const STEPS: Step[] = [
   },
 ];
 
-// The scrim is one huge border around an animated content box: the box is the
-// spotlight hole, the border is the dark overlay. Moving/resizing the box
-// slides the hole from one element to the next in a single Animated.View.
-const SCRIM_BORDER = 4000;
+// The scrim darkens everything except the spotlight hole, drawn as four dark
+// rectangles hugging the hole (top/bottom/left/right). This deliberately avoids
+// the old "one 8000px view with a 4000px rounded border" trick: on a @3x device
+// that forced offscreen rasterization of a ~24000×24000px layer (~2 GB), which
+// OOM-crashed the app at launch. Four plain rects have no such cost.
 const HOLE_PAD = 6;
 const HOLE_RADIUS = 14;
 
@@ -256,18 +257,21 @@ export default function OnboardingTour() {
       {/* Tapping anywhere advances — the scrim doubles as the "next" surface
           and keeps the app underneath untouchable during the tour. */}
       <Pressable style={StyleSheet.absoluteFill} onPress={next}>
+        {/* Four dark rectangles around the spotlight hole. With no target the
+            hole collapses to zero size at the screen centre, so top+bottom meet
+            and the whole screen dims. */}
+        <Animated.View pointerEvents="none" style={[styles.scrim, { top: 0, left: 0, right: 0, height: hole.y }]} />
         <Animated.View
           pointerEvents="none"
-          style={{
-            position: 'absolute',
-            left: Animated.subtract(hole.x, SCRIM_BORDER),
-            top: Animated.subtract(hole.y, SCRIM_BORDER),
-            width: Animated.add(hole.w, SCRIM_BORDER * 2),
-            height: Animated.add(hole.h, SCRIM_BORDER * 2),
-            borderWidth: SCRIM_BORDER,
-            borderColor: 'rgba(5,7,12,0.84)',
-            borderRadius: SCRIM_BORDER + HOLE_RADIUS,
-          }}
+          style={[styles.scrim, { top: Animated.add(hole.y, hole.h), left: 0, right: 0, bottom: 0 }]}
+        />
+        <Animated.View
+          pointerEvents="none"
+          style={[styles.scrim, { top: hole.y, left: 0, width: hole.x, height: hole.h }]}
+        />
+        <Animated.View
+          pointerEvents="none"
+          style={[styles.scrim, { top: hole.y, left: Animated.add(hole.x, hole.w), right: 0, height: hole.h }]}
         />
         <Animated.View
           pointerEvents="none"
@@ -303,6 +307,7 @@ export default function OnboardingTour() {
 
 const styles = StyleSheet.create({
   root: { zIndex: 1000 },
+  scrim: { position: 'absolute', backgroundColor: 'rgba(5,7,12,0.84)' },
   ring: {
     position: 'absolute',
     borderRadius: HOLE_RADIUS,
