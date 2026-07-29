@@ -19,6 +19,7 @@ import (
 	authpkg "github.com/morider/backend/pkg/auth"
 	"github.com/morider/backend/pkg/config"
 	"github.com/morider/backend/pkg/httpx"
+	"github.com/morider/backend/pkg/oauth"
 	"github.com/morider/backend/pkg/ratelimit"
 )
 
@@ -46,10 +47,15 @@ func registerRoutes(d *server.Deps) {
 		d:          d,
 		perIP:      ratelimit.NewStore(credentialRatePerSec, credentialBurst),
 		perAccount: ratelimit.NewStore(credentialRatePerSec, credentialBurst),
+		google:     oauth.NewGoogleVerifier(d.Cfg.GoogleClientIDs),
+	}
+	if !h.google.Configured() {
+		d.Log.Warn().Msg("GOOGLE_CLIENT_IDS not set: google sign-in disabled")
 	}
 	g := d.Engine.Group("/api/auth")
 	g.POST("/signup", h.signup)
 	g.POST("/login", h.login)
+	g.POST("/google", h.googleSignIn)
 	g.GET("/me", d.JWT.Middleware(), h.me)
 }
 
@@ -61,6 +67,10 @@ type handler struct {
 	// which is why this lives in the handler rather than in a middleware.
 	perIP      *ratelimit.Store
 	perAccount *ratelimit.Store
+
+	// google verifies Google ID tokens. Non-nil always; it rejects everything
+	// with ErrNotConfigured when no client id is configured.
+	google *oauth.GoogleVerifier
 }
 
 // normaliseEmail lowercases and trims an address so it maps to exactly one
@@ -193,9 +203,10 @@ func (h *handler) login(c *gin.Context) {
 	}
 
 	var (
-		u        user
-		stored   string
-		found    bool
+		u      user
+		stored *string // NULL for accounts that only have Google sign-in
+		found  bool
+
 		compared = dummyHash
 	)
 	err := h.d.DB.QueryRow(c,
@@ -204,7 +215,12 @@ func (h *handler) login(c *gin.Context) {
 	).Scan(&u.ID, &u.Name, &u.Username, &u.Email, &u.Country, &u.AvatarURL, &stored)
 	switch {
 	case err == nil:
-		found, compared = true, []byte(stored)
+		// A Google-only account has no password hash. It must still burn the
+		// same bcrypt time and return the same message as a wrong password,
+		// otherwise the response reveals how the account was created.
+		if stored != nil && *stored != "" {
+			found, compared = true, []byte(*stored)
+		}
 	case errors.Is(err, pgx.ErrNoRows):
 		// fall through to the dummy comparison below
 	default:

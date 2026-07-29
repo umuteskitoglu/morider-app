@@ -8,17 +8,20 @@ import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { AuthStackParams } from '../navigation/RootNavigator';
 import { useAuth } from '../store/auth';
 import { Button, TextField } from '../components/ui';
+import { GoogleSignInButton, OrDivider } from '../components/GoogleSignInButton';
 import { errorMessage } from '../api/client';
+import { googleSignInAvailable, GoogleSignInCancelled } from '../api/googleAuth';
 import { colors, gradients, shadow, spacing } from '../theme';
 
 type Props = NativeStackScreenProps<AuthStackParams, 'Login'>;
 
 export default function LoginScreen({ navigation }: Props) {
   const insets = useSafeAreaInsets();
-  const { signIn } = useAuth();
+  const { signIn, signInWithGoogle } = useAuth();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
+  const [googleLoading, setGoogleLoading] = useState(false);
 
   async function onSubmit() {
     if (!email || !password) {
@@ -32,6 +35,20 @@ export default function LoginScreen({ navigation }: Props) {
       Alert.alert('Giriş başarısız', errorMessage(err));
     } finally {
       setLoading(false);
+    }
+  }
+
+  async function onGoogle() {
+    try {
+      setGoogleLoading(true);
+      await signInWithGoogle();
+    } catch (err) {
+      // Backing out of the Google sheet is a normal action, not a failure to
+      // report — an alert here would punish the user for changing their mind.
+      if (err instanceof GoogleSignInCancelled) return;
+      Alert.alert('Google ile giriş başarısız', errorMessage(err));
+    } finally {
+      setGoogleLoading(false);
     }
   }
 
@@ -71,13 +88,33 @@ export default function LoginScreen({ navigation }: Props) {
             placeholder="••••••••"
           />
 
-          <Button title="Giriş Yap" icon="login" onPress={onSubmit} loading={loading} />
+          <Button
+            title="Giriş Yap"
+            icon="login"
+            onPress={onSubmit}
+            loading={loading}
+            disabled={googleLoading}
+          />
+
+          {googleSignInAvailable ? (
+            <>
+              <OrDivider />
+              <GoogleSignInButton
+                title="Google ile giriş yap"
+                onPress={onGoogle}
+                loading={googleLoading}
+                disabled={loading}
+              />
+            </>
+          ) : null}
+
           <View style={{ height: spacing.md }} />
           <Button
             title="Hesap Oluştur"
             variant="ghost"
             icon="account-plus-outline"
             onPress={() => navigation.navigate('Signup')}
+            disabled={loading || googleLoading}
           />
         </View>
       </KeyboardAvoidingView>

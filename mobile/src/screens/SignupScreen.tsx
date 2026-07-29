@@ -8,18 +8,21 @@ import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { AuthStackParams } from '../navigation/RootNavigator';
 import { useAuth } from '../store/auth';
 import { Button, TextField } from '../components/ui';
+import { GoogleSignInButton, OrDivider } from '../components/GoogleSignInButton';
 import { errorMessage } from '../api/client';
+import { googleSignInAvailable, GoogleSignInCancelled } from '../api/googleAuth';
 import { colors, gradients, shadow, spacing } from '../theme';
 
 type Props = NativeStackScreenProps<AuthStackParams, 'Signup'>;
 
 export default function SignupScreen({ navigation }: Props) {
   const insets = useSafeAreaInsets();
-  const { signUp } = useAuth();
+  const { signUp, signInWithGoogle } = useAuth();
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
+  const [googleLoading, setGoogleLoading] = useState(false);
 
   async function onSubmit() {
     if (!name || !email || password.length < 6) {
@@ -33,6 +36,21 @@ export default function SignupScreen({ navigation }: Props) {
       Alert.alert('Kayıt başarısız', errorMessage(err));
     } finally {
       setLoading(false);
+    }
+  }
+
+  // Same call as on the login screen: the backend decides whether this Google
+  // account becomes a new rider or links to one that already exists, so the
+  // sign-up screen needs no separate endpoint.
+  async function onGoogle() {
+    try {
+      setGoogleLoading(true);
+      await signInWithGoogle();
+    } catch (err) {
+      if (err instanceof GoogleSignInCancelled) return;
+      Alert.alert('Google ile kayıt başarısız', errorMessage(err));
+    } finally {
+      setGoogleLoading(false);
     }
   }
 
@@ -77,9 +95,34 @@ export default function SignupScreen({ navigation }: Props) {
             placeholder="En az 6 karakter"
           />
 
-          <Button title="Kayıt Ol" icon="motorbike" onPress={onSubmit} loading={loading} />
+          <Button
+            title="Kayıt Ol"
+            icon="motorbike"
+            onPress={onSubmit}
+            loading={loading}
+            disabled={googleLoading}
+          />
+
+          {googleSignInAvailable ? (
+            <>
+              <OrDivider />
+              <GoogleSignInButton
+                title="Google ile kayıt ol"
+                onPress={onGoogle}
+                loading={googleLoading}
+                disabled={loading}
+              />
+            </>
+          ) : null}
+
           <View style={{ height: spacing.md }} />
-          <Button title="Zaten hesabım var" variant="ghost" icon="login" onPress={() => navigation.goBack()} />
+          <Button
+            title="Zaten hesabım var"
+            variant="ghost"
+            icon="login"
+            onPress={() => navigation.goBack()}
+            disabled={loading || googleLoading}
+          />
         </View>
         </ScrollView>
       </KeyboardAvoidingView>

@@ -2,6 +2,7 @@ import React, { createContext, useContext, useEffect, useMemo, useState } from '
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
 import { api, setUnauthorizedHandler, TOKEN_KEY } from '../api/client';
+import { getGoogleIdToken, googleSignOut } from '../api/googleAuth';
 
 export type User = {
   id: number;
@@ -24,6 +25,7 @@ type AuthState = {
   loading: boolean;
   signIn: (email: string, password: string) => Promise<void>;
   signUp: (name: string, email: string, password: string) => Promise<void>;
+  signInWithGoogle: () => Promise<void>;
   signOut: () => Promise<void>;
   updateUser: (partial: Partial<User>) => Promise<void>;
 };
@@ -68,10 +70,22 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     await persist(data.token, data.user);
   }
 
+  // One endpoint covers both cases: the app cannot know whether this Google
+  // account is new to Morider, and the backend links it to an existing account
+  // when the verified email matches.
+  async function signInWithGoogle() {
+    const idToken = await getGoogleIdToken();
+    const { data } = await api.post('/api/auth/google', { id_token: idToken });
+    await persist(data.token, data.user);
+  }
+
   async function signOut() {
     setToken(null);
     setUser(null);
     await AsyncStorage.multiRemove([TOKEN_KEY, USER_KEY]);
+    // Also drop the native Google session, so signing out and back in offers
+    // the account picker instead of silently reusing the last account.
+    await googleSignOut();
   }
 
   // Any 401 from the API (expired/invalid token) clears the session so the app
@@ -93,7 +107,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }
 
   const value = useMemo<AuthState>(
-    () => ({ user, token, loading, signIn, signUp, signOut, updateUser }),
+    () => ({ user, token, loading, signIn, signUp, signInWithGoogle, signOut, updateUser }),
     [user, token, loading],
   );
 

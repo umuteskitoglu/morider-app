@@ -28,6 +28,13 @@ type Config struct {
 	JWTSecret string
 	JWTTTL    time.Duration
 
+	// GoogleClientIDs are the OAuth client ids Google ID tokens may be issued
+	// for — typically the iOS, Android and Web client ids of one Google Cloud
+	// project. A token whose audience is not in this list is rejected, which is
+	// what stops an ID token minted for someone else's app from logging a user
+	// in here. Empty disables Google sign-in.
+	GoogleClientIDs []string
+
 	// Per-client-IP rate limit applied by every service (token bucket).
 	RateLimitRPS   float64
 	RateLimitBurst int
@@ -103,8 +110,9 @@ func Load() Config {
 		RedisURL:    getEnv("REDIS_URL", "redis://localhost:6379/0"),
 		NATSURL:     getEnv("NATS_URL", "nats://localhost:4222"),
 
-		JWTSecret: getEnv("JWT_SECRET", defaultJWTSecret),
-		JWTTTL:    time.Duration(ttlHours) * time.Hour,
+		JWTSecret:       getEnv("JWT_SECRET", defaultJWTSecret),
+		JWTTTL:          time.Duration(ttlHours) * time.Hour,
+		GoogleClientIDs: getList("GOOGLE_CLIENT_IDS", nil),
 
 		RateLimitRPS:   getFloat("RATE_LIMIT_RPS", 50),
 		RateLimitBurst: getInt("RATE_LIMIT_BURST", 100),
