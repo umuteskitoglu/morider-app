@@ -1,7 +1,6 @@
 package chat
 
 import (
-	"encoding/json"
 	"errors"
 	"net/http"
 	"strconv"
@@ -11,6 +10,7 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	"github.com/morider/backend/pkg/httpx"
+	"github.com/morider/backend/pkg/wshub"
 )
 
 // maxBodyLen bounds a single chat message.
@@ -92,14 +92,14 @@ func (h *handler) globalWS(c *gin.Context) {
 	}
 	defer conn.Close()
 
-	client := &wsClient{send: make(chan []byte, 32), done: make(chan struct{})}
-	h.globalHub.add(globalRoom, client)
+	client := wshub.NewClient(me, 32)
+	h.globalHub.Add(globalRoom, client)
 	defer func() {
-		h.globalHub.remove(globalRoom, client)
-		close(client.done)
+		h.globalHub.Remove(globalRoom, client)
+		client.Close()
 	}()
 
-	go pumpWriter(conn, client)
+	serveClient(conn, client)
 
 	for {
 		var in wsBodyIn
@@ -135,10 +135,9 @@ func (h *handler) globalWS(c *gin.Context) {
 			h.d.Log.Error().Err(err).Msg("could not persist global message")
 			continue
 		}
-		msg := globalMsg{ID: id, UserID: me, Name: name, AvatarURL: avatar, Body: body, CreatedAt: createdAt}
-		if data, err := json.Marshal(msg); err == nil {
-			h.globalHub.publish(globalRoom, data)
-		}
+		h.globalHub.PublishJSON(globalRoom, globalMsg{
+			ID: id, UserID: me, Name: name, AvatarURL: avatar, Body: body, CreatedAt: createdAt,
+		})
 	}
 }
 
@@ -160,13 +159,7 @@ func (h *handler) globalSlowmodeWait(c *gin.Context, userID int64) time.Duration
 	return 0
 }
 
-// sendFrame marshals and pushes a control frame to a single client.
-func (h *handler) sendFrame(client *wsClient, payload gin.H) {
-	if data, err := json.Marshal(payload); err == nil {
-		select {
-		case client.send <- data:
-		case <-client.done:
-		default:
-		}
-	}
+// sendFrame pushes a control frame to a single client.
+func (h *handler) sendFrame(client *wshub.Client, payload gin.H) {
+	client.SendJSON(payload)
 }

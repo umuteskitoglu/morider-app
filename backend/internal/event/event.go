@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/gorilla/websocket"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/nats-io/nats.go"
@@ -19,7 +20,9 @@ import (
 	"github.com/morider/backend/internal/server"
 	authpkg "github.com/morider/backend/pkg/auth"
 	"github.com/morider/backend/pkg/config"
+	"github.com/morider/backend/pkg/events"
 	"github.com/morider/backend/pkg/httpx"
+	"github.com/morider/backend/pkg/wshub"
 )
 
 // Run boots the event service.
@@ -28,6 +31,8 @@ func Run(cfg config.Config) error {
 	if err != nil {
 		return err
 	}
+	upgrader = websocket.Upgrader{CheckOrigin: wshub.OriginChecker(cfg.AllowedWSOrigins)}
+
 	h := &handler{d: deps}
 
 	// NATS is optional: events and chat still work without it, only cross-replica
@@ -37,7 +42,8 @@ func Run(cfg config.Config) error {
 	} else {
 		h.nats = nc
 	}
-	h.hub = newChatHub(h.nats)
+	h.hub = wshub.New(h.nats, events.SubjectEventChat, events.SubjectEventDisconnect)
+	deps.AddCloser(h.hub.CloseAll)
 
 	registerRoutes(deps, h)
 	return deps.Run(config.ResolvePort("EVENT_PORT", "8088"))
@@ -61,7 +67,7 @@ func registerRoutes(d *server.Deps, h *handler) {
 type handler struct {
 	d    *server.Deps
 	nats *nats.Conn
-	hub  *chatHub
+	hub  *wshub.Hub
 }
 
 // codeAlphabet excludes visually ambiguous characters (0/O, 1/I) so codes are

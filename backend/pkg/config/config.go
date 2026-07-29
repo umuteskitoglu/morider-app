@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"strconv"
+	"strings"
 	"time"
 )
 
@@ -30,6 +31,20 @@ type Config struct {
 	// Per-client-IP rate limit applied by every service (token bucket).
 	RateLimitRPS   float64
 	RateLimitBurst int
+
+	// TrustedProxies lists the CIDRs/IPs allowed to set X-Forwarded-For. Gin
+	// defaults to trusting every peer, which lets any client forge its own
+	// rate-limit identity; an empty list means "trust nobody" and ClientIP()
+	// falls back to the real socket address. Set this to the gateway/ingress
+	// hop only.
+	TrustedProxies []string
+
+	// MaxBodyBytes caps the size of any non-WebSocket request body.
+	MaxBodyBytes int64
+
+	// AllowedWSOrigins is the browser Origin allow-list for WebSocket upgrades.
+	// The native mobile client sends no Origin and is always allowed.
+	AllowedWSOrigins []string
 
 	// Minimum interval between two global-chat messages from the same user
 	// (slow mode). Guards the community room against flooding.
@@ -93,6 +108,13 @@ func Load() Config {
 
 		RateLimitRPS:   getFloat("RATE_LIMIT_RPS", 50),
 		RateLimitBurst: getInt("RATE_LIMIT_BURST", 100),
+
+		// Default to the private ranges docker-compose/k8s put the gateway on.
+		// Deployments behind a cloud LB must set this to the LB's range.
+		TrustedProxies: getList("TRUSTED_PROXIES", []string{"10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16", "127.0.0.1/32", "::1/128"}),
+		MaxBodyBytes:   int64(getInt("MAX_BODY_BYTES", 1<<20)),
+
+		AllowedWSOrigins: getList("ALLOWED_WS_ORIGINS", nil),
 
 		GlobalChatSlowmode: time.Duration(getInt("GLOBAL_CHAT_SLOWMODE_SECONDS", 30)) * time.Second,
 
@@ -159,6 +181,23 @@ func getInt(key string, fallback int) int {
 		}
 	}
 	return fallback
+}
+
+// getList reads a comma-separated env var. An explicit empty value ("") is
+// honoured as an empty list, which for TRUSTED_PROXIES means "trust nobody".
+func getList(key string, fallback []string) []string {
+	v, ok := os.LookupEnv(key)
+	if !ok {
+		return fallback
+	}
+	parts := strings.Split(v, ",")
+	out := make([]string, 0, len(parts))
+	for _, p := range parts {
+		if p = strings.TrimSpace(p); p != "" {
+			out = append(out, p)
+		}
+	}
+	return out
 }
 
 func getFloat(key string, fallback float64) float64 {

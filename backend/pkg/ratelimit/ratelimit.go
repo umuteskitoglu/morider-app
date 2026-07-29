@@ -23,23 +23,46 @@ type entry struct {
 	lastSeen time.Time
 }
 
-type limiterStore struct {
+// Store is a set of token buckets keyed by an arbitrary string, with idle
+// eviction. Exported so handlers can rate limit on a key that is only known
+// after the request body is parsed — the login endpoint limits per targeted
+// account, which a middleware cannot see without consuming the body.
+type Store struct {
 	mu      sync.Mutex
 	clients map[string]*entry
 	rate    rate.Limit
 	burst   int
 }
 
+// NewStore builds a keyed limiter store and starts its eviction sweep.
+func NewStore(r rate.Limit, burst int) *Store {
+	s := &Store{clients: make(map[string]*entry), rate: r, burst: burst}
+	go s.sweepLoop()
+	return s
+}
+
+// Allow reports whether the given key may proceed, consuming a token if so.
+func (s *Store) Allow(key string) bool { return s.get(key).Allow() }
+
+type limiterStore = Store
+
 // Middleware limits each client IP to r requests/sec with the given burst.
+//
+// Note that this is per-process: with N replicas the effective ceiling is N*r,
+// and every bucket resets on deploy. It is a blunt safety net, not a quota.
 func Middleware(r rate.Limit, burst int) gin.HandlerFunc {
-	store := &limiterStore{
-		clients: make(map[string]*entry),
-		rate:    r,
-		burst:   burst,
-	}
-	go store.sweepLoop()
+	return Keyed(r, burst, func(c *gin.Context) string { return c.ClientIP() })
+}
+
+// Keyed limits by an arbitrary key derived from the request.
+//
+// The login endpoint needs this: limiting by IP alone lets a distributed
+// credential-stuffing run walk through accounts freely, so auth routes key by
+// IP *and* the targeted account.
+func Keyed(r rate.Limit, burst int, key func(*gin.Context) string) gin.HandlerFunc {
+	store := NewStore(r, burst)
 	return func(c *gin.Context) {
-		if !store.get(c.ClientIP()).Allow() {
+		if !store.Allow(key(c)) {
 			c.AbortWithStatusJSON(http.StatusTooManyRequests, gin.H{"error": "rate limit exceeded"})
 			return
 		}

@@ -54,6 +54,16 @@ func SubjectDMChat(conversationID int64) string {
 	return fmt.Sprintf("chat.dm.%d", conversationID)
 }
 
+// Forced-disconnect control subjects. A user kicked or banned on one replica
+// may hold their WebSocket on another, so the command to close their socket has
+// to reach every replica — otherwise revoking access does not actually revoke
+// anything and the ejected user keeps receiving live GPS.
+const (
+	SubjectSessionDisconnect = "session.disconnect"
+	SubjectEventDisconnect   = "event.disconnect"
+	SubjectChatDisconnect    = "chat.disconnect"
+)
+
 // SubjectSessionRoster is published by the telemetry service whenever a group
 // ride's participant set changes, and consumed by the reward service to award
 // group-ride badges to every current participant.

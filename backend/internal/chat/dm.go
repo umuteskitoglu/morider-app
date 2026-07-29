@@ -2,7 +2,6 @@ package chat
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"net/http"
 	"strconv"
@@ -14,6 +13,7 @@ import (
 	authpkg "github.com/morider/backend/pkg/auth"
 	"github.com/morider/backend/pkg/httpx"
 	"github.com/morider/backend/pkg/push"
+	"github.com/morider/backend/pkg/wshub"
 )
 
 // maxPendingRequestMsgs caps how many messages a requester may send into a
@@ -392,16 +392,16 @@ func (h *handler) dmWS(c *gin.Context) {
 		return
 	}
 
-	client := &wsClient{send: make(chan []byte, 32), done: make(chan struct{})}
-	h.dmHub.add(convID, client)
+	client := wshub.NewClient(me, 32)
+	h.dmHub.Add(convID, client)
 	h.addPresence(convID, me)
 	defer func() {
 		h.removePresence(convID, me)
-		h.dmHub.remove(convID, client)
-		close(client.done)
+		h.dmHub.Remove(convID, client)
+		client.Close()
 	}()
 
-	go pumpWriter(conn, client)
+	serveClient(conn, client)
 
 	// Track status locally; the recipient's first reply flips pending → accepted.
 	status := cv.status
@@ -457,10 +457,10 @@ func (h *handler) dmWS(c *gin.Context) {
 			h.d.Log.Error().Err(err).Msg("could not persist direct message")
 			continue
 		}
-		msg := dmMsg{ID: id, ConversationID: convID, SenderID: me, Name: name, Body: in.Body, Lat: in.Lat, Lon: in.Lon, CreatedAt: createdAt}
-		if data, err := json.Marshal(msg); err == nil {
-			h.dmHub.publish(convID, data)
-		}
+		h.dmHub.PublishJSON(convID, dmMsg{
+			ID: id, ConversationID: convID, SenderID: me, Name: name,
+			Body: in.Body, Lat: in.Lat, Lon: in.Lon, CreatedAt: createdAt,
+		})
 
 		// Notify the recipient if they are not currently viewing this conversation.
 		if !suppressPush && !h.isPresent(convID, other) {

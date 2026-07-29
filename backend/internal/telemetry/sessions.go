@@ -5,17 +5,19 @@ import (
 	"crypto/rand"
 	"encoding/json"
 	"errors"
+	"math"
 	"net/http"
 	"time"
 
 	"github.com/gin-gonic/gin"
-	"github.com/gorilla/websocket"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
+	"golang.org/x/time/rate"
 
 	authpkg "github.com/morider/backend/pkg/auth"
 	"github.com/morider/backend/pkg/events"
 	"github.com/morider/backend/pkg/httpx"
+	"github.com/morider/backend/pkg/wshub"
 )
 
 // codeAlphabet excludes visually ambiguous characters (0/O, 1/I) so codes are
@@ -59,24 +61,46 @@ func (h *handler) createSession(c *gin.Context) {
 		routeID = &req.RouteID
 	}
 
+	// The session and its first participant are created together: as two
+	// statements, a failure on the second left an orphaned session holding a
+	// code nobody was in.
+	tx, err := h.d.DB.Begin(c)
+	if err != nil {
+		httpx.Internal(c, "could not create session")
+		return
+	}
+	defer func() { _ = tx.Rollback(c) }()
+
 	var (
 		sessionID int64
 		code      string
 	)
-	// Retry on the rare code collision (unique violation).
+	// Retry on the rare code collision (unique violation). Each attempt runs in
+	// its own savepoint: a failed INSERT aborts the surrounding transaction, so
+	// without one the retry would fail too.
 	for attempt := 0; attempt < 5; attempt++ {
 		gen, err := generateCode()
 		if err != nil {
 			httpx.Internal(c, "could not create session")
 			return
 		}
-		err = h.d.DB.QueryRow(c,
+		sp, err := tx.Begin(c) // nested Begin = SAVEPOINT
+		if err != nil {
+			httpx.Internal(c, "could not create session")
+			return
+		}
+		err = sp.QueryRow(c,
 			`INSERT INTO ride_sessions (code, host_id, route_id) VALUES ($1, $2, $3) RETURNING id`,
 			gen, host, routeID).Scan(&sessionID)
 		if err == nil {
+			if err := sp.Commit(c); err != nil {
+				httpx.Internal(c, "could not create session")
+				return
+			}
 			code = gen
 			break
 		}
+		_ = sp.Rollback(c)
 		var pgErr *pgconn.PgError
 		if !(errors.As(err, &pgErr) && pgErr.Code == "23505") {
 			httpx.Internal(c, "could not create session")
@@ -88,10 +112,14 @@ func (h *handler) createSession(c *gin.Context) {
 		return
 	}
 
-	if _, err := h.d.DB.Exec(c,
+	if _, err := tx.Exec(c,
 		`INSERT INTO session_participants (session_id, user_id) VALUES ($1, $2) ON CONFLICT DO NOTHING`,
 		sessionID, host); err != nil {
 		httpx.Internal(c, "could not join session")
+		return
+	}
+	if err := tx.Commit(c); err != nil {
+		httpx.Internal(c, "could not create session")
 		return
 	}
 	h.leaveOtherActiveSessions(c, host, sessionID)
@@ -195,12 +223,14 @@ func (h *handler) leaveSession(c *gin.Context) {
 			`UPDATE ride_sessions SET status = 'ended', ended_at = now() WHERE id = $1 AND status = 'active'`, sessionID)
 		if err == nil {
 			h.publishControl(sessionID, gin.H{"type": "ended", "session_id": sessionID})
+			h.hub.DisconnectRoom(sessionID)
 		}
 	} else {
 		_, err = h.d.DB.Exec(c,
 			`DELETE FROM session_participants WHERE session_id = $1 AND user_id = $2`, sessionID, me)
 		if err == nil {
 			h.publishControl(sessionID, gin.H{"type": "left", "user_id": me, "session_id": sessionID})
+			h.hub.DisconnectUser(sessionID, me)
 		}
 	}
 	if err != nil {
@@ -226,6 +256,8 @@ func (h *handler) endSession(c *gin.Context) {
 		return
 	}
 	h.publishControl(sessionID, gin.H{"type": "ended", "session_id": sessionID})
+	// The session is over: no socket should keep streaming positions into it.
+	h.hub.DisconnectRoom(sessionID)
 	c.Status(http.StatusNoContent)
 }
 
@@ -249,6 +281,35 @@ func (h *handler) getSession(c *gin.Context) {
 	if err != nil {
 		httpx.Internal(c, "could not load session")
 		return
+	}
+
+	// A 6-character code is not an authorisation token. Without this check any
+	// authenticated user could enumerate codes and read a pack's roster and
+	// full planned route. Callers who are not yet participants must go through
+	// join, which enforces the mutual-follow / event-invite rule.
+	if me := authpkg.UserID(c); me != hostID {
+		// Mirrors joinSession's rule, ban included: anyone who could join may
+		// preview, and nobody else. Without the ban clause an ejected rider who
+		// still mutually follows the host could keep reading the roster.
+		var allowed bool
+		if err := h.d.DB.QueryRow(c,
+			`SELECT NOT EXISTS(SELECT 1 FROM session_bans WHERE session_id = $1 AND user_id = $2)
+			    AND (
+			     EXISTS(SELECT 1 FROM session_participants WHERE session_id = $1 AND user_id = $2)
+			     OR EXISTS(
+			         SELECT 1 FROM events e
+			         JOIN event_participants ep ON ep.event_id = e.id
+			         WHERE e.ride_session_id = $1 AND ep.user_id = $2 AND ep.rsvp = 'going')
+			     OR (EXISTS(SELECT 1 FROM follows WHERE follower_id = $2 AND followee_id = $3)
+			         AND EXISTS(SELECT 1 FROM follows WHERE follower_id = $3 AND followee_id = $2)))`,
+			sessionID, me, hostID).Scan(&allowed); err != nil {
+			httpx.Internal(c, "could not verify access")
+			return
+		}
+		if !allowed {
+			httpx.Error(c, http.StatusForbidden, "you must follow each other with the host to view this ride")
+			return
+		}
 	}
 
 	prows, err := h.d.DB.Query(c,
@@ -275,9 +336,12 @@ func (h *handler) getSession(c *gin.Context) {
 	var resolvedRouteID int64
 	if routeID != nil {
 		resolvedRouteID = *routeID
+		// Bounded: an imported route can carry tens of thousands of vertices,
+		// and this used to load every one into memory per request.
 		rrows, err := h.d.DB.Query(c,
 			`SELECT ST_Y(d.geom) AS lat, ST_X(d.geom) AS lon
-			 FROM (SELECT (ST_DumpPoints(path)).geom AS geom FROM routes WHERE id = $1) d`, *routeID)
+			 FROM (SELECT (ST_DumpPoints(path)).geom AS geom FROM routes WHERE id = $1) d
+			 LIMIT $2`, *routeID, maxRoutePoints)
 		if err != nil {
 			httpx.Internal(c, "could not load route geometry")
 			return
@@ -361,9 +425,7 @@ type targetReq struct {
 // session's WebSocket clients. Control frames carry a "type" field; position
 // frames do not, so clients can tell them apart.
 func (h *handler) publishControl(sessionID int64, payload gin.H) {
-	if data, err := json.Marshal(payload); err == nil {
-		h.hub.publish(sessionID, data)
-	}
+	h.hub.PublishJSON(sessionID, payload)
 }
 
 // publishRoster announces a session's current participant set on NATS so the
@@ -385,6 +447,12 @@ func (h *handler) publishRoster(ctx context.Context, sessionID int64) {
 		}
 	}
 	rows.Close()
+	// A connection failure mid-iteration would otherwise publish a silently
+	// truncated roster, and the reward service would award group-ride badges to
+	// only part of the pack.
+	if rows.Err() != nil {
+		return
+	}
 	if data, err := json.Marshal(events.SessionRoster{SessionID: sessionID, ParticipantIDs: ids}); err == nil {
 		_ = h.nats.Publish(events.SubjectSessionRoster, data)
 	}
@@ -410,17 +478,24 @@ func (h *handler) leaveOtherActiveSessions(c *gin.Context, userID, keepID int64)
 		}
 	}
 	rows.Close()
+	// A partial read here would silently leave the user in two active sessions,
+	// breaking the single-active-ride invariant this function exists to hold.
+	if rows.Err() != nil {
+		return
+	}
 
 	for _, s := range others {
 		if s.host == userID {
 			if _, err := h.d.DB.Exec(c,
 				`UPDATE ride_sessions SET status='ended', ended_at=now() WHERE id=$1 AND status='active'`, s.id); err == nil {
 				h.publishControl(s.id, gin.H{"type": "ended", "session_id": s.id})
+				h.hub.DisconnectRoom(s.id)
 			}
 		} else {
 			if _, err := h.d.DB.Exec(c,
 				`DELETE FROM session_participants WHERE session_id=$1 AND user_id=$2`, s.id, userID); err == nil {
 				h.publishControl(s.id, gin.H{"type": "left", "user_id": userID, "session_id": s.id})
+				h.hub.DisconnectUser(s.id, userID)
 			}
 		}
 	}
@@ -467,7 +542,17 @@ func (h *handler) removeParticipant(c *gin.Context, ban bool) {
 		return
 	}
 
-	tag, err := h.d.DB.Exec(c,
+	// Removal and the ban must land together: as two statements, a failure
+	// between them returned 500 while the user was already kicked but not
+	// banned, so they simply rejoined.
+	tx, err := h.d.DB.Begin(c)
+	if err != nil {
+		httpx.Internal(c, "could not remove participant")
+		return
+	}
+	defer func() { _ = tx.Rollback(c) }()
+
+	tag, err := tx.Exec(c,
 		`DELETE FROM session_participants WHERE session_id = $1 AND user_id = $2`,
 		sessionID, req.UserID)
 	if err != nil {
@@ -479,12 +564,16 @@ func (h *handler) removeParticipant(c *gin.Context, ban bool) {
 		return
 	}
 	if ban {
-		if _, err := h.d.DB.Exec(c,
+		if _, err := tx.Exec(c,
 			`INSERT INTO session_bans (session_id, user_id) VALUES ($1, $2) ON CONFLICT DO NOTHING`,
 			sessionID, req.UserID); err != nil {
 			httpx.Internal(c, "could not ban participant")
 			return
 		}
+	}
+	if err := tx.Commit(c); err != nil {
+		httpx.Internal(c, "could not remove participant")
+		return
 	}
 
 	kind := "kick"
@@ -492,6 +581,10 @@ func (h *handler) removeParticipant(c *gin.Context, ban bool) {
 		kind = "ban"
 	}
 	h.publishControl(sessionID, gin.H{"type": kind, "user_id": req.UserID, "session_id": sessionID})
+	// Enforce it server-side. The control frame above is a courtesy to a
+	// well-behaved client; on its own it left a modified client subscribed to
+	// the pack's live GPS for as long as it kept the socket open.
+	h.hub.DisconnectUser(sessionID, req.UserID)
 	c.Status(http.StatusNoContent)
 }
 
@@ -511,19 +604,21 @@ func (h *handler) transferHost(c *gin.Context) {
 		return
 	}
 
-	var isParticipant bool
-	if err := h.d.DB.QueryRow(c,
-		`SELECT EXISTS(SELECT 1 FROM session_participants WHERE session_id = $1 AND user_id = $2)`,
-		sessionID, req.UserID).Scan(&isParticipant); err != nil {
-		httpx.Internal(c, "could not verify participant")
+	// Check and update in one statement. As two, a participant leaving in the
+	// gap between them transferred the session to somebody who was no longer in
+	// it, leaving an orphaned ride nobody could end.
+	var newHost int64
+	err := h.d.DB.QueryRow(c,
+		`UPDATE ride_sessions SET host_id = $2
+		 WHERE id = $1 AND host_id = $3 AND status = 'active'
+		   AND EXISTS (SELECT 1 FROM session_participants WHERE session_id = $1 AND user_id = $2)
+		 RETURNING host_id`,
+		sessionID, req.UserID, hostID).Scan(&newHost)
+	if errors.Is(err, pgx.ErrNoRows) {
+		httpx.BadRequest(c, "user is not a participant of this active session")
 		return
 	}
-	if !isParticipant {
-		httpx.BadRequest(c, "user is not a participant")
-		return
-	}
-
-	if _, err := h.d.DB.Exec(c, `UPDATE ride_sessions SET host_id = $2 WHERE id = $1`, sessionID, req.UserID); err != nil {
+	if err != nil {
 		httpx.Internal(c, "could not transfer host")
 		return
 	}
@@ -600,33 +695,35 @@ func (h *handler) sessionWS(c *gin.Context) {
 	}
 	defer conn.Close()
 
-	client := &wsClient{send: make(chan []byte, 16), done: make(chan struct{})}
-	h.hub.add(sessionID, client)
-	defer func() {
-		h.hub.remove(sessionID, client)
-		close(client.done)
-	}()
+	// Bound inbound frames and arm the liveness deadline before anything else:
+	// without them a connection dropped by a tunnel or a NAT timeout blocks the
+	// read loop forever, leaking this goroutine, the writer, the socket and the
+	// hub entry — and the ghost keeps receiving every broadcast.
+	wshub.ConfigureReader(conn, maxPositionFrame)
 
-	// Writer goroutine: the only place that writes to the gorilla connection.
-	go func() {
-		for {
-			select {
-			case data := <-client.send:
-				if err := conn.WriteMessage(websocket.TextMessage, data); err != nil {
-					return
-				}
-			case <-client.done:
-				return
-			}
-		}
+	client := wshub.NewClient(me, wshub.DefaultSendBuffer)
+	h.hub.Add(sessionID, client)
+	defer func() {
+		h.hub.Remove(sessionID, client)
+		client.Close()
 	}()
+	// Lets a server-side kick/ban interrupt a read already in flight.
+	client.CloseOnDone(conn)
+
+	go client.WritePump(conn)
 
 	// Read loop: every inbound position is stamped and published to the session.
 	var lastSOS time.Time
+	limiter := rate.NewLimiter(positionRate, positionRate*2)
 	for {
 		var in wsPositionIn
 		if err := conn.ReadJSON(&in); err != nil {
 			return
+		}
+		// Each frame fans out to every participant, so an unthrottled client is
+		// an N-times amplifier against the whole pack and NATS.
+		if !limiter.Allow() {
+			continue
 		}
 		// SOS frame: rider's crash countdown expired (or manual emergency).
 		// Fan it out as a control frame so every participant gets alerted.
@@ -637,12 +734,13 @@ func (h *handler) sessionWS(c *gin.Context) {
 				continue // drop floods from this connection
 			}
 			lastSOS = now
+			hasLoc := in.HasLoc && validCoord(in.Lat, in.Lon)
 			h.publishControl(sessionID, gin.H{
 				"type":       "sos",
 				"session_id": sessionID,
 				"user_id":    me,
 				"name":       name,
-				"has_loc":    in.HasLoc,
+				"has_loc":    hasLoc,
 				"lat":        in.Lat,
 				"lon":        in.Lon,
 				"ts":         now.UnixMilli(),
@@ -650,32 +748,53 @@ func (h *handler) sessionWS(c *gin.Context) {
 			// Also push the crash location through the normal position channel so
 			// participants' maps move the rider's marker to the crash site (and
 			// anyone reconnecting sees it), but only when it's a real fix.
-			if in.HasLoc {
-				pos := events.LivePosition{
+			if hasLoc {
+				h.hub.PublishJSON(sessionID, events.LivePosition{
 					SessionID: sessionID,
 					UserID:    me,
 					Name:      name,
 					Lat:       in.Lat,
 					Lon:       in.Lon,
 					Ts:        now.UnixMilli(),
-				}
-				if data, err := json.Marshal(pos); err == nil {
-					h.hub.publish(sessionID, data)
-				}
+				})
 			}
 			continue
 		}
-		pos := events.LivePosition{
+		// Honour HasLoc on the regular path too. It was only checked for SOS
+		// frames, so a rider without a fix was broadcast at 0,0 and every other
+		// map moved their marker to the Gulf of Guinea.
+		if !in.HasLoc || !validCoord(in.Lat, in.Lon) {
+			continue
+		}
+		speed := in.Speed
+		if math.IsNaN(speed) || math.IsInf(speed, 0) || speed < 0 || speed > maxPlausibleSpeed {
+			speed = 0
+		}
+		h.hub.PublishJSON(sessionID, events.LivePosition{
 			SessionID: sessionID,
 			UserID:    me,
 			Name:      name,
 			Lat:       in.Lat,
 			Lon:       in.Lon,
-			Speed:     in.Speed,
+			Speed:     speed,
 			Ts:        time.Now().UnixMilli(),
-		}
-		if data, err := json.Marshal(pos); err == nil {
-			h.hub.publish(sessionID, data)
-		}
+		})
 	}
+}
+
+// maxPositionFrame bounds one inbound position frame (~150 bytes in practice).
+const maxPositionFrame = 4 << 10
+
+// maxRoutePoints caps the route geometry returned with a session.
+const maxRoutePoints = 5000
+
+// positionRate is the per-connection ceiling on position frames per second.
+const positionRate = 5
+
+// validCoord reports whether a coordinate pair is a finite, in-range fix.
+func validCoord(lat, lon float64) bool {
+	if math.IsNaN(lat) || math.IsNaN(lon) || math.IsInf(lat, 0) || math.IsInf(lon, 0) {
+		return false
+	}
+	return lat >= -90 && lat <= 90 && lon >= -180 && lon <= 180
 }

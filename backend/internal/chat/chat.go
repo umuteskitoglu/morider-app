@@ -5,7 +5,6 @@ package chat
 
 import (
 	"context"
-	"net/http"
 	"os"
 	"sync"
 	"time"
@@ -18,6 +17,7 @@ import (
 	"github.com/morider/backend/pkg/config"
 	"github.com/morider/backend/pkg/events"
 	"github.com/morider/backend/pkg/push"
+	"github.com/morider/backend/pkg/wshub"
 )
 
 // globalRoom is the single fixed room key used for the community-wide chat. Its
@@ -32,16 +32,20 @@ const (
 	dmRateBurst = 10
 )
 
-var upgrader = websocket.Upgrader{
-	CheckOrigin: func(r *http.Request) bool { return true },
-}
+// upgrader is built in Run once the config is known, so the Origin allow-list
+// can come from the environment.
+var upgrader websocket.Upgrader
+
+// maxChatFrame bounds a single inbound chat frame. Message bodies are capped
+// well below this; the limit stops a client streaming an unbounded frame.
+const maxChatFrame = 16 << 10
 
 type handler struct {
 	d         *server.Deps
 	nats      *nats.Conn
 	push      push.Sender
-	globalHub *roomHub
-	dmHub     *roomHub
+	globalHub *wshub.Hub
+	dmHub     *wshub.Hub
 
 	// slowmode is the minimum interval between two global-chat messages from the
 	// same user.
@@ -62,6 +66,8 @@ func Run(cfg config.Config) error {
 	if err != nil {
 		return err
 	}
+	upgrader = websocket.Upgrader{CheckOrigin: wshub.OriginChecker(cfg.AllowedWSOrigins)}
+
 	h := &handler{
 		d:          deps,
 		push:       push.ExpoSender{},
@@ -87,8 +93,10 @@ func Run(cfg config.Config) error {
 	} else {
 		h.nats = nc
 	}
-	h.globalHub = newRoomHub(h.nats, func(int64) string { return events.SubjectGlobalChat })
-	h.dmHub = newRoomHub(h.nats, events.SubjectDMChat)
+	h.globalHub = wshub.New(h.nats, func(int64) string { return events.SubjectGlobalChat }, events.SubjectChatDisconnect)
+	h.dmHub = wshub.New(h.nats, events.SubjectDMChat, "")
+	deps.AddCloser(h.globalHub.CloseAll)
+	deps.AddCloser(h.dmHub.CloseAll)
 
 	registerRoutes(deps, h)
 	return deps.Run(config.ResolvePort("CHAT_PORT", "8089"))
@@ -126,17 +134,12 @@ func (h *handler) dmLimiter(userID int64) *rate.Limiter {
 	return l
 }
 
-// pumpWriter drains a client's send channel onto the gorilla connection. It is
-// the only place that writes to conn, so callers must not write elsewhere.
-func pumpWriter(conn *websocket.Conn, client *wsClient) {
-	for {
-		select {
-		case data := <-client.send:
-			if err := conn.WriteMessage(websocket.TextMessage, data); err != nil {
-				return
-			}
-		case <-client.done:
-			return
-		}
-	}
+// serveClient wires the shared liveness handling onto a freshly upgraded
+// connection: bounded frames, read deadline with ping/pong keepalive, a single
+// writer goroutine, and a watchdog so a server-side close interrupts a blocked
+// read. Callers must not write to conn themselves.
+func serveClient(conn *websocket.Conn, client *wshub.Client) {
+	wshub.ConfigureReader(conn, maxChatFrame)
+	client.CloseOnDone(conn)
+	go client.WritePump(conn)
 }

@@ -15,6 +15,10 @@ type Claims struct {
 	jwt.RegisteredClaims
 }
 
+// issuer identifies tokens minted by this platform; Parse requires a match so a
+// token from an unrelated system signed with a leaked secret is still rejected.
+const issuer = "morider"
+
 // Manager issues and validates JWTs with a shared secret.
 type Manager struct {
 	secret []byte
@@ -35,7 +39,7 @@ func (m *Manager) Issue(userID int64, email string) (string, error) {
 		RegisteredClaims: jwt.RegisteredClaims{
 			IssuedAt:  jwt.NewNumericDate(now),
 			ExpiresAt: jwt.NewNumericDate(now.Add(m.ttl)),
-			Issuer:    "morider",
+			Issuer:    issuer,
 		},
 	}
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
@@ -43,6 +47,12 @@ func (m *Manager) Issue(userID int64, email string) (string, error) {
 }
 
 // Parse validates a token string and returns its claims.
+//
+// The signing method is pinned to HMAC so a token claiming alg:none or an
+// asymmetric algorithm can never be accepted with the shared secret as the key.
+// Expiry is required rather than merely honoured-if-present: jwt/v5 treats a
+// token with no exp claim as valid forever, so a single leaked token without
+// one would never age out.
 func (m *Manager) Parse(tokenStr string) (*Claims, error) {
 	claims := &Claims{}
 	token, err := jwt.ParseWithClaims(tokenStr, claims, func(t *jwt.Token) (interface{}, error) {
@@ -50,7 +60,11 @@ func (m *Manager) Parse(tokenStr string) (*Claims, error) {
 			return nil, errors.New("unexpected signing method")
 		}
 		return m.secret, nil
-	})
+	},
+		jwt.WithValidMethods([]string{jwt.SigningMethodHS256.Alg()}),
+		jwt.WithExpirationRequired(),
+		jwt.WithIssuer(issuer),
+	)
 	if err != nil {
 		return nil, err
 	}

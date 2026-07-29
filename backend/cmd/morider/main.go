@@ -15,6 +15,8 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"sync"
+	"time"
 
 	"github.com/morider/backend/internal/auth"
 	"github.com/morider/backend/internal/chat"
@@ -32,6 +34,10 @@ import (
 	"github.com/morider/backend/pkg/db"
 	"github.com/morider/backend/pkg/migrate"
 )
+
+// drainTimeout bounds how long all-in-one mode waits for every service to
+// finish shutting down before exiting regardless.
+const drainTimeout = 40 * time.Second
 
 func main() {
 	service := flag.String("service", "", "service to run: all|gateway|auth|user|ride|route|reward|telemetry|feed|event|chat|community")
@@ -103,9 +109,12 @@ func runAll(cfg config.Config, runners map[string]func(config.Config) error) err
 	}
 
 	results := make(chan error, len(order))
+	var wg sync.WaitGroup
 	for _, name := range order {
 		run := runners[name]
+		wg.Add(1)
 		go func(name string, run func(config.Config) error) {
+			defer wg.Done()
 			err := run(cfg)
 			if err != nil {
 				err = fmt.Errorf("service %q: %w", name, err)
@@ -114,5 +123,18 @@ func runAll(cfg config.Config, runners map[string]func(config.Config) error) err
 		}(name, run)
 	}
 
-	return <-results
+	// The first result wins so a startup error (e.g. a port clash) surfaces at
+	// once. On shutdown every service receives the signal independently, so we
+	// then wait for all of them to finish draining instead of exiting the
+	// process out from under the ten still shutting down.
+	first := <-results
+
+	done := make(chan struct{})
+	go func() { wg.Wait(); close(done) }()
+	select {
+	case <-done:
+	case <-time.After(drainTimeout):
+		log.Printf("all-in-one: drain timed out after %s, exiting anyway", drainTimeout)
+	}
+	return first
 }

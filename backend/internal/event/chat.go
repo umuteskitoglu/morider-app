@@ -1,26 +1,26 @@
 package event
 
 import (
-	"encoding/json"
 	"errors"
 	"net/http"
 	"strconv"
-	"sync"
 	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/gorilla/websocket"
 	"github.com/jackc/pgx/v5"
-	"github.com/nats-io/nats.go"
 
 	authpkg "github.com/morider/backend/pkg/auth"
-	"github.com/morider/backend/pkg/events"
 	"github.com/morider/backend/pkg/httpx"
+	"github.com/morider/backend/pkg/wshub"
 )
 
-var upgrader = websocket.Upgrader{
-	CheckOrigin: func(r *http.Request) bool { return true },
-}
+// upgrader is built in Run once the config is known, so the Origin allow-list
+// can come from the environment.
+var upgrader websocket.Upgrader
+
+// maxChatFrame bounds a single inbound chat frame.
+const maxChatFrame = 16 << 10
 
 // chatMessage is the wire shape of a single chat message, both for the REST
 // history endpoint and the WebSocket fan-out.
@@ -149,26 +149,20 @@ func (h *handler) chatWS(c *gin.Context) {
 	}
 	defer conn.Close()
 
-	client := &wsClient{send: make(chan []byte, 32), done: make(chan struct{})}
-	h.hub.add(eventID, client)
-	defer func() {
-		h.hub.remove(eventID, client)
-		close(client.done)
-	}()
+	// Bound inbound frames and arm the liveness deadline: without them a
+	// connection dropped by a NAT timeout blocks this read loop forever, leaking
+	// the goroutine, the socket and the hub entry.
+	wshub.ConfigureReader(conn, maxChatFrame)
 
-	// Writer goroutine: the only place that writes to the gorilla connection.
-	go func() {
-		for {
-			select {
-			case data := <-client.send:
-				if err := conn.WriteMessage(websocket.TextMessage, data); err != nil {
-					return
-				}
-			case <-client.done:
-				return
-			}
-		}
+	client := wshub.NewClient(me, 32)
+	h.hub.Add(eventID, client)
+	defer func() {
+		h.hub.Remove(eventID, client)
+		client.Close()
 	}()
+	client.CloseOnDone(conn)
+
+	go client.WritePump(conn)
 
 	// Read loop: persist each message, then fan it out to the event.
 	for {
@@ -190,110 +184,8 @@ func (h *handler) chatWS(c *gin.Context) {
 			h.d.Log.Error().Err(err).Msg("could not persist chat message")
 			continue
 		}
-		msg := chatMessage{ID: id, EventID: eventID, UserID: me, Name: name, Body: body, CreatedAt: createdAt}
-		if data, err := json.Marshal(msg); err == nil {
-			h.hub.publish(eventID, data)
-		}
-	}
-}
-
-// wsClient is a single chat WebSocket connection. Messages are pushed onto send;
-// a dedicated writer goroutine drains it so the hub never touches the gorilla
-// writer directly. done is closed on disconnect to stop that goroutine.
-type wsClient struct {
-	send chan []byte
-	done chan struct{}
-}
-
-// chatHub fans chat messages out to the WebSocket clients of each event.
-//
-// Within one replica it broadcasts locally; across replicas it relies on NATS.
-// To keep delivery exactly-once, a local sender publishes to NATS and the
-// per-event NATS subscription is the sole path that writes to local clients.
-// When NATS is unavailable it falls back to a direct local broadcast, so a
-// single-replica deployment still works. Mirrors telemetry's sessionHub.
-type chatHub struct {
-	nats *nats.Conn
-	mu   sync.Mutex
-	subs map[int64]*chatSub
-}
-
-type chatSub struct {
-	clients map[*wsClient]struct{}
-	natsSub *nats.Subscription
-}
-
-func newChatHub(nc *nats.Conn) *chatHub {
-	return &chatHub{nats: nc, subs: map[int64]*chatSub{}}
-}
-
-// add registers a client for an event, creating the per-event NATS subscription
-// on the first client.
-func (h *chatHub) add(eventID int64, c *wsClient) {
-	h.mu.Lock()
-	defer h.mu.Unlock()
-	s := h.subs[eventID]
-	if s == nil {
-		s = &chatSub{clients: map[*wsClient]struct{}{}}
-		h.subs[eventID] = s
-		if h.nats != nil {
-			if sub, err := h.nats.Subscribe(events.SubjectEventChat(eventID), func(m *nats.Msg) {
-				h.broadcastLocal(eventID, m.Data)
-			}); err == nil {
-				s.natsSub = sub
-			}
-		}
-	}
-	s.clients[c] = struct{}{}
-}
-
-// remove drops a client, tearing down the NATS subscription once the last client
-// of an event disconnects.
-func (h *chatHub) remove(eventID int64, c *wsClient) {
-	h.mu.Lock()
-	defer h.mu.Unlock()
-	s := h.subs[eventID]
-	if s == nil {
-		return
-	}
-	delete(s.clients, c)
-	if len(s.clients) == 0 {
-		if s.natsSub != nil {
-			_ = s.natsSub.Unsubscribe()
-		}
-		delete(h.subs, eventID)
-	}
-}
-
-// publish delivers a message to every participant of an event.
-func (h *chatHub) publish(eventID int64, data []byte) {
-	if h.nats != nil {
-		_ = h.nats.Publish(events.SubjectEventChat(eventID), data)
-		return
-	}
-	h.broadcastLocal(eventID, data)
-}
-
-// broadcastLocal pushes data to the send channel of each local client. It never
-// blocks: a slow client simply drops the frame.
-func (h *chatHub) broadcastLocal(eventID int64, data []byte) {
-	h.mu.Lock()
-	s := h.subs[eventID]
-	if s == nil {
-		h.mu.Unlock()
-		return
-	}
-	clients := make([]*wsClient, 0, len(s.clients))
-	for c := range s.clients {
-		clients = append(clients, c)
-	}
-	h.mu.Unlock()
-
-	for _, c := range clients {
-		select {
-		case c.send <- data:
-		case <-c.done:
-		default:
-		}
+		h.hub.PublishJSON(eventID, chatMessage{
+			ID: id, EventID: eventID, UserID: me, Name: name, Body: body, CreatedAt: createdAt,
+		})
 	}
 }
