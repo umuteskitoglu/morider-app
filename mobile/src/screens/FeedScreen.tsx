@@ -168,11 +168,18 @@ export default function FeedScreen({ navigation }: Props) {
         style={[styles.searchBtn, { top: insets.top + spacing.sm }]}
         onPress={() => navigation.navigate('UserSearch')}
         hitSlop={8}
+        accessibilityRole="button"
+        accessibilityLabel="Sürücü ara"
       >
         <MaterialCommunityIcons name="magnify" size={22} color="#fff" />
       </Pressable>
 
-      <Pressable style={styles.fab} onPress={() => navigation.navigate('CreatePost')}>
+      <Pressable
+        style={styles.fab}
+        onPress={() => navigation.navigate('CreatePost')}
+        accessibilityRole="button"
+        accessibilityLabel="Yeni gönderi paylaş"
+      >
         <MaterialCommunityIcons name="plus" size={28} color="#fff" />
       </Pressable>
 
@@ -318,7 +325,12 @@ function PostItem({
       )}
 
       <LinearGradient colors={['transparent', 'rgba(0,0,0,0.92)']} style={styles.overlay}>
-        <Pressable style={styles.authorRow} onPress={() => onOpenProfile(post.user_id, post.author)}>
+        <Pressable
+          style={styles.authorRow}
+          onPress={() => onOpenProfile(post.user_id, post.author)}
+          accessibilityRole="button"
+          accessibilityLabel={`${post.author} profilini aç`}
+        >
           <LinearGradient colors={gradients.primary} style={styles.avatar}>
             <Text style={styles.avatarText}>{post.author?.charAt(0).toUpperCase() ?? 'M'}</Text>
           </LinearGradient>
@@ -334,18 +346,35 @@ function PostItem({
 
         <View style={styles.actions}>
           <View style={styles.action}>
-            <Pressable onPress={toggleLike} hitSlop={8}>
+            <Pressable
+              onPress={toggleLike}
+              hitSlop={12}
+              accessibilityRole="button"
+              accessibilityLabel={liked ? 'Beğeniyi geri al' : 'Beğen'}
+              accessibilityState={{ selected: liked }}
+            >
               <MaterialCommunityIcons
                 name={liked ? 'heart' : 'heart-outline'}
                 size={26}
                 color={liked ? colors.danger : '#fff'}
               />
             </Pressable>
-            <Pressable onPress={() => onOpenLikers(post.id)} hitSlop={8}>
+            <Pressable
+              onPress={() => onOpenLikers(post.id)}
+              hitSlop={12}
+              accessibilityRole="button"
+              accessibilityLabel={`${likeCount} beğeni, beğenenleri gör`}
+            >
               <Text style={styles.actionText}>{likeCount}</Text>
             </Pressable>
           </View>
-          <Pressable style={styles.action} onPress={() => onOpenComments(post.id)} hitSlop={8}>
+          <Pressable
+            style={styles.action}
+            onPress={() => onOpenComments(post.id)}
+            hitSlop={12}
+            accessibilityRole="button"
+            accessibilityLabel={`${post.comment_count} yorum, yorumları aç`}
+          >
             <MaterialCommunityIcons name="comment-outline" size={24} color="#fff" />
             <Text style={styles.actionText}>{post.comment_count}</Text>
           </Pressable>

@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"os"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -16,6 +17,7 @@ import (
 	authpkg "github.com/morider/backend/pkg/auth"
 	"github.com/morider/backend/pkg/config"
 	"github.com/morider/backend/pkg/httpx"
+	"github.com/morider/backend/pkg/push"
 )
 
 // Run boots the telemetry service.
@@ -24,7 +26,19 @@ func Run(cfg config.Config) error {
 	if err != nil {
 		return err
 	}
-	h := &handler{d: deps}
+	h := &handler{d: deps, push: push.ExpoSender{}}
+
+	// Push sender: FCM when a service-account file is configured, else Expo relay.
+	if cfg.FCMCredentialsFile != "" {
+		if sa, err := os.ReadFile(cfg.FCMCredentialsFile); err != nil {
+			deps.Log.Warn().Err(err).Msg("could not read FCM credentials, falling back to Expo push")
+		} else if sender, err := push.NewFCMSender(sa); err != nil {
+			deps.Log.Warn().Err(err).Msg("invalid FCM credentials, falling back to Expo push")
+		} else {
+			h.push = sender
+			deps.Log.Info().Msg("push: using FCM HTTP v1")
+		}
+	}
 
 	// NATS is optional: if it is unavailable the service still records points.
 	if nc, err := nats.Connect(cfg.NATSURL, nats.RetryOnFailedConnect(true), nats.MaxReconnects(-1)); err != nil {
@@ -62,6 +76,12 @@ func registerRoutes(d *server.Deps, h *handler) {
 	s.POST("/:code/voice-token", jwt, h.voiceToken)
 	s.GET("/:code/ws", h.sessionWS)
 
+	// Emergency alerts. REST rather than the session socket so a solo rider is
+	// covered too, and so the client can retry it once signal returns.
+	sos := d.Engine.Group("/api/sos", jwt)
+	sos.POST("", h.raiseSOS)
+	sos.POST("/:id/resolve", h.resolveSOS)
+
 	// Ambient "active riders" presence layer (REST polling, not a WS room).
 	p := d.Engine.Group("/api/presence", jwt)
 	p.POST("/heartbeat", h.heartbeat)
@@ -73,6 +93,9 @@ type handler struct {
 	d    *server.Deps
 	nats *nats.Conn
 	hub  *sessionHub
+	// Used to reach riders whose app is backgrounded — the audience an SOS
+	// most needs and the session WebSocket cannot serve.
+	push push.Sender
 }
 
 // Point is a single GPS sample.

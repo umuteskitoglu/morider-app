@@ -31,6 +31,20 @@ export async function composeEmergencySMS(phone: string, lat?: number, lon?: num
   await Linking.openURL(`sms:${phone}${sep}body=${body}`);
 }
 
+/**
+ * Opens the SMS composer with a harmless test message. The emergency contact is
+ * the one field whose mistakes only surface at the worst possible moment — a
+ * digit dropped here is discovered after a crash — so the rider gets a way to
+ * prove the number reaches someone while nothing is at stake.
+ */
+export async function composeTestSMS(phone: string): Promise<void> {
+  const body = encodeURIComponent(
+    'Morider testi: Bir kaza durumunda acil durum kişim olarak sana mesaj gidecek. Bu bir testtir, bir şey yapmana gerek yok.',
+  );
+  const sep = Platform.OS === 'ios' ? '&' : '?';
+  await Linking.openURL(`sms:${phone}${sep}body=${body}`);
+}
+
 /** Starts a phone call to the national emergency number (112). */
 export async function call112(): Promise<void> {
   await Linking.openURL('tel:112');

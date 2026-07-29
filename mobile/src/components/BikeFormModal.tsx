@@ -110,8 +110,13 @@ export function BikeFormModal({
   return (
     <Modal visible={visible} animationType="slide" transparent statusBarTranslucent onRequestClose={onClose}>
       <KeyboardAvoidingView style={styles.flex} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
-        <Pressable style={styles.backdrop} onPress={onClose}>
-          <Pressable style={styles.sheet} onPress={() => {}}>
+        <Pressable
+          style={styles.backdrop}
+          onPress={onClose}
+          accessibilityRole="button"
+          accessibilityLabel="Kapat"
+        >
+          <Pressable style={styles.sheet} onPress={() => {}} accessible={false}>
             <ScrollView keyboardShouldPersistTaps="handled">
               <Text style={styles.title}>{initial ? 'Motoru Düzenle' : 'Motor Ekle'}</Text>
               <TextField label="İsim" value={name} onChangeText={setName} placeholder="MT-07" />
@@ -171,8 +176,13 @@ export function BikeFormModal({
       {/* iOS date spinner */}
       {Platform.OS === 'ios' && (
         <Modal visible={iosPicker != null} animationType="slide" transparent onRequestClose={() => setIosPicker(null)}>
-          <Pressable style={styles.backdrop} onPress={() => setIosPicker(null)}>
-            <Pressable style={styles.sheet} onPress={() => {}}>
+          <Pressable
+            style={styles.backdrop}
+            onPress={() => setIosPicker(null)}
+            accessibilityRole="button"
+            accessibilityLabel="Kapat"
+          >
+            <Pressable style={styles.sheet} onPress={() => {}} accessible={false}>
               <DateTimePicker
                 value={iosTemp}
                 mode="date"

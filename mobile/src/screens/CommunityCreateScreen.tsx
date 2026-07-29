@@ -97,7 +97,6 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: '800',
     letterSpacing: 1,
-    textTransform: 'uppercase',
     marginBottom: spacing.sm,
   },
   privacyRow: { flexDirection: 'row', gap: spacing.sm },

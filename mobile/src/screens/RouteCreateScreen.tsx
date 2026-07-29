@@ -397,7 +397,7 @@ const styles = StyleSheet.create({
     marginTop: spacing.sm,
   },
   curvyTitle: { color: colors.text, fontWeight: '600', fontSize: 13 },
-  curvyHint: { color: colors.textMuted, fontSize: 11, marginTop: -spacing.sm, marginBottom: spacing.sm },
+  curvyHint: { color: colors.textMuted, fontSize: 12, marginTop: -spacing.sm, marginBottom: spacing.sm },
   stats: { color: colors.primary, fontWeight: '700' },
   row: { flexDirection: 'row' },
   flex: { flex: 1 },

@@ -13,7 +13,7 @@ import { api, errorMessage } from '../api/client';
 import { cancelEventReminders, scheduleEventReminders } from '../lib/eventReminders';
 import { eventDraft } from '../lib/eventDraft';
 import { formatDateTime, formatTime, timeUntil } from '../lib/datetime';
-import { colors, radius, spacing } from '../theme';
+import { colors, onAccent, radius, spacing } from '../theme';
 
 type Participant = { id: number; name: string; rsvp: string };
 type ChatMsg = { id: number; user_id: number; name: string; body: string; created_at: string };
@@ -348,7 +348,7 @@ export default function EventDetailScreen({ navigation, route }: Props) {
         )}
 
         {(hasRoute || startCoord) && (
-          <Pressable style={styles.mapWrap} onPress={handleRide}>
+          <Pressable style={styles.mapWrap} onPress={handleRide} accessibilityRole="button" accessibilityLabel="Buluşma noktasını haritada aç">
             <View style={styles.mapInner}>
               <MapView ref={mapRef} style={styles.map} initialRegion={region} pointerEvents="none">
                 {hasRoute && (
@@ -388,7 +388,7 @@ export default function EventDetailScreen({ navigation, route }: Props) {
         )}
 
         {(hasRoute || startCoord) && !cancelled && (
-          <Pressable onPress={openDirections}>
+          <Pressable onPress={openDirections} accessibilityRole="button" accessibilityLabel="Buluşma noktasına yol tarifi al">
             <Card style={styles.directionsCard}>
               <MaterialCommunityIcons name="navigation-variant" size={20} color={colors.cyan} />
               <View style={{ flex: 1 }}>
@@ -403,7 +403,14 @@ export default function EventDetailScreen({ navigation, route }: Props) {
         )}
 
         {showRideCta && (
-          <Pressable style={[styles.rideCta, ridePending && styles.rideCtaDisabled]} onPress={handleRide} disabled={ridePending}>
+          <Pressable
+            style={[styles.rideCta, ridePending && styles.rideCtaDisabled]}
+            onPress={handleRide}
+            disabled={ridePending}
+            accessibilityRole="button"
+            accessibilityLabel={rideLabel}
+            accessibilityState={{ disabled: ridePending }}
+          >
             <MaterialCommunityIcons name={liveRide ? 'motorbike' : 'flag-checkered'} size={20} color="#fff" />
             <Text style={styles.rideCtaText}>{rideLabel}</Text>
           </Pressable>
@@ -447,7 +454,7 @@ export default function EventDetailScreen({ navigation, route }: Props) {
         )}
 
         {/* Invite */}
-        <Pressable onPress={invite}>
+        <Pressable onPress={invite} accessibilityRole="button" accessibilityLabel="Arkadaşlarını etkinliğe davet et">
           <Card style={styles.inviteCard}>
             <MaterialCommunityIcons name="share-variant" size={20} color={colors.primary} />
             <View style={{ flex: 1 }}>
@@ -507,8 +514,8 @@ export default function EventDetailScreen({ navigation, route }: Props) {
                 <View key={m.id} style={[styles.msgRow, mine && styles.msgRowMine]}>
                   <View style={[styles.msgBubble, mine ? styles.msgBubbleMine : styles.msgBubbleOther]}>
                     {!mine ? <Text style={styles.msgAuthor}>{m.name}</Text> : null}
-                    <Text style={styles.msgBody}>{m.body}</Text>
-                    <Text style={styles.msgTime}>{formatTime(m.created_at)}</Text>
+                    <Text style={[styles.msgBody, mine && styles.msgBodyMine]}>{m.body}</Text>
+                    <Text style={[styles.msgTime, mine && styles.msgTimeMine]}>{formatTime(m.created_at)}</Text>
                   </View>
                 </View>
               );
@@ -527,7 +534,12 @@ export default function EventDetailScreen({ navigation, route }: Props) {
         </Card>
 
         {isHost && !cancelled && (
-          <Pressable onPress={confirmCancel} style={styles.cancelBtn}>
+          <Pressable
+            onPress={confirmCancel}
+            style={styles.cancelBtn}
+            accessibilityRole="button"
+            accessibilityLabel="Etkinliği iptal et"
+          >
             <MaterialCommunityIcons name="calendar-remove" size={18} color={colors.danger} />
             <Text style={styles.cancelBtnText}>Etkinliği iptal et</Text>
           </Pressable>
@@ -574,7 +586,7 @@ const styles = StyleSheet.create({
   countdownText: { color: colors.primary, fontSize: 12, fontWeight: '800' },
   countdownTextPassed: { color: colors.textMuted },
   timeRow: { flexDirection: 'row', gap: spacing.lg, marginTop: spacing.xs },
-  timeHint: { color: colors.textFaint, fontSize: 11, lineHeight: 15, marginTop: 2 },
+  timeHint: { color: colors.textFaint, fontSize: 12, lineHeight: 15, marginTop: 2 },
   rsvpNudge: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -587,7 +599,7 @@ const styles = StyleSheet.create({
   },
   rsvpNudgeText: { flex: 1, color: colors.text, fontSize: 13, lineHeight: 18 },
   timeItem: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
-  timeLabel: { color: colors.textMuted, fontSize: 10, fontWeight: '800', letterSpacing: 1 },
+  timeLabel: { color: colors.textMuted, fontSize: 12, fontWeight: '800', letterSpacing: 1 },
   timeValue: { color: colors.text, fontSize: 14, fontWeight: '700' },
   mapWrap: { borderRadius: radius.lg, overflow: 'hidden', borderWidth: 1, borderColor: colors.border },
   mapInner: { position: 'relative' },
@@ -605,7 +617,7 @@ const styles = StyleSheet.create({
     borderRadius: 999,
   },
   liveDot: { width: 7, height: 7, borderRadius: 4, backgroundColor: '#fff' },
-  liveBadgeText: { color: '#fff', fontSize: 10, fontWeight: '900', letterSpacing: 0.5 },
+  liveBadgeText: { color: '#fff', fontSize: 12, fontWeight: '900', letterSpacing: 0.5 },
   distanceBadge: {
     position: 'absolute',
     top: spacing.sm,
@@ -618,7 +630,7 @@ const styles = StyleSheet.create({
     paddingVertical: 4,
     borderRadius: 999,
   },
-  distanceBadgeText: { color: '#fff', fontSize: 11, fontWeight: '800' },
+  distanceBadgeText: { color: '#fff', fontSize: 12, fontWeight: '800' },
   mapTapHint: {
     position: 'absolute',
     bottom: spacing.sm,
@@ -631,7 +643,7 @@ const styles = StyleSheet.create({
     paddingVertical: 5,
     borderRadius: 999,
   },
-  mapTapHintText: { color: '#fff', fontSize: 11, fontWeight: '700' },
+  mapTapHintText: { color: '#fff', fontSize: 12, fontWeight: '700' },
   rideCta: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -658,7 +670,7 @@ const styles = StyleSheet.create({
   rsvpCard: { gap: spacing.sm },
   rsvpCardNudge: { borderColor: 'rgba(255,176,32,0.45)' },
   reminderHintRow: { flexDirection: 'row', alignItems: 'center', gap: 5 },
-  reminderHint: { flex: 1, color: colors.textFaint, fontSize: 11, lineHeight: 15 },
+  reminderHint: { flex: 1, color: colors.textFaint, fontSize: 12, lineHeight: 15 },
   sectionTitle: { color: colors.text, fontWeight: '800', fontSize: 15 },
   rsvpRow: { flexDirection: 'row', gap: spacing.sm },
   rsvpBtn: {
@@ -675,7 +687,7 @@ const styles = StyleSheet.create({
   inviteCard: { flexDirection: 'row', alignItems: 'center', gap: spacing.md },
   inviteTitle: { color: colors.text, fontSize: 15, fontWeight: '800' },
   inviteCode: { color: colors.textMuted, fontSize: 13, marginTop: 1, letterSpacing: 1 },
-  inviteHint: { color: colors.textFaint, fontSize: 11, marginTop: 2, lineHeight: 15 },
+  inviteHint: { color: colors.textFaint, fontSize: 12, marginTop: 2, lineHeight: 15 },
   attendCard: { gap: spacing.sm },
   attendGroup: { gap: spacing.xs },
   attendGroupTitle: {
@@ -683,7 +695,6 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: '800',
     letterSpacing: 0.5,
-    textTransform: 'uppercase',
     marginTop: spacing.xs,
   },
   attendEmpty: { color: colors.textMuted, fontSize: 13 },
@@ -691,7 +702,7 @@ const styles = StyleSheet.create({
   personDot: { width: 30, height: 30, borderRadius: 15, backgroundColor: colors.primary, alignItems: 'center', justifyContent: 'center' },
   personDotText: { color: '#fff', fontWeight: '900', fontSize: 13 },
   personName: { color: colors.text, fontWeight: '600', flex: 1 },
-  personHost: { color: colors.primary, fontSize: 11, fontWeight: '800' },
+  personHost: { color: colors.primary, fontSize: 12, fontWeight: '800' },
   chatCard: { gap: spacing.sm },
   chatHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
   chatCount: { color: colors.textMuted, fontSize: 12, fontWeight: '700' },
@@ -700,9 +711,13 @@ const styles = StyleSheet.create({
   msgBubble: { maxWidth: '80%', paddingHorizontal: spacing.sm, paddingVertical: 6, borderRadius: radius.md },
   msgBubbleMine: { backgroundColor: colors.primary, borderBottomRightRadius: 2 },
   msgBubbleOther: { backgroundColor: colors.surfaceAlt, borderBottomLeftRadius: 2 },
-  msgAuthor: { color: colors.accent, fontSize: 11, fontWeight: '800', marginBottom: 1 },
+  msgAuthor: { color: colors.accent, fontSize: 12, fontWeight: '800', marginBottom: 1 },
   msgBody: { color: '#fff', fontSize: 15, paddingRight: 3 },
-  msgTime: { color: 'rgba(255,255,255,0.6)', fontSize: 10, alignSelf: 'flex-end', marginTop: 1 },
+  // The outgoing bubble is filled with the brand orange, on which white
+  // text measures 2.9:1. Dark ink on the same fill measures 6.8:1.
+  msgBodyMine: { color: onAccent },
+  msgTime: { color: 'rgba(255,255,255,0.7)', fontSize: 12, alignSelf: 'flex-end', marginTop: 1 },
+  msgTimeMine: { color: 'rgba(11,13,16,0.8)' },
   openChatBtn: {
     flexDirection: 'row',
     alignItems: 'center',

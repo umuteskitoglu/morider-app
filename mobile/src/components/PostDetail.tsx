@@ -208,13 +208,27 @@ export function PostDetail({
               </View>
             )}
 
-            <Pressable style={styles.close} onPress={onClose} hitSlop={12}>
+            <Pressable
+              style={styles.close}
+              onPress={onClose}
+              hitSlop={12}
+              accessibilityRole="button"
+              accessibilityLabel="Kapat"
+            >
               <MaterialCommunityIcons name="chevron-down" size={28} color="#fff" />
             </Pressable>
 
             {/* Delete is only offered on the viewer's own posts. */}
             {isOwn && (
-              <Pressable style={styles.delete} onPress={confirmDelete} disabled={deleting} hitSlop={12}>
+              <Pressable
+                style={styles.delete}
+                onPress={confirmDelete}
+                disabled={deleting}
+                hitSlop={12}
+                accessibilityRole="button"
+                accessibilityLabel="Gönderiyi sil"
+                accessibilityState={{ disabled: deleting }}
+              >
                 <MaterialCommunityIcons
                   name={deleting ? 'loading' : 'trash-can-outline'}
                   size={22}
@@ -226,7 +240,14 @@ export function PostDetail({
             {/* Right action rail — icons carry a soft shadow so they stay visible
                 on light photos (Instagram-style). */}
             <View style={styles.rail}>
-              <Pressable style={styles.railBtn} onPress={toggleLike} hitSlop={8}>
+              <Pressable
+                style={styles.railBtn}
+                onPress={toggleLike}
+                hitSlop={12}
+                accessibilityRole="button"
+                accessibilityLabel={liked ? 'Beğeniyi geri al' : 'Beğen'}
+                accessibilityState={{ selected: liked }}
+              >
                 <MaterialCommunityIcons
                   name={liked ? 'heart' : 'heart-outline'}
                   size={34}
@@ -234,10 +255,21 @@ export function PostDetail({
                   style={styles.iconShadow}
                 />
               </Pressable>
-              <Pressable onPress={() => setShowLikers(true)} hitSlop={8}>
+              <Pressable
+                onPress={() => setShowLikers(true)}
+                hitSlop={12}
+                accessibilityRole="button"
+                accessibilityLabel={`${likeCount} beğeni, beğenenleri gör`}
+              >
                 <Text style={styles.railText}>{likeCount}</Text>
               </Pressable>
-              <Pressable style={styles.railBtn} onPress={() => setShowComments(true)} hitSlop={8}>
+              <Pressable
+                style={styles.railBtn}
+                onPress={() => setShowComments(true)}
+                hitSlop={12}
+                accessibilityRole="button"
+                accessibilityLabel={`${commentCount} yorum, yorumları aç`}
+              >
                 <MaterialCommunityIcons name="comment-outline" size={32} color="#fff" style={styles.iconShadow} />
               </Pressable>
               <Text style={styles.railText}>{commentCount}</Text>
@@ -247,6 +279,8 @@ export function PostDetail({
               <Pressable
                 onPress={() => navigation.navigate('UserProfile', { userId: post.user_id, name: post.author })}
                 hitSlop={8}
+                accessibilityRole="button"
+                accessibilityLabel={`${post.author} profilini aç`}
               >
                 <Text style={styles.author}>{post.author}</Text>
               </Pressable>
@@ -258,7 +292,12 @@ export function PostDetail({
                 </View>
               ) : null}
               {likeCount > 0 && (
-                <Pressable onPress={() => setShowLikers(true)} hitSlop={8}>
+                <Pressable
+                  onPress={() => setShowLikers(true)}
+                  hitSlop={12}
+                  accessibilityRole="button"
+                  accessibilityLabel={`${likeCount} beğeni, beğenenleri gör`}
+                >
                   <Text style={styles.likesLink}>{likeCount} beğeni · beğenenleri gör</Text>
                 </Pressable>
               )}
@@ -271,7 +310,12 @@ export function PostDetail({
       <Modal visible={showComments} animationType="slide" onRequestClose={() => setShowComments(false)}>
         <View style={[styles.sheetHeader, { paddingTop: insets.top + spacing.sm }]}>
           <Text style={styles.sheetTitle}>Yorumlar</Text>
-          <Pressable onPress={() => setShowComments(false)} hitSlop={12}>
+          <Pressable
+            onPress={() => setShowComments(false)}
+            hitSlop={12}
+            accessibilityRole="button"
+            accessibilityLabel="Yorumları kapat"
+          >
             <MaterialCommunityIcons name="close" size={24} color={colors.text} />
           </Pressable>
         </View>

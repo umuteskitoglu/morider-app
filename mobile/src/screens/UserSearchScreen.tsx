@@ -210,7 +210,6 @@ const styles = StyleSheet.create({
     color: colors.textMuted,
     fontWeight: '900',
     fontSize: 13,
-    textTransform: 'uppercase',
     letterSpacing: 0.5,
     marginTop: spacing.sm,
     marginBottom: spacing.xs,

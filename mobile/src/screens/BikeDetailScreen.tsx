@@ -305,7 +305,7 @@ export default function BikeDetailScreen({ route, navigation }: Props) {
       <Card style={styles.docsCard}>
         <View style={styles.docsHead}>
           <Text style={styles.section}>Belgeler</Text>
-          <Pressable onPress={() => setEditing(true)} hitSlop={8} style={styles.editBtn}>
+          <Pressable onPress={() => setEditing(true)} hitSlop={12} style={styles.editBtn} accessibilityRole="button" accessibilityLabel="Motoru düzenle">
             <MaterialCommunityIcons name="pencil" size={15} color={colors.primary} />
             <Text style={styles.editText}>Düzenle</Text>
           </Pressable>
@@ -336,7 +336,7 @@ export default function BikeDetailScreen({ route, navigation }: Props) {
       <Card style={styles.docsCard}>
         <View style={styles.docsHead}>
           <Text style={styles.section}>Yakıt & Menzil</Text>
-          <Pressable onPress={openAddFuel} hitSlop={8} style={styles.editBtn}>
+          <Pressable onPress={openAddFuel} hitSlop={12} style={styles.editBtn} accessibilityRole="button" accessibilityLabel="Yakıt kaydı ekle">
             <MaterialCommunityIcons name="plus" size={16} color={colors.primary} />
             <Text style={styles.editText}>Yakıt Ekle</Text>
           </Pressable>
@@ -382,7 +382,7 @@ export default function BikeDetailScreen({ route, navigation }: Props) {
                   {log.is_full_tank ? '' : ' · kısmi'}
                 </Text>
               </View>
-              <Pressable onPress={() => confirmDeleteFuel(log)} hitSlop={8}>
+              <Pressable onPress={() => confirmDeleteFuel(log)} hitSlop={12} accessibilityRole="button" accessibilityLabel="Yakıt kaydını sil">
                 <MaterialCommunityIcons name="trash-can-outline" size={18} color={colors.textMuted} />
               </Pressable>
             </View>
@@ -394,7 +394,7 @@ export default function BikeDetailScreen({ route, navigation }: Props) {
       <Card style={styles.docsCard}>
         <View style={styles.docsHead}>
           <Text style={styles.section}>Bakım</Text>
-          <Pressable onPress={openAddMaint} hitSlop={8} style={styles.editBtn}>
+          <Pressable onPress={openAddMaint} hitSlop={12} style={styles.editBtn} accessibilityRole="button" accessibilityLabel="Bakım kalemi ekle">
             <MaterialCommunityIcons name="plus" size={16} color={colors.primary} />
             <Text style={styles.editText}>Kalem Ekle</Text>
           </Pressable>
@@ -437,12 +437,12 @@ export default function BikeDetailScreen({ route, navigation }: Props) {
 
                 {/* Actions */}
                 <View style={styles.maintActions}>
-                  <Pressable style={styles.doneBtn} onPress={() => openDoneSheet(m)} hitSlop={6}>
+                  <Pressable style={styles.doneBtn} onPress={() => openDoneSheet(m)} hitSlop={12} accessibilityRole="button" accessibilityLabel="Bakımı yapıldı olarak işaretle">
                     <MaterialCommunityIcons name="check-circle-outline" size={16} color={colors.success} />
                     <Text style={styles.doneBtnText}>Yapıldı</Text>
                   </Pressable>
                   {hasHistory && (
-                    <Pressable style={styles.histBtn} onPress={() => toggleExpand(m.id)} hitSlop={6}>
+                    <Pressable style={styles.histBtn} onPress={() => toggleExpand(m.id)} hitSlop={12} accessibilityRole="button" accessibilityLabel="Bakım geçmişini aç veya kapat">
                       <MaterialCommunityIcons
                         name={isExpanded ? 'chevron-up' : 'history'}
                         size={16}
@@ -453,7 +453,7 @@ export default function BikeDetailScreen({ route, navigation }: Props) {
                       </Text>
                     </Pressable>
                   )}
-                  <Pressable onPress={() => confirmDeleteMaint(m)} hitSlop={8} style={styles.deleteBtn}>
+                  <Pressable onPress={() => confirmDeleteMaint(m)} hitSlop={12} style={styles.deleteBtn} accessibilityRole="button" accessibilityLabel="Bakım kalemini sil">
                     <MaterialCommunityIcons name="trash-can-outline" size={18} color={colors.textMuted} />
                   </Pressable>
                 </View>
@@ -514,8 +514,13 @@ export default function BikeDetailScreen({ route, navigation }: Props) {
       {/* Yakıt ekle */}
       <Modal visible={addingFuel} animationType="slide" transparent statusBarTranslucent onRequestClose={() => setAddingFuel(false)}>
         <KeyboardAvoidingView style={styles.flex} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
-          <Pressable style={styles.backdrop} onPress={() => setAddingFuel(false)}>
-            <Pressable style={styles.sheet} onPress={() => {}}>
+          <Pressable
+            style={styles.backdrop}
+            onPress={() => setAddingFuel(false)}
+            accessibilityRole="button"
+            accessibilityLabel="Kapat"
+          >
+            <Pressable style={styles.sheet} onPress={() => {}} accessible={false}>
               <Text style={styles.sheetTitle}>Yakıt Kaydı</Text>
               <View style={styles.row}>
                 <View style={styles.flex}>
@@ -527,7 +532,7 @@ export default function BikeDetailScreen({ route, navigation }: Props) {
                 </View>
               </View>
               <TextField label="Tutar (₺, opsiyonel)" value={fCost} onChangeText={setFCost} placeholder="700" keyboardType="decimal-pad" />
-              <Pressable style={styles.toggleRow} onPress={() => setFFull((v) => !v)} hitSlop={8}>
+              <Pressable style={styles.toggleRow} onPress={() => setFFull((v) => !v)} hitSlop={12} accessibilityRole="checkbox" accessibilityLabel="Depoyu tam doldurdum" accessibilityState={{ checked: fFull }}>
                 <MaterialCommunityIcons
                   name={fFull ? 'checkbox-marked' : 'checkbox-blank-outline'}
                   size={22}
@@ -546,8 +551,13 @@ export default function BikeDetailScreen({ route, navigation }: Props) {
       {/* Bakım kalemi ekle */}
       <Modal visible={addingMaint} animationType="slide" transparent statusBarTranslucent onRequestClose={() => setAddingMaint(false)}>
         <KeyboardAvoidingView style={styles.flex} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
-          <Pressable style={styles.backdrop} onPress={() => setAddingMaint(false)}>
-            <Pressable style={styles.sheet} onPress={() => {}}>
+          <Pressable
+            style={styles.backdrop}
+            onPress={() => setAddingMaint(false)}
+            accessibilityRole="button"
+            accessibilityLabel="Kapat"
+          >
+            <Pressable style={styles.sheet} onPress={() => {}} accessible={false}>
               <Text style={styles.sheetTitle}>Bakım Kalemi</Text>
               <TextField label="Kalem" value={mItem} onChangeText={setMItem} placeholder="Motor yağı" />
               <View style={styles.row}>
@@ -576,8 +586,13 @@ export default function BikeDetailScreen({ route, navigation }: Props) {
         onRequestClose={() => setDoneFor(null)}
       >
         <KeyboardAvoidingView style={styles.flex} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
-          <Pressable style={styles.backdrop} onPress={() => setDoneFor(null)}>
-            <Pressable style={styles.sheet} onPress={() => {}}>
+          <Pressable
+            style={styles.backdrop}
+            onPress={() => setDoneFor(null)}
+            accessibilityRole="button"
+            accessibilityLabel="Kapat"
+          >
+            <Pressable style={styles.sheet} onPress={() => {}} accessible={false}>
               <Text style={styles.sheetTitle}>
                 {doneFor?.item} — Yapıldı
               </Text>
@@ -640,7 +655,7 @@ const styles = StyleSheet.create({
     paddingVertical: 3,
   },
   statusDot: { width: 7, height: 7, borderRadius: 4 },
-  statusText: { color: colors.text, fontSize: 11, fontWeight: '700' },
+  statusText: { color: colors.text, fontSize: 12, fontWeight: '700' },
   odoLine: { color: colors.textMuted, fontSize: 12, marginBottom: spacing.xs },
   // Maintenance item
   maintItem: { paddingVertical: spacing.sm },
@@ -661,12 +676,12 @@ const styles = StyleSheet.create({
   histMeta: { color: colors.textMuted, fontSize: 12, marginTop: 1 },
   // Orphan records section
   orphanSection: { marginTop: spacing.md, paddingTop: spacing.md, borderTopWidth: 1, borderTopColor: colors.border, gap: 2 },
-  orphanTitle: { color: colors.textMuted, fontSize: 12, fontWeight: '800', marginBottom: spacing.xs, textTransform: 'uppercase', letterSpacing: 0.5 },
+  orphanTitle: { color: colors.textMuted, fontSize: 12, fontWeight: '800', marginBottom: spacing.xs, letterSpacing: 0.5 },
   // Fuel
   metricRow: { flexDirection: 'row', gap: spacing.sm },
   metric: { flex: 1, alignItems: 'center', gap: 2, backgroundColor: colors.surfaceAlt, borderRadius: radius.sm, paddingVertical: spacing.sm },
   metricValue: { color: colors.text, fontWeight: '900', fontSize: 14 },
-  metricLabel: { color: colors.textMuted, fontSize: 11, fontWeight: '700' },
+  metricLabel: { color: colors.textMuted, fontSize: 12, fontWeight: '700' },
   fuelRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.md, paddingVertical: spacing.xs },
   // Sheet / modal
   backdrop: { flex: 1, backgroundColor: 'rgba(0,0,0,0.55)', justifyContent: 'flex-end' },

@@ -16,7 +16,12 @@ export function AvatarViewer({ uri, onClose }: { uri: string | null; onClose: ()
     <Modal visible={!!uri} transparent animationType="fade" statusBarTranslucent onRequestClose={onClose}>
       {/* GestureHandlerRootView is required for gestures to work inside a Modal on Android. */}
       <GestureHandlerRootView style={styles.flex}>
-        <Pressable style={styles.backdrop} onPress={onClose}>
+        <Pressable
+          style={styles.backdrop}
+          onPress={onClose}
+          accessibilityRole="button"
+          accessibilityLabel="Kapat"
+        >
           {uri ? (
             <ZoomableImage
               uri={uri}

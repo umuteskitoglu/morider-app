@@ -25,8 +25,13 @@ export function LevelInfoButton() {
       </Pressable>
 
       <Modal visible={open} animationType="slide" transparent statusBarTranslucent onRequestClose={() => setOpen(false)}>
-        <Pressable style={styles.backdrop} onPress={() => setOpen(false)}>
-          <Pressable style={styles.sheet} onPress={() => {}}>
+        <Pressable
+          style={styles.backdrop}
+          onPress={() => setOpen(false)}
+          accessibilityRole="button"
+          accessibilityLabel="Kapat"
+        >
+          <Pressable style={styles.sheet} onPress={() => {}} accessible={false}>
             <View style={styles.header}>
               <MaterialCommunityIcons name="star-four-points" size={20} color={colors.accent} />
               <Text style={styles.title}>Nasıl Seviye Atlanır?</Text>

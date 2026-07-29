@@ -1,12 +1,12 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Svg, { Circle, G, Line, Path, Text as SvgText } from 'react-native-svg';
 
 import { Button } from './ui';
 import { SpeedDial } from './SpeedDial';
 import { Rideability, RideWeather } from './RouteWeatherCard';
-import { useLeanAngle } from '../lib/useLeanAngle';
 import { api } from '../api/client';
 import { colors, radius, shadow, spacing } from '../theme';
 
@@ -18,7 +18,10 @@ export type DashSample = {
   ts: string;
 };
 
-type GaugeKey = 'speed' | 'lean' | 'elev' | 'trip' | 'weather';
+// No 'lean' gauge. A live max-lean readout rewards glancing at the phone in
+// the middle of a corner, which is the single most dangerous moment to do it.
+// Peak lean is still recorded for the ride and shown in the post-ride summary.
+type GaugeKey = 'speed' | 'elev' | 'trip' | 'weather';
 
 type Props = {
   speed: number; // km/h
@@ -35,14 +38,12 @@ type Props = {
 
 const ICONS: Record<GaugeKey, React.ComponentProps<typeof MaterialCommunityIcons>['name']> = {
   speed: 'speedometer',
-  lean: 'angle-acute',
   elev: 'image-filter-hdr',
   trip: 'timer-outline',
   weather: 'weather-partly-cloudy',
 };
 const LABELS: Record<GaugeKey, string> = {
   speed: 'Hız',
-  lean: 'Yatış',
   elev: 'İrtifa',
   trip: 'Sürüş',
   weather: 'Hava',
@@ -106,12 +107,23 @@ export function RideDashboard({
   onClose,
   onStop,
 }: Props) {
+  const insets = useSafeAreaInsets();
   const [focused, setFocused] = useState<GaugeKey>('speed');
   const [elapsed, setElapsed] = useState(0);
   const [wx, setWx] = useState<{ weather: RideWeather; rideability: Rideability } | null>(null);
-  const { lean, maxLean, calibrate } = useLeanAngle(true);
-  // Peak speed over the whole ride (samples store m/s); persists across toggles.
-  const maxSpeed = Math.max(speed, ...samples.map((s) => s.speed * 3.6), 0);
+  // Peak speed over the whole ride, carried forward incrementally. Recomputing
+  // it from `samples` on every render meant spreading the whole track into
+  // Math.max once a second — O(n) per frame, and a hard RangeError crash once
+  // the track passed the argument limit on a long ride. Seeded once from any
+  // samples that already exist (dashboard opened mid-ride).
+  const maxSpeedRef = useRef<number | null>(null);
+  if (maxSpeedRef.current === null) {
+    let seed = 0;
+    for (const s of samples) if (s.speed * 3.6 > seed) seed = s.speed * 3.6;
+    maxSpeedRef.current = seed;
+  }
+  if (speed > maxSpeedRef.current) maxSpeedRef.current = speed;
+  const maxSpeed = maxSpeedRef.current;
 
   // 1 s ticker for the ride clock + derived averages.
   useEffect(() => {
@@ -152,22 +164,27 @@ export function RideDashboard({
 
   const meta: Record<GaugeKey, { value: string; unit: string }> = {
     speed: { value: `${Math.round(speed)}`, unit: 'km/s' },
-    lean: { value: `${Math.abs(Math.round(lean))}°`, unit: lean >= 0 ? 'sağ' : 'sol' },
     elev: { value: `${Math.round(altitude)}`, unit: 'm' },
     trip: { value: fmtElapsed(elapsed), unit: `${distance.toFixed(1)} km` },
     weather: { value: wx ? `${Math.round(wx.weather.temp_c)}°` : '--', unit: wx ? `${wx.rideability.score}/100` : 'hava' },
   };
 
-  const others = (['speed', 'lean', 'elev', 'trip', 'weather'] as GaugeKey[]).filter((k) => k !== focused);
+  const others = (['speed', 'elev', 'trip', 'weather'] as GaugeKey[]).filter((k) => k !== focused);
 
   return (
-    <View style={styles.root}>
+    <View style={[styles.root, { paddingTop: insets.top + spacing.sm, paddingBottom: insets.bottom + spacing.md }]}>
       {/* header */}
       <View style={styles.header}>
-        <Pressable style={styles.iconBtn} onPress={onClose} hitSlop={8}>
+        <Pressable
+          style={styles.iconBtn}
+          onPress={onClose}
+          hitSlop={8}
+          accessibilityRole="button"
+          accessibilityLabel="Haritaya dön"
+        >
           <MaterialCommunityIcons name="map-outline" size={22} color={colors.text} />
         </Pressable>
-        <View style={styles.clock}>
+        <View style={styles.clock} accessibilityRole="text" accessibilityLabel={`Sürüş süresi ${fmtElapsed(elapsed)}`}>
           <View style={[styles.dot, { backgroundColor: recording ? colors.danger : colors.textMuted }]} />
           <Text style={styles.clockText}>{fmtElapsed(elapsed)}</Text>
         </View>
@@ -177,7 +194,6 @@ export function RideDashboard({
       {/* primary (big) slot */}
       <View style={styles.primary}>
         {focused === 'speed' && <SpeedBig speed={speed} heading={heading} maxSpeed={maxSpeed} />}
-        {focused === 'lean' && <LeanBig lean={lean} maxLean={maxLean} onCalibrate={calibrate} />}
         {focused === 'elev' && <ElevBig altitude={altitude} grade={g} samples={samples} />}
         {focused === 'trip' && <TripBig elapsed={elapsed} distance={distance} maxSpeed={maxSpeed} avg={avg} />}
         {focused === 'weather' && <WeatherBig wx={wx} />}
@@ -186,7 +202,13 @@ export function RideDashboard({
       {/* secondary tiles — tap to promote into the big slot */}
       <View style={styles.tiles}>
         {others.map((k) => (
-          <Pressable key={k} style={styles.tile} onPress={() => setFocused(k)}>
+          <Pressable
+            key={k}
+            style={styles.tile}
+            onPress={() => setFocused(k)}
+            accessibilityRole="button"
+            accessibilityLabel={`${LABELS[k]}: ${meta[k].value} ${meta[k].unit}. Büyük göstergeye al.`}
+          >
             <MaterialCommunityIcons name={ICONS[k]} size={18} color={colors.primary} />
             <Text style={styles.tileValue} numberOfLines={1}>
               {meta[k].value}
@@ -215,61 +237,6 @@ function SpeedBig({ speed, heading, maxSpeed }: { speed: number; heading: number
         <Caption icon="compass-outline" text={`${cardinal(heading)}${heading >= 0 ? ` ${Math.round(heading)}°` : ''}`} />
         <Caption icon="speedometer-medium" text={`Max ${Math.round(maxSpeed)} km/s`} />
       </View>
-    </View>
-  );
-}
-
-// Roll/lean indicator: a pointer tilting from vertical by the lean angle.
-function LeanBig({ lean, maxLean, onCalibrate }: { lean: number; maxLean: number; onCalibrate: () => void }) {
-  const VB = 200;
-  const cx = 100;
-  const cy = 120;
-  const r = 86;
-  const polar = (angle: number, radius: number) => {
-    const rad = (angle * Math.PI) / 180;
-    return { x: cx + radius * Math.cos(rad), y: cy + radius * Math.sin(rad) };
-  };
-  // Up is 270° (native, clockwise-positive); right lean adds clockwise.
-  const clamped = Math.max(-50, Math.min(50, lean));
-  const tip = polar(270 + clamped, r);
-  const ticks = [-45, -30, -15, 0, 15, 30, 45].map((t) => {
-    const a = 270 + t;
-    const o = polar(a, r);
-    const inn = polar(a, r - (t === 0 ? 16 : 10));
-    return (
-      <Line key={t} x1={o.x} y1={o.y} x2={inn.x} y2={inn.y} stroke={t === 0 ? colors.text : colors.border} strokeWidth={t === 0 ? 2.5 : 1.5} />
-    );
-  });
-  return (
-    <View style={styles.center}>
-      <View style={{ width: 280, height: 220 }}>
-        <Svg width={280} height={220} viewBox={`0 0 ${VB} ${VB - 20}`}>
-          <Path
-            d={`M ${polar(220, r).x} ${polar(220, r).y} A ${r} ${r} 0 0 1 ${polar(320, r).x} ${polar(320, r).y}`}
-            stroke={colors.border}
-            strokeWidth={5}
-            fill="none"
-            strokeLinecap="round"
-          />
-          {ticks}
-          <Line x1={cx} y1={cy} x2={tip.x} y2={tip.y} stroke={colors.accent} strokeWidth={5} strokeLinecap="round" />
-          <Circle cx={cx} cy={cy} r={8} fill={colors.surfaceAlt} stroke={colors.accent} strokeWidth={2} />
-          <SvgText x={cx} y={cy + 34} fill={colors.text} fontSize={34} fontWeight="900" textAnchor="middle">
-            {Math.abs(Math.round(lean))}°
-          </SvgText>
-          <SvgText x={cx} y={cy + 52} fill={colors.textMuted} fontSize={12} fontWeight="700" textAnchor="middle">
-            {Math.abs(lean) < 2 ? 'DİK' : lean >= 0 ? 'SAĞA' : 'SOLA'}
-          </SvgText>
-        </Svg>
-      </View>
-      <View style={styles.subRow}>
-        <Caption icon="arrow-expand-horizontal" text={`Max ${Math.round(maxLean)}°`} />
-        <Pressable style={styles.calBtn} onPress={onCalibrate} hitSlop={6}>
-          <MaterialCommunityIcons name="crosshairs" size={15} color={colors.text} />
-          <Text style={styles.calText}>Dik konumu sıfırla</Text>
-        </Pressable>
-      </View>
-      <Text style={styles.hint}>Yatış açısı yaklaşıktır</Text>
     </View>
   );
 }
@@ -409,7 +376,10 @@ function Caption({
 }
 
 const styles = StyleSheet.create({
-  root: { ...StyleSheet.absoluteFillObject, backgroundColor: colors.bg, paddingTop: 52, paddingBottom: spacing.lg },
+  // paddingTop/Bottom come from the safe-area insets at render time: the old
+  // fixed 52pt sat under the Dynamic Island, and the fixed bottom padding put
+  // the "end ride" button under the home indicator.
+  root: { ...StyleSheet.absoluteFillObject, backgroundColor: colors.bg },
   header: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -439,18 +409,6 @@ const styles = StyleSheet.create({
   bigUnit: { color: colors.textMuted, fontSize: 28, fontWeight: '800' },
   gradeRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.xs, marginTop: -spacing.xs },
   gradeText: { fontSize: 18, fontWeight: '800' },
-  calBtn: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacing.xs,
-    backgroundColor: colors.surface,
-    borderWidth: 1,
-    borderColor: colors.border,
-    paddingHorizontal: spacing.md,
-    paddingVertical: spacing.xs,
-    borderRadius: radius.pill,
-  },
-  calText: { color: colors.text, fontSize: 13, fontWeight: '700' },
   tripGrid: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'center', gap: spacing.md, paddingHorizontal: spacing.lg },
   tripCell: {
     width: '42%',
@@ -476,6 +434,6 @@ const styles = StyleSheet.create({
     gap: 2,
   },
   tileValue: { color: colors.text, fontSize: 20, fontWeight: '900', fontVariant: ['tabular-nums'] },
-  tileLabel: { color: colors.textMuted, fontSize: 11, fontWeight: '700' },
+  tileLabel: { color: colors.textMuted, fontSize: 12, fontWeight: '700' },
   footer: { paddingHorizontal: spacing.md, marginTop: spacing.md },
 });

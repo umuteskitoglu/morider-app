@@ -4,7 +4,6 @@ import MapView, { LongPressEvent, Marker, Polyline, Region } from 'react-native-
 import { Image } from 'expo-image';
 import * as Location from 'expo-location';
 import { useFocusEffect } from '@react-navigation/native';
-import { activateKeepAwakeAsync, deactivateKeepAwake } from 'expo-keep-awake';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
@@ -21,6 +20,7 @@ import { darkMapStyle } from '../lib/mapStyle';
 import { useCrashDetection } from '../lib/crashDetection';
 import { useLeanAngle } from '../lib/useLeanAngle';
 import { call112, composeEmergencySMS, getEmergencyContact } from '../lib/emergency';
+import { flushSOSQueue, newSosId, raiseSOS } from '../lib/sos';
 import {
   advanceStep,
   distanceM,
@@ -38,11 +38,9 @@ import {
   SpokenState,
   stopSpeaking,
 } from '../lib/navigation';
-import { configureAudioSession } from '../lib/audio';
 import { POI, POI_CATEGORIES, POI_LABELS, poiColor, poiIcon } from '../lib/poi';
-import { setRideLocationHandler, startRideLocation, stopRideLocation } from '../lib/backgroundLocation';
-import { computeRideStats } from '../lib/rideStats';
-import { kapismaSummary } from '../lib/segments';
+import { clearCheckpoint, finalizeDraft, flushPendingRides, loadCheckpoint, saveOrQueueRide, setLastRideSummary } from '../lib/rideStore';
+import { useRideRecorder } from '../lib/useRideRecorder';
 import { RideDashboard } from '../components/RideDashboard';
 import { useAuth } from '../store/auth';
 import { useBlockedUsers } from '../store/blockedUsers';
@@ -52,7 +50,6 @@ import { api, apiBaseURL, errorMessage } from '../api/client';
 import { colors, radius, shadow, spacing } from '../theme';
 
 type Coord = { latitude: number; longitude: number };
-type Sample = Coord & { altitude: number; speed: number; ts: string };
 type Props = NativeStackScreenProps<RideStackParams, 'RideMain'>;
 
 const INITIAL_REGION: Region = {
@@ -67,37 +64,25 @@ const INITIAL_REGION: Region = {
 const navRouteFill = '#4E9BFF';
 const navRouteCasing = '#1A6CD4';
 
-function haversineKm(a: Coord, b: Coord): number {
-  const R = 6371;
-  const dLat = ((b.latitude - a.latitude) * Math.PI) / 180;
-  const dLon = ((b.longitude - a.longitude) * Math.PI) / 180;
-  const lat1 = (a.latitude * Math.PI) / 180;
-  const lat2 = (b.latitude * Math.PI) / 180;
-  const h = Math.sin(dLat / 2) ** 2 + Math.sin(dLon / 2) ** 2 * Math.cos(lat1) * Math.cos(lat2);
-  return 2 * R * Math.asin(Math.sqrt(h));
+// "1s 24dk" / "24dk" — compact enough to read at a glance.
+function fmtDuration(ms: number): string {
+  const total = Math.max(0, Math.floor(ms / 1000));
+  const h = Math.floor(total / 3600);
+  const m = Math.floor((total % 3600) / 60);
+  return h > 0 ? `${h}s ${m}dk` : `${m}dk`;
 }
 
 export default function MapScreen({ route, navigation }: Props) {
   const insets = useSafeAreaInsets();
   const followRouteId = route.params?.followRouteId;
   const followReverseParam = route.params?.followReverse;
-  const [hasPermission, setHasPermission] = useState(false);
-  const [recording, setRecording] = useState(false);
-  const [path, setPath] = useState<Coord[]>([]);
   const [followPath, setFollowPath] = useState<Coord[]>([]);
   // The followed route as saved (A→B). followPath is the *displayed* guide:
   // the base in the chosen direction, later replaced by the planned geometry
   // (which may include a lead-in from the rider's actual position).
   const [followBase, setFollowBase] = useState<Coord[]>([]);
   const [followReversed, setFollowReversed] = useState(false);
-  // Live position for the Google-Maps-style heading arrow (puck) while riding.
-  const [userCoord, setUserCoord] = useState<Coord | null>(null);
-  const [distance, setDistance] = useState(0);
-  const [speed, setSpeed] = useState(0);
-  const [heading, setHeading] = useState(-1);
-  const [altitude, setAltitude] = useState(0);
   const [viewMode, setViewMode] = useState<'map' | 'dash'>('map');
-  const [saving, setSaving] = useState(false);
   const [crashAlarm, setCrashAlarm] = useState(false);
   const [pois, setPois] = useState<POI[]>([]);
   const [poiPoint, setPoiPoint] = useState<Coord | null>(null);
@@ -139,30 +124,14 @@ export default function MapScreen({ route, navigation }: Props) {
   const [nearby, setNearby] = useState<NearbyRider[]>([]);
   const [selectedRider, setSelectedRider] = useState<NearbyRider | null>(null);
   const headingRef = useRef(-1);
-  headingRef.current = heading;
   const speedRef = useRef(0);
-  speedRef.current = speed;
 
-  // Track peak lean over the whole ride so it can be saved on the ride.
-  const { lean } = useLeanAngle(recording);
-  const maxLeanRight = useRef(0);
-  const maxLeanLeft = useRef(0);
-  useEffect(() => {
-    if (!recording) return;
-    if (lean > maxLeanRight.current) maxLeanRight.current = lean;
-    if (-lean > maxLeanLeft.current) maxLeanLeft.current = -lean;
-  }, [lean, recording]);
-
-  const samples = useRef<Sample[]>([]);
+  // Position of the last fix, read by the presence tick and the SOS payload.
   const lastCoord = useRef<Coord | null>(null);
-  const startedAt = useRef<Date | null>(null);
   const mapRef = useRef<MapView | null>(null);
   // Chase-cam pitch/zoom are applied once at the first fix; later fixes only
   // pan/rotate. Re-applying pitch every fix made the map jolt "up" each point.
   const camPrimed = useRef(false);
-  // Cleared on unmount so a startRideLocation() that resolves after the screen
-  // is gone doesn't leave the foreground service (and its notification) running.
-  const alive = useRef(true);
   const navSteps = useRef<NavStep[] | null>(null);
   const navIdx = useRef(0);
   const spoken = useRef<SpokenState>({ idx: -1, far: false, near: false });
@@ -180,6 +149,48 @@ export default function MapScreen({ route, navigation }: Props) {
   // Rider's progress (vertex index) along the displayed guide, so the
   // remaining-km search only moves forward (see nearestVertexAhead).
   const progressRef = useRef(0);
+
+  // The recorder owns the ride itself; this screen only reacts to each fix with
+  // the things that are its own — turn-by-turn and the chase camera.
+  const rec = useRideRecorder(({ lat, lon, heading: hdg }) => {
+    lastCoord.current = { latitude: lat, longitude: lon };
+
+    const navigating = updateNavigation({ lat, lon });
+    if (navigating) {
+      maybeReroute({ lat, lon });
+      // Forward-only progress along the guide keeps remaining-km monotonic
+      // even when the geometry passes near itself (out-and-back, figure-8).
+      const { index } = nearestVertexAhead(routePointsRef.current, { lat, lon }, progressRef.current);
+      progressRef.current = index;
+      setRemainingKm(remainingKmFrom(routePointsRef.current, index, { lat, lon }));
+    }
+
+    // Google-Maps-style chase cam: tilted, zoomed-in, rotated to heading.
+    // Pitch/zoom are set once (camPrimed); later fixes only pan + rotate so the
+    // map doesn't jolt "up" on every point. Suspended while the rider has
+    // panned the map by hand. No-op while backgrounded.
+    if (!followCamRef.current) return;
+    const center = { latitude: lat, longitude: lon };
+    if (!camPrimed.current) {
+      camPrimed.current = true;
+      mapRef.current?.animateCamera(
+        { center, pitch: 55, zoom: 17.5, altitude: 300, ...(hdg >= 0 ? { heading: hdg } : {}) },
+        { duration: 700 },
+      );
+    } else {
+      mapRef.current?.animateCamera({ center, ...(hdg >= 0 ? { heading: hdg } : {}) }, { duration: 700 });
+    }
+  });
+  const { recording, paused, autoPaused, gpsStale, saving, distance, speed, heading, altitude, path } = rec;
+  headingRef.current = heading;
+  speedRef.current = speed;
+
+  // Peak lean is still recorded for the summary — it just isn't shown live.
+  // Declared after the recorder because it reads `recording` from it.
+  const { lean } = useLeanAngle(recording);
+  useEffect(() => {
+    if (recording) rec.trackLean(lean);
+  }, [lean, recording, rec]);
 
   useEffect(() => {
     routePointsRef.current = followPath.map((p) => ({ lat: p.latitude, lon: p.longitude }));
@@ -254,33 +265,53 @@ export default function MapScreen({ route, navigation }: Props) {
 
   useEffect(() => {
     (async () => {
+      // Only to centre the map on arrival; the recorder does its own
+      // permission handling when a ride actually starts.
       const { status } = await Location.requestForegroundPermissionsAsync();
-      const granted = status === 'granted';
-      setHasPermission(granted);
-      if (granted) {
-        await centerOnUser(true);
-      }
+      if (status === 'granted') await centerOnUser(true);
     })();
-    return () => {
-      // Leaving the screen mid-ride must tear down the foreground service, or
-      // the GPS notification (and battery drain) would outlive the screen.
-      alive.current = false;
-      setRideLocationHandler(null);
-      void stopRideLocation();
-    };
+    // The recorder tears down the foreground service on unmount, so there is
+    // nothing for this effect to clean up.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Maps-style: keep the screen on for the whole ride so it never dims/locks
-  // mid-navigation. Released as soon as recording stops (or the screen unmounts).
+  // On arrival: push out anything the last session couldn't send, and offer to
+  // recover a ride that was interrupted rather than stopped.
   useEffect(() => {
-    if (!recording) return;
-    const tag = 'morider-ride';
-    void activateKeepAwakeAsync(tag);
-    return () => {
-      void deactivateKeepAwake(tag);
-    };
-  }, [recording]);
+    (async () => {
+      // An SOS raised in a dead zone gets its second chance here.
+      void flushSOSQueue();
+      const { sent } = await flushPendingRides();
+      if (sent > 0) {
+        Alert.alert(
+          'Bekleyen sürüş yüklendi',
+          sent === 1 ? 'Kaydedilemeyen bir sürüşün yüklendi.' : `Kaydedilemeyen ${sent} sürüşün yüklendi.`,
+        );
+      }
+      const orphan = await loadCheckpoint();
+      if (!orphan) return;
+      const km = orphan.distance.toFixed(1);
+      Alert.alert(
+        'Yarım kalan sürüş',
+        `Uygulama kapandığında ${km} km'lik bir sürüş kaydediliyordu. Kaydedilsin mi?`,
+        [
+          { text: 'Sil', style: 'destructive', onPress: () => void clearCheckpoint() },
+          {
+            text: 'Kaydet',
+            onPress: async () => {
+              const res = await saveOrQueueRide(finalizeDraft(orphan));
+              Alert.alert(
+                res.status === 'uploaded' ? '🏁 Sürüş kaydedildi' : 'Sürüş kuyruğa alındı',
+                res.status === 'uploaded'
+                  ? `${km} km kaydedildi.`
+                  : 'İnternet gelince otomatik olarak yüklenecek.',
+              );
+            },
+          },
+        ],
+      );
+    })();
+  }, []);
 
   // Presence loop: heartbeat + refresh nearby riders while sharing is on and the
   // map is focused. Leaving the screen (or turning sharing off) removes us from
@@ -466,9 +497,22 @@ export default function MapScreen({ route, navigation }: Props) {
   // OS-level SMS permissions) and offers a 112 call.
   useCrashDetection(recording, () => setCrashAlarm(true));
 
+  // The alert goes to the server first: that path is recorded, retried when
+  // signal returns, and reaches other riders' phones even when their app is
+  // backgrounded. The SMS composer stays as a follow-up for a contact who
+  // isn't a Morider user — it can't be the mechanism, because it needs someone
+  // conscious to press send.
   async function emergencyProtocol() {
     setCrashAlarm(false);
     const c = lastCoord.current;
+    const res = await raiseSOS({
+      client_id: newSosId(),
+      lat: c?.latitude,
+      lon: c?.longitude,
+      source: 'crash',
+      raised_at: new Date().toISOString(),
+    });
+
     const contact = await getEmergencyContact();
     if (contact) {
       try {
@@ -480,9 +524,12 @@ export default function MapScreen({ route, navigation }: Props) {
     }
     Alert.alert(
       '🚨 Acil durum',
-      contact
-        ? 'SMS hazırlanamadı. 112 aransın mı?'
-        : 'Kayıtlı acil durum kişisi yok (Profil > Acil Durum Kişisi). 112 aransın mı?',
+      (res.status === 'queued'
+        ? 'İnternet yok — bildirim sinyal gelince gönderilecek.\n\n'
+        : 'Acil durum kaydedildi.\n\n') +
+        (contact
+          ? 'SMS hazırlanamadı. 112 aransın mı?'
+          : 'Kayıtlı acil durum kişisi yok (Profil > Acil Durum Kişisi). 112 aransın mı?'),
       [
         { text: '112 Ara', style: 'destructive', onPress: () => call112() },
         { text: 'Vazgeç', style: 'cancel' },
@@ -554,52 +601,31 @@ export default function MapScreen({ route, navigation }: Props) {
   }
 
   async function startRecording() {
-    if (!hasPermission) {
-      Alert.alert('İzin gerekli', 'Sürüş kaydı için konum izni vermelisiniz.');
-      return;
-    }
-    // "Always" permission is what keeps the GPS recording alive when the app is
-    // backgrounded (screen locked or switched away). Without it the ride still
-    // records while the app is open, so we warn rather than block.
-    const bg = await Location.requestBackgroundPermissionsAsync().catch(() => null);
-    if (bg && bg.status !== 'granted') {
-      Alert.alert(
-        'Arka plan konumu kapalı',
-        'Başka bir uygulamaya geçince sürüş kaydı durabilir. Kesintisiz kayıt için konum iznini "Her zaman" yap.',
-      );
-    }
-
-    // Sesli yönlendirme diğer uygulamaların müziğini kesmesin (duck etsin).
-    // Açılışta değil burada: ses oturumu ancak sürüş başlayınca gerekir.
-    configureAudioSession();
-
-    setPath([]);
-    setDistance(0);
-    setSpeed(0);
-    samples.current = [];
-    lastCoord.current = null;
-    startedAt.current = new Date();
-    maxLeanRight.current = 0;
-    maxLeanLeft.current = 0;
-    camPrimed.current = false;
-    setRecording(true);
-    // Zoom/tilt in right away so the start feels like Google Maps navigation.
-    primeChaseCam();
-
-    // Following a saved route → plan turn-by-turn from the rider's *current*
-    // position (best effort; without steps the dashed guide line still shows).
-    // Planning from here, not the route's stored start, means a rider who
-    // begins somewhere else gets a guide that leads them onto the route instead
-    // of pointing back at its original start point.
+    // The recorder owns permissions, the audio session, sampling, pause and
+    // checkpointing. What stays here is what belongs to *this* screen: the
+    // turn-by-turn plan and the chase camera.
+    setNavStep(null);
+    setNavNext(null);
+    setManualNavView(false);
+    setFollowCam(true);
     navSteps.current = null;
     navIdx.current = 0;
     spoken.current = { idx: -1, far: false, near: false };
     reroute.current = newRerouteState();
     progressRef.current = 0;
-    setNavStep(null);
-    setNavNext(null);
-    setManualNavView(false);
-    setFollowCam(true);
+    camPrimed.current = false;
+
+    const ok = await rec.start();
+    if (!ok) return;
+
+    // Zoom/tilt in right away so the start feels like Google Maps navigation.
+    primeChaseCam();
+
+    // Following a saved route → plan turn-by-turn from the rider's *current*
+    // position (best effort; without steps the guide line still shows).
+    // Planning from here, not the route's stored start, means a rider who
+    // begins somewhere else gets a guide that leads them onto the route instead
+    // of pointing back at its original start point.
     if (followPath.length > 1) {
       const routePts = followPath.map((p) => ({ lat: p.latitude, lon: p.longitude }));
       // Pin the ride target now: every later reroute rejoins this geometry,
@@ -622,73 +648,12 @@ export default function MapScreen({ route, navigation }: Props) {
         })
         .catch(() => {});
     }
-
-    // Stream GPS through the background-capable foreground service so the ride
-    // keeps recording when the rider locks the screen or switches apps (the
-    // service keeps the JS process alive, so these callbacks keep firing).
-    setRideLocationHandler(({ lat, lon, speed, heading, altitude, ts }) => {
-      const coord: Coord = { latitude: lat, longitude: lon };
-      if (lastCoord.current) {
-        setDistance((d) => d + haversineKm(lastCoord.current as Coord, coord));
-      }
-      lastCoord.current = coord;
-      setUserCoord(coord);
-      setSpeed(speed);
-      setHeading(heading);
-      setAltitude(altitude);
-      setPath((p) => [...p, coord]);
-      samples.current.push({
-        ...coord,
-        altitude,
-        // RideFix speed is km/h; telemetry stores raw m/s like before.
-        speed: speed / 3.6,
-        ts,
-      });
-      const navigating = updateNavigation({ lat, lon });
-      if (navigating) {
-        maybeReroute({ lat, lon });
-        // Forward-only progress along the guide keeps remaining-km monotonic
-        // even when the geometry passes near itself (out-and-back, figure-8).
-        const { index } = nearestVertexAhead(routePointsRef.current, { lat, lon }, progressRef.current);
-        progressRef.current = index;
-        setRemainingKm(remainingKmFrom(routePointsRef.current, index, { lat, lon }));
-      }
-      // Google-Maps-style chase cam: tilted, zoomed-in, rotated to heading.
-      // Pitch/zoom are set once (camPrimed); later fixes only pan + rotate so
-      // the map doesn't jolt "up" on every point. Suspended while the rider has
-      // panned the map by hand (followCam off). No-op while backgrounded.
-      if (followCamRef.current) {
-        if (!camPrimed.current) {
-          camPrimed.current = true;
-          mapRef.current?.animateCamera(
-            { center: coord, pitch: 55, zoom: 17.5, altitude: 300, ...(heading >= 0 ? { heading } : {}) },
-            { duration: 700 },
-          );
-        } else {
-          mapRef.current?.animateCamera(
-            { center: coord, ...(heading >= 0 ? { heading } : {}) },
-            { duration: 700 },
-          );
-        }
-      }
-    });
-    await startRideLocation({
-      notificationTitle: 'Morider sürüş kaydı',
-      notificationBody: 'Sürüşün kaydediliyor — mesafe, hız ve rota.',
-    });
-    // Screen left while awaiting → don't leave the service running.
-    if (!alive.current) {
-      setRideLocationHandler(null);
-      void stopRideLocation();
-    }
   }
 
   async function stopRecording() {
-    setRideLocationHandler(null);
-    await stopRideLocation();
-    setRecording(false);
+    const summary = await rec.stop();
+
     setViewMode('map');
-    setSpeed(0);
     navSteps.current = null;
     targetPointsRef.current = [];
     progressRef.current = 0;
@@ -701,71 +666,17 @@ export default function MapScreen({ route, navigation }: Props) {
     // Reset the chase cam tilt back to a flat overview.
     mapRef.current?.animateCamera({ pitch: 0, heading: 0 });
 
-    const start = startedAt.current ?? new Date();
-    const end = new Date();
-
-    if (samples.current.length < 2) {
-      Alert.alert('Sürüş çok kısa', 'Kaydetmek için biraz daha sürmelisin.');
+    if (!summary) {
+      // Be explicit that nothing was kept — "ride too short" left it ambiguous
+      // whether a short ride had still been saved somewhere.
+      Alert.alert('Sürüş kaydedilmedi', 'Yeterli konum verisi toplanmadı, bu sürüş kaydedilmedi.');
       return;
     }
 
-    // Total ascent from the recorded altitude track (GPS jitter filtered out by
-    // computeRideStats); this is the elevation gain shown on the rides list.
-    const { ascent } = computeRideStats(
-      samples.current.map((s) => ({
-        lat: s.latitude,
-        lon: s.longitude,
-        altitude: s.altitude,
-        speed: s.speed,
-        ts: s.ts,
-      })),
-    );
-
-    try {
-      setSaving(true);
-      // Top speed (km/h) from the recorded track; GPS reports m/s.
-      const maxSpeed = samples.current.reduce((m, s) => Math.max(m, s.speed * 3.6), 0);
-
-      const { data: ride } = await api.post('/api/rides', {
-        distance,
-        start_time: start.toISOString(),
-        end_time: end.toISOString(),
-        elevation_gain: Math.round(ascent),
-        max_lean_right: Math.round(maxLeanRight.current),
-        max_lean_left: Math.round(maxLeanLeft.current),
-        max_speed: Math.round(maxSpeed),
-      });
-
-      await api.post('/api/telemetry', {
-        points: samples.current.map((s) => ({
-          ride_id: ride.id,
-          lat: s.latitude,
-          lon: s.longitude,
-          altitude: s.altitude,
-          speed: s.speed,
-          ts: s.ts,
-        })),
-      });
-
-      // Match the track against public kapışmalar so a rider who merely passed
-      // through one gets ranked automatically. Only a PR/podium result surfaces
-      // (see kapismaSummary), folded into the save confirmation as one line —
-      // never one alert per segment. Best-effort: matching must not block saving.
-      let kapisma = '';
-      try {
-        const { data } = await api.post(`/api/rides/${ride.id}/segments/match`);
-        kapisma = kapismaSummary(data.efforts ?? []);
-      } catch {
-        // ignore — the ride is already saved
-      }
-
-      const body = `${distance.toFixed(2)} km kaydedildi.` + (kapisma ? `\n\n${kapisma}` : '');
-      Alert.alert('🏁 Sürüş kaydedildi', body);
-    } catch (err) {
-      Alert.alert('Kaydedilemedi', errorMessage(err));
-    } finally {
-      setSaving(false);
-    }
+    // A finished ride goes to its own screen, not into an alert the rider
+    // dismisses in a second.
+    setLastRideSummary(summary);
+    navigation.navigate('RideSummary');
   }
 
   const navigating = recording && (navStep != null || manualNavView);
@@ -837,9 +748,9 @@ export default function MapScreen({ route, navigation }: Props) {
         {/* Google-Maps-style heading arrow (puck) instead of the round dot while
             riding. `flat` makes the rotation map-relative, so the arrow points
             in the true travel direction even as the chase cam rotates the map. */}
-        {recording && userCoord && (
+        {recording && rec.userCoord && (
           <Marker
-            coordinate={userCoord}
+            coordinate={rec.userCoord}
             anchor={{ x: 0.5, y: 0.5 }}
             flat
             rotation={heading >= 0 ? heading : 0}
@@ -864,10 +775,12 @@ export default function MapScreen({ route, navigation }: Props) {
             </View>
           </Marker>
         ))}
-        {/* Active riders sharing their (approximate) location nearby. Blocked
-            riders are hidden client-side — a block doesn't stop them sharing
-            location server-side, it just removes them from our own view. */}
-        {nearby.filter((r) => !isBlocked(r.user_id)).map((r) => (
+        {/* Active riders sharing their location nearby. Blocked riders are
+            hidden client-side — a block doesn't stop them sharing location
+            server-side, it just removes them from our own view. Hidden entirely
+            while navigating: moving pins competing with the route are pure
+            distraction at exactly the moment the rider can least afford it. */}
+        {!navigating && nearby.filter((r) => !isBlocked(r.user_id)).map((r) => (
           <Marker
             key={`rider-${r.user_id}`}
             coordinate={{ latitude: r.lat, longitude: r.lon }}
@@ -916,7 +829,12 @@ export default function MapScreen({ route, navigation }: Props) {
 
           {destination ? (
             <View style={[styles.followRow, { top: insets.top + (recording ? 56 : 64) }]}>
-              <Pressable style={styles.followChip} onPress={clearDestination}>
+              <Pressable
+                style={styles.followChip}
+                onPress={clearDestination}
+                accessibilityRole="button"
+                accessibilityLabel="Hedefe gidiliyor. Hedefi kaldırmak için dokun."
+              >
                 <MaterialCommunityIcons name="flag-checkered" size={16} color={colors.accent} />
                 <Text style={styles.followChipText}>Hedefe gidiliyor</Text>
                 <MaterialCommunityIcons name="close" size={16} color={colors.textMuted} />
@@ -926,7 +844,16 @@ export default function MapScreen({ route, navigation }: Props) {
             <View style={[styles.followRow, { top: insets.top + (recording ? 56 : 64) }]}>
               {/* Direction chip: shows which way the guide runs; tap to flip
                   (disabled mid-ride — the reroute would fight the rider). */}
-              <Pressable style={styles.followChip} onPress={toggleFollowDirection} disabled={recording}>
+              <Pressable
+                style={styles.followChip}
+                onPress={toggleFollowDirection}
+                disabled={recording}
+                accessibilityRole="button"
+                accessibilityLabel={
+                  followReversed ? 'Rota ters yönde. Yönü çevirmek için dokun.' : 'Rota düz yönde. Yönü çevirmek için dokun.'
+                }
+                accessibilityState={{ disabled: recording }}
+              >
                 <MaterialCommunityIcons name="map-marker-path" size={16} color={colors.accent} />
                 <Text style={styles.followChipText}>
                   {followReversed ? 'Rota: B → A (ters)' : 'Rota: A → B'}
@@ -934,7 +861,13 @@ export default function MapScreen({ route, navigation }: Props) {
                 {!recording && <MaterialCommunityIcons name="swap-horizontal" size={16} color={colors.accent} />}
               </Pressable>
               {!recording && (
-                <Pressable style={styles.followClose} onPress={clearFollow} hitSlop={6}>
+                <Pressable
+                  style={styles.followClose}
+                  onPress={clearFollow}
+                  hitSlop={10}
+                  accessibilityRole="button"
+                  accessibilityLabel="Takip edilen rotayı kaldır"
+                >
                   <MaterialCommunityIcons name="close" size={16} color={colors.textMuted} />
                 </Pressable>
               )}
@@ -944,10 +877,20 @@ export default function MapScreen({ route, navigation }: Props) {
           {/* Recording badge — only mid free-ride; idle uses the search bar */}
           {recording && (
             <View style={[styles.badgeWrap, { top: insets.top + spacing.sm }]} pointerEvents="none">
-              <View style={[styles.badge, styles.badgeLive]}>
-                <View style={[styles.dot, { backgroundColor: colors.danger }]} />
-                <Text style={styles.badgeText}>KAYITTA</Text>
+              <View style={[styles.badge, paused ? styles.badgePaused : styles.badgeLive]}>
+                <View
+                  style={[styles.dot, { backgroundColor: paused ? colors.warning : colors.danger }]}
+                />
+                <Text style={styles.badgeText}>
+                  {paused ? (autoPaused ? 'Otomatik duraklatıldı' : 'Duraklatıldı') : 'Kayıtta'}
+                </Text>
               </View>
+              {gpsStale && (
+                <View style={[styles.badge, styles.badgeGps]}>
+                  <MaterialCommunityIcons name="crosshairs-off" size={14} color={colors.warning} />
+                  <Text style={styles.badgeText}>GPS sinyali zayıf</Text>
+                </View>
+              )}
             </View>
           )}
         </>
@@ -958,7 +901,12 @@ export default function MapScreen({ route, navigation }: Props) {
 
       {/* Resume the chase cam after panning the map by hand (navigation only) */}
       {navigating && !followCam && (
-        <Pressable style={[styles.recenterBtn, { bottom: insets.bottom + 110 }]} onPress={recenterChase}>
+        <Pressable
+          style={[styles.recenterBtn, { bottom: insets.bottom + 110 }]}
+          onPress={recenterChase}
+          accessibilityRole="button"
+          accessibilityLabel="Haritayı konumuma geri ortala"
+        >
           <MaterialCommunityIcons name="navigation" size={18} color="#fff" />
           <Text style={styles.recenterText}>Ortala</Text>
         </Pressable>
@@ -966,11 +914,21 @@ export default function MapScreen({ route, navigation }: Props) {
 
       {/* Floating controls (right): dashboard gauges + recenter */}
       <View style={[styles.controls, { bottom: controlsBottom }]} pointerEvents="box-none">
-        <Pressable style={styles.fab} onPress={() => setViewMode('dash')}>
+        <Pressable
+          style={styles.fab}
+          onPress={() => setViewMode('dash')}
+          accessibilityRole="button"
+          accessibilityLabel="Gösterge panelini aç"
+        >
           <MaterialCommunityIcons name="gauge" size={24} color={colors.primary} />
         </Pressable>
         {!navigating && (
-          <Pressable style={styles.fab} onPress={() => (recording ? recenterChase() : centerOnUser(false))}>
+          <Pressable
+            style={styles.fab}
+            onPress={() => (recording ? recenterChase() : centerOnUser(false))}
+            accessibilityRole="button"
+            accessibilityLabel="Konumuma ortala"
+          >
             <MaterialCommunityIcons name="crosshairs-gps" size={24} color={colors.text} />
           </Pressable>
         )}
@@ -989,21 +947,43 @@ export default function MapScreen({ route, navigation }: Props) {
           <View style={styles.stats}>
             <Stat icon="map-marker-distance" label="Mesafe" value={distance.toFixed(2)} unit="km" />
             <View style={styles.statDivider} />
-            <Stat icon="speedometer" label="Hız" value={speed.toFixed(0)} unit="km/s" />
+            {/* `--` rather than a stale number: a frozen speed reading is
+                indistinguishable from standing still. */}
+            <Stat icon="speedometer" label="Hız" value={gpsStale ? '--' : speed.toFixed(0)} unit="km/s" />
             <View style={styles.statDivider} />
-            <Stat icon="angle-acute" label="Yatış" value={`${Math.round(Math.abs(lean))}`} unit="°" />
+            {/* Live lean angle used to sit here. Showing a rider their peak
+                lean *while cornering* rewards looking at the screen mid-corner;
+                it belongs in the post-ride summary, and that is where it is now. */}
+            <Stat icon="timer-outline" label="Süre" value={fmtDuration(rec.movingMs)} unit="" />
           </View>
           {recording && hasRouteToFollow && (
             // Turn-by-turn steps load async and can lag or fail — don't force
             // the switch, but let the rider jump into the chase/nav view
             // themselves instead of being stuck on the plain stats panel.
-            <Pressable style={styles.switchToNavRow} onPress={() => setManualNavView(true)}>
+            <Pressable
+              style={styles.switchToNavRow}
+              onPress={() => setManualNavView(true)}
+              accessibilityRole="button"
+              accessibilityLabel="Navigasyon görünümüne geç"
+            >
               <MaterialCommunityIcons name="navigation-variant" size={16} color={colors.accent} />
               <Text style={styles.switchToNavText}>Navigasyon görünümüne geç</Text>
             </Pressable>
           )}
           {recording ? (
-            <Button title="Sürüşü Bitir" variant="danger" icon="stop-circle" onPress={stopRecording} loading={saving} />
+            <View style={styles.rideActions}>
+              <View style={styles.flex}>
+                <Button
+                  title={paused ? 'Devam Et' : 'Duraklat'}
+                  variant="ghost"
+                  icon={paused ? 'play' : 'pause'}
+                  onPress={() => (paused ? rec.resume() : rec.pause())}
+                />
+              </View>
+              <View style={styles.flex}>
+                <Button title="Sürüşü Bitir" variant="danger" icon="stop-circle" onPress={stopRecording} loading={saving} />
+              </View>
+            </View>
           ) : (
             <>
               {/* TourTarget ids let the onboarding tutorial spotlight these. */}
@@ -1032,8 +1012,8 @@ export default function MapScreen({ route, navigation }: Props) {
           heading={heading}
           altitude={altitude}
           distance={distance}
-          samples={samples.current}
-          startedAt={startedAt.current}
+          samples={rec.samples}
+          startedAt={rec.startedAt}
           recording={recording}
           saving={saving}
           onClose={() => setViewMode('map')}
@@ -1051,8 +1031,13 @@ export default function MapScreen({ route, navigation }: Props) {
         statusBarTranslucent
         onRequestClose={() => setPoiPoint(null)}
       >
-        <Pressable style={styles.poiBackdrop} onPress={() => setPoiPoint(null)}>
-          <Pressable style={styles.poiSheet} onPress={() => {}}>
+        <Pressable
+          style={styles.poiBackdrop}
+          onPress={() => setPoiPoint(null)}
+          accessibilityRole="button"
+          accessibilityLabel="Kapat"
+        >
+          <Pressable style={styles.poiSheet} onPress={() => {}} accessible={false}>
             <Text style={styles.poiTitle}>Mola Noktası Ekle</Text>
             <Text style={styles.poiSub}>
               Motorcu dostu bir yer mi buldun? Herkesin haritasında görünecek.
@@ -1091,8 +1076,13 @@ export default function MapScreen({ route, navigation }: Props) {
         statusBarTranslucent
         onRequestClose={() => setSelectedRider(null)}
       >
-        <Pressable style={styles.poiBackdrop} onPress={() => setSelectedRider(null)}>
-          <Pressable style={styles.riderSheet} onPress={() => {}}>
+        <Pressable
+          style={styles.poiBackdrop}
+          onPress={() => setSelectedRider(null)}
+          accessibilityRole="button"
+          accessibilityLabel="Kapat"
+        >
+          <Pressable style={styles.riderSheet} onPress={() => {}} accessible={false}>
             {selectedRider?.avatar_url ? (
               <Image source={{ uri: apiBaseURL() + selectedRider.avatar_url }} style={styles.riderAvatar} />
             ) : (
@@ -1166,7 +1156,7 @@ export default function MapScreen({ route, navigation }: Props) {
 
 function Stat({ icon, label, value, unit }: { icon: any; label: string; value: string; unit: string }) {
   return (
-    <View style={styles.stat}>
+    <View style={styles.stat} accessibilityRole="text" accessibilityLabel={`${label}: ${value} ${unit}`}>
       <MaterialCommunityIcons name={icon} size={18} color={colors.primary} />
       <Text style={styles.statValue}>
         {value}
@@ -1189,6 +1179,16 @@ const styles = StyleSheet.create({
     ...shadow.card,
   },
   badgeLive: { backgroundColor: 'rgba(255,77,94,0.18)', borderWidth: 1, borderColor: colors.danger },
+  badgePaused: { backgroundColor: 'rgba(255,176,32,0.18)', borderWidth: 1, borderColor: colors.warning },
+  badgeGps: {
+    backgroundColor: 'rgba(255,176,32,0.18)',
+    borderWidth: 1,
+    borderColor: colors.warning,
+    marginTop: spacing.xs,
+    gap: spacing.xs,
+  },
+  rideActions: { flexDirection: 'row', gap: spacing.sm },
+  flex: { flex: 1 },
   badgeIdle: { backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border },
   dot: { width: 8, height: 8, borderRadius: 4, marginRight: spacing.sm },
   badgeText: { color: colors.text, fontWeight: '800', fontSize: 12, letterSpacing: 1 },
@@ -1389,7 +1389,9 @@ const styles = StyleSheet.create({
   },
   stat: { alignItems: 'center', justifyContent: 'center', flex: 1, gap: spacing.xs },
   statDivider: { width: StyleSheet.hairlineWidth, alignSelf: 'stretch', marginVertical: spacing.xs, backgroundColor: colors.border },
-  statValue: { color: colors.text, fontSize: 22, fontWeight: '900' },
+  statValue: { color: colors.text, fontSize: 22, fontWeight: '900', fontVariant: ['tabular-nums'] },
   statUnit: { color: colors.textMuted, fontSize: 12, fontWeight: '700' },
-  statLabel: { color: colors.textMuted, fontSize: 11, textTransform: 'uppercase', letterSpacing: 0.5 },
+  // No textTransform: iOS uppercases locale-independently and mangles Turkish
+  // ("Yatış" → "YATIS"). 13px reads better than 11px at a glance, too.
+  statLabel: { color: colors.textMuted, fontSize: 13, fontWeight: '600', letterSpacing: 0.3 },
 });

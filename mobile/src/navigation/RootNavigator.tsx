@@ -25,6 +25,7 @@ import RouteCreateScreen from '../screens/RouteCreateScreen';
 import RouteDetailScreen from '../screens/RouteDetailScreen';
 import GroupJoinScreen from '../screens/GroupJoinScreen';
 import GroupRideScreen from '../screens/GroupRideScreen';
+import RideSummaryScreen from '../screens/RideSummaryScreen';
 import FeedScreen from '../screens/FeedScreen';
 import CreatePostScreen from '../screens/CreatePostScreen';
 import LocationPickerScreen from '../screens/LocationPickerScreen';
@@ -33,6 +34,8 @@ import UserSearchScreen from '../screens/UserSearchScreen';
 import CommentsScreen from '../screens/CommentsScreen';
 import ProfileScreen from '../screens/ProfileScreen';
 import EditProfileScreen from '../screens/EditProfileScreen';
+import SettingsScreen from '../screens/SettingsScreen';
+import BlockedUsersScreen from '../screens/BlockedUsersScreen';
 import FollowsScreen from '../screens/FollowsScreen';
 import GarageScreen from '../screens/GarageScreen';
 import BikeDetailScreen from '../screens/BikeDetailScreen';
@@ -68,6 +71,9 @@ export type RideStackParams = {
   // `code` arrives via deep link (morider://join/<code>) and auto-joins.
   GroupJoin: { code?: string } | undefined;
   GroupRide: { code: string };
+  // The finished ride is handed over through lib/rideStore, not params: a
+  // track is tens of thousands of points.
+  RideSummary: undefined;
 };
 
 export type FeedStackParams = {
@@ -88,6 +94,8 @@ export type FeedStackParams = {
 export type ProfileStackParams = {
   ProfileMain: undefined;
   EditProfile: undefined;
+  Settings: undefined;
+  BlockedUsers: undefined;
   // Without params: the caller's own follows. With userId: that user's lists
   // (subject to the connection-based visibility rule), opened on `tab`.
   Follows: { userId?: number; name?: string; tab?: 'following' | 'followers' } | undefined;
@@ -180,6 +188,11 @@ function RideNavigator() {
       <RideStack.Screen name="RideMain" component={MapScreen} />
       <RideStack.Screen name="GroupJoin" component={GroupJoinScreen} />
       <RideStack.Screen name="GroupRide" component={GroupRideScreen} />
+      <RideStack.Screen
+        name="RideSummary"
+        component={RideSummaryScreen}
+        options={{ headerShown: true, title: 'Sürüş Özeti', headerBackVisible: false }}
+      />
     </RideStack.Navigator>
   );
 }
@@ -194,7 +207,16 @@ function ProfileNavigator() {
         contentStyle: { backgroundColor: colors.bg },
       }}
     >
-      <ProfileStack.Screen name="ProfileMain" component={ProfileScreen} options={{ title: 'Profil' }} />
+      <ProfileStack.Screen
+        name="ProfileMain"
+        component={ProfileScreen}
+        options={({ navigation }) => ({
+          title: 'Profil',
+          // Settings belong behind a gear, not stacked under the leaderboard at
+          // the bottom of the profile scroll.
+          headerRight: () => <HeaderIconButton icon="cog-outline" onPress={() => navigation.navigate('Settings')} />,
+        })}
+      />
       <ProfileStack.Screen name="EditProfile" component={EditProfileScreen} options={{ title: 'Profili Düzenle' }} />
       <ProfileStack.Screen name="Rides" component={RidesScreen} options={{ title: 'Sürüşlerim' }} />
       <ProfileStack.Screen name="RideDetail" component={RideDetailScreen} options={{ title: 'Sürüş Detayı' }} />
@@ -214,6 +236,12 @@ function ProfileNavigator() {
       <ProfileStack.Screen name="Explore" component={ExploreScreen} options={{ title: 'Keşfet' }} />
       <ProfileStack.Screen name="RouteCreate" component={RouteCreateScreen} options={{ title: 'Yeni Rota' }} />
       <ProfileStack.Screen name="RouteDetail" component={RouteDetailScreen} options={{ title: 'Rota' }} />
+      <ProfileStack.Screen name="Settings" component={SettingsScreen} options={{ title: 'Ayarlar' }} />
+      <ProfileStack.Screen
+        name="BlockedUsers"
+        component={BlockedUsersScreen}
+        options={{ title: 'Engellenen Kullanıcılar' }}
+      />
       <ProfileStack.Screen name="Follows" component={FollowsScreen} options={{ title: 'Takip' }} />
       <ProfileStack.Screen name="UserProfile" component={UserProfileScreen} options={{ title: 'Profil' }} />
       <ProfileStack.Screen name="Garage" component={GarageScreen} options={{ title: 'Garajım' }} />
@@ -521,8 +549,8 @@ const styles = StyleSheet.create({
     borderWidth: 1.5,
     borderColor: colors.bg,
   },
-  tabBadgeText: { color: '#fff', fontWeight: '900', fontSize: 9 },
-  tabLabel: { fontSize: 10.5, fontWeight: '700', color: colors.textMuted, letterSpacing: 0.2 },
+  tabBadgeText: { color: '#fff', fontWeight: '900', fontSize: 12 },
+  tabLabel: { fontSize: 12.5, fontWeight: '700', color: colors.textMuted, letterSpacing: 0.2 },
   tabLabelOn: { color: colors.primary, fontWeight: '900' },
   headerRow: { flexDirection: 'row', alignItems: 'center', paddingRight: spacing.xs },
   headerBtn: { paddingHorizontal: spacing.xs, paddingVertical: spacing.xs, alignItems: 'center', justifyContent: 'center' },

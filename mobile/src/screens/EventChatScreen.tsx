@@ -19,7 +19,7 @@ import { useAuth } from '../store/auth';
 import { api } from '../api/client';
 import { useChatSocket } from '../lib/useChatSocket';
 import { formatTime } from '../lib/datetime';
-import { colors, radius, shadow, spacing } from '../theme';
+import { colors, onAccent, radius, shadow, spacing } from '../theme';
 
 type ChatMsg = { id: number; user_id: number; name: string; body: string; created_at: string };
 type Props = NativeStackScreenProps<EventsStackParams, 'EventChat'>;
@@ -102,8 +102,8 @@ export default function EventChatScreen({ navigation, route }: Props) {
                     <Text style={styles.msgAuthor}>{m.name}</Text>
                   </Pressable>
                 ) : null}
-                <Text style={styles.msgBody}>{m.body}</Text>
-                <Text style={styles.msgTime}>{formatTime(m.created_at)}</Text>
+                <Text style={[styles.msgBody, mine && styles.msgBodyMine]}>{m.body}</Text>
+                <Text style={[styles.msgTime, mine && styles.msgTimeMine]}>{formatTime(m.created_at)}</Text>
               </View>
             </View>
           );
@@ -148,11 +148,15 @@ const styles = StyleSheet.create({
   msgBubble: { maxWidth: '80%', paddingHorizontal: spacing.sm, paddingVertical: 6, borderRadius: radius.md },
   msgBubbleMine: { backgroundColor: colors.primary, borderBottomRightRadius: 2 },
   msgBubbleOther: { backgroundColor: colors.surfaceAlt, borderBottomLeftRadius: 2 },
-  msgAuthor: { color: colors.accent, fontSize: 11, fontWeight: '800', marginBottom: 1 },
+  msgAuthor: { color: colors.accent, fontSize: 12, fontWeight: '800', marginBottom: 1 },
   // paddingRight gives the last glyph room: Android clips text to its measured
   // width and can otherwise cut the final character.
   msgBody: { color: '#fff', fontSize: 15, paddingRight: 3 },
-  msgTime: { color: 'rgba(255,255,255,0.6)', fontSize: 10, alignSelf: 'flex-end', marginTop: 1 },
+  // The outgoing bubble is filled with the brand orange, on which white
+  // text measures 2.9:1. Dark ink on the same fill measures 6.8:1.
+  msgBodyMine: { color: onAccent },
+  msgTime: { color: 'rgba(255,255,255,0.7)', fontSize: 12, alignSelf: 'flex-end', marginTop: 1 },
+  msgTimeMine: { color: 'rgba(11,13,16,0.8)' },
   connBar: { alignItems: 'center', paddingVertical: 3, backgroundColor: colors.surfaceAlt },
   connText: { color: colors.textMuted, fontSize: 12, fontWeight: '700' },
   composer: {

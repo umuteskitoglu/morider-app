@@ -8,7 +8,6 @@ import {
   Pressable,
   ScrollView,
   StyleSheet,
-  Switch,
   Text,
   View,
 } from 'react-native';
@@ -33,10 +32,6 @@ export default function EditProfileScreen({ navigation }: Props) {
   const [bio, setBio] = useState(user?.bio ?? '');
   const [country, setCountry] = useState(user?.country ?? '');
   const [avatarUrl, setAvatarUrl] = useState(user?.avatar_url ?? '');
-  // Privacy: garage and ride summaries are visible on your public profile
-  // unless turned off.
-  const [showGarage, setShowGarage] = useState(user?.show_garage ?? true);
-  const [showRides, setShowRides] = useState(user?.show_rides ?? true);
   const [uploadingAvatar, setUploadingAvatar] = useState(false);
   const [saving, setSaving] = useState(false);
 
@@ -98,8 +93,6 @@ export default function EditProfileScreen({ navigation }: Props) {
       if (username.trim() !== user.username) body.username = username.trim();
       if (bio !== (user.bio ?? '')) body.bio = bio;
       if (country !== (user.country ?? '')) body.country = country;
-      if (showGarage !== (user.show_garage ?? true)) body.show_garage = showGarage;
-      if (showRides !== (user.show_rides ?? true)) body.show_rides = showRides;
 
       if (Object.keys(body).length > 0) {
         const { data } = await api.put(`/api/users/${user.id}`, body);
@@ -108,8 +101,6 @@ export default function EditProfileScreen({ navigation }: Props) {
           username: data.username,
           bio: data.bio,
           country: data.country,
-          show_garage: data.show_garage,
-          show_rides: data.show_rides,
         });
       }
       navigation.goBack();
@@ -171,37 +162,9 @@ export default function EditProfileScreen({ navigation }: Props) {
           <TextField label="Ülke" icon="map-marker" value={country} onChangeText={setCountry} placeholder="Türkiye" maxLength={56} />
         </Card>
 
-        <Text style={styles.sectionLabel}>Gizlilik</Text>
-        <Card>
-          <View style={styles.toggleRow}>
-            <View style={styles.toggleText}>
-              <Text style={styles.toggleTitle}>Garajım profilimde görünsün</Text>
-              <Text style={styles.toggleSub}>
-                Motorlarının adı ve yılı diğer sürücülere gösterilir. Plaka ve belge tarihleri her zaman gizli kalır.
-              </Text>
-            </View>
-            <Switch
-              value={showGarage}
-              onValueChange={setShowGarage}
-              trackColor={{ true: colors.primary, false: colors.border }}
-              thumbColor="#fff"
-            />
-          </View>
-          <View style={[styles.toggleRow, styles.toggleDivider]}>
-            <View style={styles.toggleText}>
-              <Text style={styles.toggleTitle}>Sürüşlerim profilimde görünsün</Text>
-              <Text style={styles.toggleSub}>
-                Sadece özet gösterilir: mesafe, max hız, süre ve tarih. Rotan ve harita izin hiçbir zaman başkalarıyla paylaşılmaz.
-              </Text>
-            </View>
-            <Switch
-              value={showRides}
-              onValueChange={setShowRides}
-              trackColor={{ true: colors.primary, false: colors.border }}
-              thumbColor="#fff"
-            />
-          </View>
-        </Card>
+        {/* The two privacy switches moved to Settings > Gizlilik, next to the
+            live-location one. Splitting three related privacy controls across
+            two screens meant nobody could see them all at once. */}
 
         <Button title="Kaydet" icon="content-save" onPress={save} loading={saving} />
       </ScrollView>
@@ -229,12 +192,6 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   changePhoto: { color: colors.primary, fontWeight: '800', fontSize: 14 },
-  sectionLabel: { color: colors.textMuted, fontWeight: '800', fontSize: 12, letterSpacing: 0.5, textTransform: 'uppercase', marginTop: spacing.sm, marginLeft: spacing.xs },
-  toggleRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.md },
-  toggleDivider: { borderTopWidth: 1, borderTopColor: colors.border, marginTop: spacing.md, paddingTop: spacing.md },
-  toggleText: { flex: 1, gap: 2 },
-  toggleTitle: { color: colors.text, fontWeight: '700', fontSize: 14 },
-  toggleSub: { color: colors.textMuted, fontSize: 12, lineHeight: 16 },
   form: { gap: spacing.xs },
-  counter: { color: colors.textMuted, fontSize: 11, alignSelf: 'flex-end', marginTop: -spacing.sm, marginBottom: spacing.xs },
+  counter: { color: colors.textMuted, fontSize: 12, alignSelf: 'flex-end', marginTop: -spacing.sm, marginBottom: spacing.xs },
 });

@@ -142,7 +142,7 @@ const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: colors.bg },
   content: { padding: spacing.md, gap: spacing.xs, paddingBottom: spacing.xl },
   empty: { flex: 1, minHeight: 400, alignItems: 'center', justifyContent: 'center' },
-  sectionTitle: { color: colors.textMuted, fontWeight: '800', fontSize: 12, letterSpacing: 0.5, textTransform: 'uppercase', marginTop: spacing.md, marginBottom: spacing.xs },
+  sectionTitle: { color: colors.textMuted, fontWeight: '800', fontSize: 12, letterSpacing: 0.5, marginTop: spacing.md, marginBottom: spacing.xs },
   globalCard: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -175,7 +175,7 @@ const styles = StyleSheet.create({
   preview: { color: colors.textMuted, fontSize: 13, marginTop: 2 },
   previewUnread: { color: colors.text, fontWeight: '700' },
   meta: { alignItems: 'flex-end', gap: 4 },
-  time: { color: colors.textMuted, fontSize: 11 },
+  time: { color: colors.textMuted, fontSize: 12 },
   badge: { minWidth: 20, height: 20, borderRadius: 10, paddingHorizontal: 5, backgroundColor: colors.primary, alignItems: 'center', justifyContent: 'center' },
-  badgeText: { color: '#fff', fontWeight: '900', fontSize: 11 },
+  badgeText: { color: '#fff', fontWeight: '900', fontSize: 12 },
 });

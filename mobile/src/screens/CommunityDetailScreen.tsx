@@ -262,7 +262,12 @@ export default function CommunityDetailScreen({ route, navigation }: Props) {
       />
 
       {isAdmin && (
-        <Pressable style={styles.fab} onPress={() => navigation.navigate('CommunityPostCreate', { id })}>
+        <Pressable
+          style={styles.fab}
+          onPress={() => navigation.navigate('CommunityPostCreate', { id })}
+          accessibilityRole="button"
+          accessibilityLabel="Yeni yayın paylaş"
+        >
           <LinearGradient colors={gradients.primary} style={styles.fabInner}>
             <MaterialCommunityIcons name="bullhorn" size={24} color="#fff" />
           </LinearGradient>
@@ -307,7 +312,7 @@ function PostCard({
         </View>
         {post.pinned && <MaterialCommunityIcons name="pin" size={16} color={colors.accent} />}
         {canDelete && (
-          <Pressable onPress={onDelete} hitSlop={8}>
+          <Pressable onPress={onDelete} hitSlop={12} accessibilityRole="button" accessibilityLabel="Yayını sil">
             <MaterialCommunityIcons name="trash-can-outline" size={18} color={colors.textMuted} />
           </Pressable>
         )}
@@ -389,7 +394,15 @@ function PostCard({
       )}
 
       <View style={styles.postActions}>
-        <Pressable style={styles.postAction} onPress={onLike} disabled={!canInteract} hitSlop={6}>
+        <Pressable
+          style={styles.postAction}
+          onPress={onLike}
+          disabled={!canInteract}
+          hitSlop={12}
+          accessibilityRole="button"
+          accessibilityLabel="Beğen"
+          accessibilityState={{ disabled: !canInteract }}
+        >
           <MaterialCommunityIcons
             name={post.liked ? 'heart' : 'heart-outline'}
             size={20}
@@ -397,7 +410,15 @@ function PostCard({
           />
           {post.like_count > 0 && <Text style={styles.postActionText}>{post.like_count}</Text>}
         </Pressable>
-        <Pressable style={styles.postAction} onPress={onComments} disabled={!canInteract} hitSlop={6}>
+        <Pressable
+          style={styles.postAction}
+          onPress={onComments}
+          disabled={!canInteract}
+          hitSlop={12}
+          accessibilityRole="button"
+          accessibilityLabel="Yorumları aç"
+          accessibilityState={{ disabled: !canInteract }}
+        >
           <MaterialCommunityIcons name="comment-outline" size={19} color={colors.textMuted} />
           <Text style={styles.postActionText}>
             {post.comment_count > 0 ? post.comment_count : 'Yorum yap'}
