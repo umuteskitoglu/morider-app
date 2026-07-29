@@ -64,7 +64,15 @@ export function Button({ title, onPress, loading, disabled, variant = 'primary',
 
   return (
     <Animated.View style={{ transform: [{ scale }], opacity: isDisabled ? 0.55 : 1 }}>
-      <Pressable onPress={onPress} disabled={isDisabled} onPressIn={onPressIn} onPressOut={onPressOut}>
+      <Pressable
+        onPress={onPress}
+        disabled={isDisabled}
+        onPressIn={onPressIn}
+        onPressOut={onPressOut}
+        accessibilityRole="button"
+        accessibilityLabel={title}
+        accessibilityState={{ disabled: !!isDisabled, busy: !!loading }}
+      >
         {variant === 'ghost' ? (
           <View style={[base, styles.ghost]}>{content}</View>
         ) : variant === 'glass' ? (
@@ -129,16 +137,25 @@ export function TouchCard({
   children,
   style,
   glass,
+  accessibilityLabel,
 }: {
   onPress: () => void;
   children: React.ReactNode;
   style?: ViewProps['style'];
   glass?: boolean;
+  /** Falls back to the card's own text content when omitted. */
+  accessibilityLabel?: string;
 }) {
   const { scale, onPressIn, onPressOut } = usePressScale(0.98);
   return (
     <Animated.View style={{ transform: [{ scale }] }}>
-      <Pressable onPress={onPress} onPressIn={onPressIn} onPressOut={onPressOut}>
+      <Pressable
+        onPress={onPress}
+        onPressIn={onPressIn}
+        onPressOut={onPressOut}
+        accessibilityRole="button"
+        accessibilityLabel={accessibilityLabel}
+      >
         <View style={[styles.card, glass && styles.cardGlass, style]}>{children}</View>
       </Pressable>
     </Animated.View>
@@ -147,11 +164,27 @@ export function TouchCard({
 
 // EmptyState — the consistent "nothing here yet" panel: an ember-tinted icon
 // halo, a headline and an optional hint line.
-export function EmptyState({ icon, title, hint }: { icon: IconName; title: string; hint?: string }) {
+export function EmptyState({
+  icon,
+  title,
+  hint,
+  compact,
+}: {
+  icon: IconName;
+  title: string;
+  hint?: string;
+  /** Trims the full-screen padding for use inside a Card, where several
+   *  empty sections can stack on one screen. */
+  compact?: boolean;
+}) {
   return (
-    <View style={styles.emptyState}>
-      <View style={styles.emptyHalo}>
-        <MaterialCommunityIcons name={icon} size={40} color={colors.primary} />
+    <View
+      style={[styles.emptyState, compact && styles.emptyStateCompact]}
+      accessibilityRole="text"
+      accessibilityLabel={hint ? `${title}. ${hint}` : title}
+    >
+      <View style={[styles.emptyHalo, compact && styles.emptyHaloCompact]}>
+        <MaterialCommunityIcons name={icon} size={compact ? 26 : 40} color={colors.primary} />
       </View>
       <Text style={styles.emptyTitle}>{title}</Text>
       {hint ? <Text style={styles.emptyHint}>{hint}</Text> : null}
@@ -197,7 +230,13 @@ export function Chip({
     </View>
   );
   return onPress ? (
-    <Pressable onPress={onPress} hitSlop={4}>
+    <Pressable
+      onPress={onPress}
+      hitSlop={10}
+      accessibilityRole="button"
+      accessibilityLabel={label}
+      accessibilityState={{ selected: !!active }}
+    >
       {body}
     </Pressable>
   ) : (
@@ -223,7 +262,16 @@ export function Stars({
         const name = value >= s ? 'star' : value >= s - 0.5 ? 'star-half-full' : 'star-outline';
         const star = <MaterialCommunityIcons name={name} size={size} color={colors.accent} />;
         return onRate ? (
-          <Pressable key={s} onPress={() => onRate(s)} hitSlop={6}>
+          <Pressable
+            key={s}
+            onPress={() => onRate(s)}
+            // 18pt stars in a row need real slop to be tappable at all, let
+            // alone with gloves on.
+            hitSlop={14}
+            accessibilityRole="button"
+            accessibilityLabel={`${s} yıldız ver`}
+            accessibilityState={{ selected: value >= s }}
+          >
             {star}
           </Pressable>
         ) : (
@@ -255,15 +303,18 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: colors.glassBorder,
   },
+  // No textTransform: on iOS RN uppercases locale-independently, so Turkish
+  // labels came out wrong ("Bitir" → "BITIR" instead of "BİTİR") while Android
+  // rendered them correctly. Sentence case is also ~15% faster to read, which
+  // matters for the buttons a rider taps mid-ride.
   buttonText: {
     color: '#fff',
     fontWeight: '900',
     fontSize: 15,
-    letterSpacing: 0.8,
-    textTransform: 'uppercase',
+    letterSpacing: 0.3,
     flexShrink: 1,
   },
-  buttonTextSm: { fontSize: 13, letterSpacing: 0.5 },
+  buttonTextSm: { fontSize: 13, letterSpacing: 0.2 },
   buttonGhostText: { color: colors.text },
   fieldWrap: { marginBottom: spacing.md },
   label: {
@@ -271,8 +322,7 @@ const styles = StyleSheet.create({
     marginBottom: spacing.xs + 2,
     fontSize: 12,
     fontWeight: '800',
-    letterSpacing: 1,
-    textTransform: 'uppercase',
+    letterSpacing: 0.4,
   },
   inputRow: {
     position: 'relative',
@@ -302,6 +352,8 @@ const styles = StyleSheet.create({
   },
   cardGlass: { backgroundColor: colors.glass, borderColor: colors.glassBorder },
   emptyState: { alignItems: 'center', justifyContent: 'center', gap: spacing.sm, paddingVertical: spacing.xxl, paddingHorizontal: spacing.xl },
+  emptyStateCompact: { paddingVertical: spacing.md, paddingHorizontal: 0, gap: spacing.xs },
+  emptyHaloCompact: { width: 52, height: 52, borderRadius: 26, marginBottom: 0 },
   emptyHalo: {
     width: 84,
     height: 84,

@@ -156,7 +156,7 @@ const styles = StyleSheet.create({
   row: { flexDirection: 'row', gap: spacing.xl },
   meta: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
   metaValue: { color: colors.text, fontWeight: '800' },
-  metaLabel: { color: colors.textMuted, fontSize: 11, textTransform: 'uppercase', letterSpacing: 0.5 },
+  metaLabel: { color: colors.textMuted, fontSize: 12, letterSpacing: 0.5 },
   deleteAction: {
     backgroundColor: colors.danger,
     justifyContent: 'center',

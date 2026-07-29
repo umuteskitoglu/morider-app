@@ -17,7 +17,10 @@ export const colors = {
 
   text: '#F4F6F8',
   textMuted: '#8A929E',
-  textFaint: '#586170',
+  // Placeholder / hint text. Kept light enough to clear WCAG AA (4.5:1) on the
+  // surfaceAlt inputs it sits on — the old #586170 measured 2.6:1 and was
+  // effectively invisible in sunlight.
+  textFaint: '#848D9C',
   border: '#252B33',
   borderStrong: '#333C47',
 
@@ -28,15 +31,34 @@ export const colors = {
 
 // Type scale — a single source for font sizes / weights so screens stay in
 // rhythm. RN uses the platform UI font; weights do the heavy lifting.
+//
+// 12 is the floor. Anything smaller is unreadable through a visor in daylight,
+// and Apple's HIG puts 11pt at the absolute limit for incidental text — the
+// screens that reached for 9 and 10 were solving a layout problem by making
+// text disappear.
+//
+// No textTransform anywhere: on iOS React Native uppercases locale-independently
+// and mangles Turkish ("Bitir" → "BITIR"), and all-caps costs ~15% reading
+// speed, which is the wrong trade in an app used at 100 km/h.
 export const type = {
   display: { fontSize: 34, fontWeight: '900' as const, letterSpacing: 0.5 },
   title: { fontSize: 22, fontWeight: '900' as const, letterSpacing: 0.3 },
   heading: { fontSize: 17, fontWeight: '800' as const, letterSpacing: 0.2 },
   body: { fontSize: 15, fontWeight: '500' as const },
-  label: { fontSize: 12, fontWeight: '800' as const, letterSpacing: 1, textTransform: 'uppercase' as const },
-  caption: { fontSize: 12, fontWeight: '600' as const },
+  label: { fontSize: 13, fontWeight: '800' as const, letterSpacing: 0.4 },
+  caption: { fontSize: 13, fontWeight: '600' as const },
+  /** Smallest permitted size: badges, timestamps, tab labels. */
+  micro: { fontSize: 12, fontWeight: '700' as const },
   mono: { fontSize: 15, fontWeight: '800' as const, letterSpacing: 0.5 }, // telemetry numbers
 };
+
+/**
+ * Ink for text and icons sitting on the saturated accent fills (primary,
+ * success, danger, accent). White fails WCAG AA on all four — #FF6A1A gives
+ * 2.9:1, #34D399 gives 2.2:1 — while this lands between 5.9:1 and 8.0:1 and
+ * lets the fills stay as vivid as they are.
+ */
+export const onAccent = '#0B0D10';
 
 // Gradient stops (use with expo-linear-gradient).
 export const gradients = {

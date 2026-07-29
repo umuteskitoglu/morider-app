@@ -492,9 +492,9 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   levelNum: { color: colors.accent, fontSize: 22, fontWeight: '900', lineHeight: 24 },
-  levelNumLabel: { color: colors.textMuted, fontSize: 9, fontWeight: '800', letterSpacing: 1 },
+  levelNumLabel: { color: colors.textMuted, fontSize: 12, fontWeight: '800', letterSpacing: 1 },
   levelTopRow: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 6 },
   levelXp: { color: colors.text, fontWeight: '900', fontSize: 15 },
   seasonXp: { color: colors.textMuted, fontWeight: '700', fontSize: 12 },
-  levelHint: { color: colors.textMuted, fontSize: 11, marginTop: 4 },
+  levelHint: { color: colors.textMuted, fontSize: 12, marginTop: 4 },
 });

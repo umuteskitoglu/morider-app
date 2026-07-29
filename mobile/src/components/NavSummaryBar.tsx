@@ -43,7 +43,13 @@ export function NavSummaryBar({
             {distText} • varış {etaText}
           </Text>
         </View>
-        <Pressable style={styles.stopBtn} onPress={onStop} hitSlop={8}>
+        <Pressable
+          style={styles.stopBtn}
+          onPress={onStop}
+          hitSlop={8}
+          accessibilityRole="button"
+          accessibilityLabel="Sürüşü bitir"
+        >
           <MaterialCommunityIcons name="close" size={26} color="#fff" />
         </Pressable>
       </View>
@@ -57,9 +63,17 @@ export function NavSummaryBar({
  */
 export function SpeedPill({ speed, bottomInset = 0 }: { speed: number; bottomInset?: number }) {
   return (
-    <View style={[styles.speedPill, { bottom: bottomInset + 150 }]}>
-      <Text style={styles.speedValue}>{Math.max(0, Math.round(speed))}</Text>
-      <Text style={styles.speedUnit}>km/s</Text>
+    <View
+      style={[styles.speedPill, { bottom: bottomInset + 150 }]}
+      accessibilityRole="text"
+      accessibilityLabel={`Hız ${Math.max(0, Math.round(speed))} kilometre bölü saat`}
+    >
+      <Text style={styles.speedValue} allowFontScaling={false}>
+        {Math.max(0, Math.round(speed))}
+      </Text>
+      <Text style={styles.speedUnit} allowFontScaling={false}>
+        km/s
+      </Text>
     </View>
   );
 }
@@ -94,14 +108,14 @@ const styles = StyleSheet.create({
   speedPill: {
     position: 'absolute',
     left: spacing.md,
-    width: 60,
-    height: 60,
-    borderRadius: 30,
+    width: 72,
+    height: 72,
+    borderRadius: 36,
     backgroundColor: '#fff',
     alignItems: 'center',
     justifyContent: 'center',
     ...shadow.card,
   },
-  speedValue: { color: '#1a1a1a', fontSize: 22, fontWeight: '900', lineHeight: 24 },
-  speedUnit: { color: '#666', fontSize: 9, fontWeight: '700', letterSpacing: 0.3 },
+  speedValue: { color: '#1a1a1a', fontSize: 30, fontWeight: '900', lineHeight: 32, fontVariant: ['tabular-nums'] },
+  speedUnit: { color: '#5A5A5A', fontSize: 12, fontWeight: '700', letterSpacing: 0.3 },
 });

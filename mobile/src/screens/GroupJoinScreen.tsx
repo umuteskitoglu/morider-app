@@ -136,7 +136,15 @@ export default function GroupJoinScreen({ route, navigation }: Props) {
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>Devam eden sürüşlerim</Text>
           {active.map((s) => (
-            <Pressable key={s.session_id} onPress={() => navigation.navigate('GroupRide', { code: s.code })}>
+            <Pressable
+              key={s.session_id}
+              // replace, like create/join above: with navigate, backing out of a
+              // group ride landed on this screen or the map depending on how you
+              // got in.
+              onPress={() => navigation.replace('GroupRide', { code: s.code })}
+              accessibilityRole="button"
+              accessibilityLabel={`${s.code} kodlu grup sürüşüne dön, ${s.participants} katılımcı${s.is_host ? ', host sensin' : ''}`}
+            >
               <Card style={styles.activeRow}>
                 <View style={styles.activeIcon}>
                   <MaterialCommunityIcons name="motorbike" size={20} color={colors.primary} />
@@ -169,8 +177,12 @@ export default function GroupJoinScreen({ route, navigation }: Props) {
           value={code}
           onChangeText={setCode}
           autoCapitalize="characters"
+          autoCorrect={false}
           placeholder="ABC123"
-          maxLength={6}
+          // Matches codeFromQR's 4–8 range: at 6 an 8-character code could be
+          // scanned but never typed in by hand.
+          maxLength={8}
+          accessibilityLabel="Oturum kodu"
         />
         <Button title="Katıl" icon="login" onPress={() => join(code)} loading={joining} />
         <Button title="QR Kod Okut" variant="ghost" icon="qrcode-scan" onPress={openScanner} />
@@ -187,7 +199,13 @@ export default function GroupJoinScreen({ route, navigation }: Props) {
             <View style={styles.scannerFrame} />
             <Text style={styles.scannerHint}>Davet QR kodunu çerçeveye hizala</Text>
           </View>
-          <Pressable style={styles.scannerClose} onPress={() => setShowScanner(false)} hitSlop={12}>
+          <Pressable
+            style={[styles.scannerClose, { top: insets.top + spacing.sm }]}
+            onPress={() => setShowScanner(false)}
+            hitSlop={12}
+            accessibilityRole="button"
+            accessibilityLabel="Tarayıcıyı kapat"
+          >
             <MaterialCommunityIcons name="close" size={26} color="#fff" />
           </Pressable>
         </View>
@@ -243,7 +261,6 @@ const styles = StyleSheet.create({
   scannerHint: { color: '#fff', fontWeight: '700' },
   scannerClose: {
     position: 'absolute',
-    top: 56,
     right: spacing.lg,
     width: 42,
     height: 42,

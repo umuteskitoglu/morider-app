@@ -31,7 +31,7 @@ import { blockUser } from '../lib/block';
 import { useBlockedUsers } from '../store/blockedUsers';
 import { useChatSocket } from '../lib/useChatSocket';
 import { formatTime } from '../lib/datetime';
-import { colors, radius, shadow, spacing } from '../theme';
+import { colors, onAccent, radius, shadow, spacing } from '../theme';
 
 type Props = NativeStackScreenProps<ChatStackParams, 'ChatThread'>;
 
@@ -79,7 +79,7 @@ export default function ChatThreadScreen({ navigation, route }: Props) {
       title: route.params.name ?? 'Sohbet',
       headerRight: () =>
         userId != null ? (
-          <Pressable onPress={confirmBlock} hitSlop={12} style={{ paddingHorizontal: spacing.sm }}>
+          <Pressable onPress={confirmBlock} hitSlop={12} style={{ paddingHorizontal: spacing.sm }} accessibilityRole="button" accessibilityLabel="Kullanıcıyı engelle">
             <MaterialCommunityIcons name="dots-vertical" size={22} color={colors.text} />
           </Pressable>
         ) : null,
@@ -218,10 +218,10 @@ export default function ChatThreadScreen({ navigation, route }: Props) {
         <View style={styles.requestBar}>
           <Text style={styles.requestText}>Bu bir mesaj isteği. Kabul edersen sohbet başlar.</Text>
           <View style={styles.requestBtns}>
-            <Pressable style={[styles.reqBtn, styles.reqDecline]} onPress={onDecline}>
+            <Pressable style={[styles.reqBtn, styles.reqDecline]} onPress={onDecline} accessibilityRole="button" accessibilityLabel="Mesaj isteğini reddet">
               <Text style={styles.reqDeclineText}>Sil</Text>
             </Pressable>
-            <Pressable style={[styles.reqBtn, styles.reqAccept]} onPress={onAccept}>
+            <Pressable style={[styles.reqBtn, styles.reqAccept]} onPress={onAccept} accessibilityRole="button" accessibilityLabel="Mesaj isteğini kabul et">
               <Text style={styles.reqAcceptText}>Kabul Et</Text>
             </Pressable>
           </View>
@@ -245,14 +245,14 @@ export default function ChatThreadScreen({ navigation, route }: Props) {
           return (
             <View style={[styles.msgRow, mine && styles.msgRowMine]}>
               <View style={[styles.msgBubble, mine ? styles.msgBubbleMine : styles.msgBubbleOther]}>
-                <Text style={styles.msgBody}>{m.body}</Text>
+                <Text style={[styles.msgBody, mine && styles.msgBodyMine]}>{m.body}</Text>
                 {hasLoc && (
-                  <Pressable style={styles.locChip} onPress={() => openLocation(m.lat as number, m.lon as number)}>
+                  <Pressable style={styles.locChip} onPress={() => openLocation(m.lat as number, m.lon as number)} accessibilityRole="button" accessibilityLabel="Paylaşılan konumu haritada aç">
                     <MaterialCommunityIcons name="map-marker" size={16} color={colors.accent} />
                     <Text style={styles.locChipText}>Konumu Gör</Text>
                   </Pressable>
                 )}
-                <Text style={styles.msgTime}>{formatTime(m.created_at)}</Text>
+                <Text style={[styles.msgTime, mine && styles.msgTimeMine]}>{formatTime(m.created_at)}</Text>
               </View>
             </View>
           );
@@ -271,7 +271,7 @@ export default function ChatThreadScreen({ navigation, route }: Props) {
         </View>
       ) : (
         <View style={styles.composer}>
-          <Pressable style={styles.locBtn} onPress={sendLocation} disabled={sendingLoc}>
+          <Pressable style={styles.locBtn} onPress={sendLocation} disabled={sendingLoc} accessibilityRole="button" accessibilityLabel="Konumumu gönder" accessibilityState={{ disabled: sendingLoc }}>
             {sendingLoc ? (
               <ActivityIndicator size="small" color={colors.primary} />
             ) : (
@@ -290,7 +290,14 @@ export default function ChatThreadScreen({ navigation, route }: Props) {
             autoComplete="off"
             spellCheck={false}
           />
-          <Pressable style={[styles.sendBtn, !draft.trim() && styles.sendBtnOff]} onPress={send} disabled={!draft.trim()}>
+          <Pressable
+            style={[styles.sendBtn, !draft.trim() && styles.sendBtnOff]}
+            onPress={send}
+            disabled={!draft.trim()}
+            accessibilityRole="button"
+            accessibilityLabel="Mesajı gönder"
+            accessibilityState={{ disabled: !draft.trim() }}
+          >
             <MaterialCommunityIcons name="send" size={20} color="#fff" style={{ marginLeft: 2 }} />
           </Pressable>
         </View>
@@ -319,7 +326,11 @@ const styles = StyleSheet.create({
   msgBubbleMine: { backgroundColor: colors.primary, borderBottomRightRadius: 2 },
   msgBubbleOther: { backgroundColor: colors.surfaceAlt, borderBottomLeftRadius: 2 },
   msgBody: { color: '#fff', fontSize: 15, paddingRight: 3 },
-  msgTime: { color: 'rgba(255,255,255,0.6)', fontSize: 10, alignSelf: 'flex-end', marginTop: 1 },
+  // The outgoing bubble is filled with the brand orange, on which white
+  // text measures 2.9:1. Dark ink on the same fill measures 6.8:1.
+  msgBodyMine: { color: onAccent },
+  msgTime: { color: 'rgba(255,255,255,0.7)', fontSize: 12, alignSelf: 'flex-end', marginTop: 1 },
+  msgTimeMine: { color: 'rgba(11,13,16,0.8)' },
   locChip: {
     flexDirection: 'row',
     alignItems: 'center',

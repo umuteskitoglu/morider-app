@@ -37,6 +37,7 @@ func Run(cfg config.Config) error {
 		{"/api/telemetry", cfg.TelemetryURL},
 		{"/api/sessions", cfg.TelemetryURL},
 		{"/api/presence", cfg.TelemetryURL},
+		{"/api/sos", cfg.TelemetryURL},
 		{"/api/feed", cfg.FeedURL},
 		{"/api/posts", cfg.FeedURL},
 		{"/api/comments", cfg.FeedURL},

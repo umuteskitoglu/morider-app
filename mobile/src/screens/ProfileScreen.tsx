@@ -2,14 +2,11 @@ import React, { useCallback, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
-  KeyboardAvoidingView,
   Modal,
-  Platform,
   Pressable,
   RefreshControl,
   ScrollView,
   StyleSheet,
-  Switch,
   Text,
   useWindowDimensions,
   View,
@@ -21,11 +18,11 @@ import { LinearGradient } from 'expo-linear-gradient';
 import * as ImagePicker from 'expo-image-picker';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 
-import { Button, Card, TextField } from '../components/ui';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+
+import { Button, Card, EmptyState, SectionTitle } from '../components/ui';
 import { BIKE_LABELS, BIKE_TYPES, bikeLabel, LICENSE_LABELS, LICENSE_TYPES, licenseLabel } from '../lib/rider';
-import { getEmergencyContact, setEmergencyContact } from '../lib/emergency';
 import { PostDetail, DetailPost } from '../components/PostDetail';
-import { replayOnboarding } from '../components/OnboardingTour';
 import { removeFromFeedCache } from './FeedScreen';
 import { AvatarViewer } from '../components/AvatarViewer';
 import { RiderChips } from '../components/RiderChips';
@@ -33,7 +30,6 @@ import { ProgressBar } from '../components/ProgressBar';
 import { LevelInfoButton } from '../components/LevelInfoButton';
 import { tierMeta, RiderLevel } from '../lib/rewards';
 import { useAuth, User } from '../store/auth';
-import { goOffline } from '../lib/presence';
 import { ProfileStackParams } from '../navigation/RootNavigator';
 import { api, apiBaseURL, errorMessage } from '../api/client';
 import { colors, gradients, radius, shadow, spacing } from '../theme';
@@ -52,9 +48,10 @@ type RecapStat = { week_start: string; distance: number; duration_seconds: numbe
 type Recap = { week: RecapStat; prev_week: RecapStat };
 
 export default function ProfileScreen() {
-  const { user, signOut, updateUser } = useAuth();
+  const { user, updateUser } = useAuth();
   const navigation = useNavigation<NativeStackNavigationProp<ProfileStackParams>>();
   const { width } = useWindowDimensions();
+  const insets = useSafeAreaInsets();
   const [uploadingAvatar, setUploadingAvatar] = useState(false);
   const [rewards, setRewards] = useState<Reward[]>([]);
   const [leaders, setLeaders] = useState<LeaderEntry[]>([]);
@@ -75,16 +72,15 @@ export default function ProfileScreen() {
   const [riderLicense, setRiderLicense] = useState('');
   const [riderBike, setRiderBike] = useState('');
   const [savingRider, setSavingRider] = useState(false);
-  const [emergencyPhone, setEmergencyPhone] = useState('');
-  const [editEmergency, setEditEmergency] = useState(false);
-  const [emergencyInput, setEmergencyInput] = useState('');
-  const [savingLoc, setSavingLoc] = useState(false);
 
   const thumb = (width - spacing.md * 2 - spacing.xs * 2) / 3;
   const showcased = rewards.filter((r) => r.showcased);
+  // Cap what the header carries: showcasing everything turned the profile card
+  // into a wall of chips.
+  const SHOWCASE_MAX = 3;
+  const headerBadges = showcased.slice(0, SHOWCASE_MAX);
 
   const load = useCallback(async () => {
-    getEmergencyContact().then(setEmergencyPhone).catch(() => {});
     try {
       // allSettled (not all): one failing endpoint must never blank the rest of
       // the profile. A missing optional section (e.g. recap) just renders empty.
@@ -214,39 +210,20 @@ export default function ProfileScreen() {
     }
   }
 
-  function openEmergencyEdit() {
-    setEmergencyInput(emergencyPhone);
-    setEditEmergency(true);
-  }
-
-  async function saveEmergency() {
-    await setEmergencyContact(emergencyInput);
-    setEmergencyPhone(emergencyInput.trim());
-    setEditEmergency(false);
-  }
-
-  async function toggleLocationSharing(next: boolean) {
-    if (!user || savingLoc) return;
-    try {
-      setSavingLoc(true);
-      await api.put(`/api/users/${user.id}`, { share_live_location: next });
-      await updateUser({ share_live_location: next });
-      // Turning it off should remove us from others' maps right away.
-      if (!next) goOffline();
-    } catch (err) {
-      Alert.alert('Kaydedilemedi', errorMessage(err));
-    } finally {
-      setSavingLoc(false);
-    }
-  }
-
   function openManage() {
     setSelected(showcased.map((r) => r.type));
     setManage(true);
   }
 
   function toggle(type: string) {
-    setSelected((s) => (s.includes(type) ? s.filter((t) => t !== type) : [...s, type]));
+    setSelected((s) => {
+      if (s.includes(type)) return s.filter((t) => t !== type);
+      if (s.length >= SHOWCASE_MAX) {
+        Alert.alert('Sergileme sınırı', `Profilinde en fazla ${SHOWCASE_MAX} rozet gösterebilirsin.`);
+        return s;
+      }
+      return [...s, type];
+    });
   }
 
   async function saveShowcase() {
@@ -271,6 +248,8 @@ export default function ProfileScreen() {
       >
         <LinearGradient colors={gradients.surface} style={styles.profile}>
           <Pressable
+            accessibilityRole="button"
+            accessibilityLabel={user?.avatar_url ? 'Profil fotoğrafını büyüt' : 'Profil fotoğrafı ekle'}
             onPress={() => (user?.avatar_url ? setZoomUri(apiBaseURL() + user.avatar_url) : changeAvatar())}
             disabled={uploadingAvatar}
           >
@@ -281,7 +260,15 @@ export default function ProfileScreen() {
                 <Text style={styles.avatarText}>{user?.name?.charAt(0).toUpperCase() ?? 'M'}</Text>
               </LinearGradient>
             )}
-            <Pressable style={styles.avatarBadge} onPress={changeAvatar} disabled={uploadingAvatar} hitSlop={8}>
+            <Pressable
+              style={styles.avatarBadge}
+              onPress={changeAvatar}
+              disabled={uploadingAvatar}
+              hitSlop={12}
+              accessibilityRole="button"
+              accessibilityLabel="Profil fotoğrafını değiştir"
+              accessibilityState={{ disabled: uploadingAvatar }}
+            >
               {uploadingAvatar ? (
                 <ActivityIndicator size="small" color="#fff" />
               ) : (
@@ -291,10 +278,17 @@ export default function ProfileScreen() {
           </Pressable>
           <Text style={styles.name}>{user?.name}</Text>
           <Text style={styles.username}>@{user?.username || 'kullanıcı_adı'}</Text>
-          <Text style={styles.email}>{user?.email}</Text>
+          {/* Email lives in account settings, not on the profile card: seeing it
+              here is no use to you and reads as "is this public?" */}
           {stats.bio ? <Text style={styles.bio}>{stats.bio}</Text> : null}
 
-          <Pressable style={styles.riderRow} onPress={openRiderEdit} hitSlop={8}>
+          <Pressable
+            style={styles.riderRow}
+            onPress={openRiderEdit}
+            hitSlop={12}
+            accessibilityRole="button"
+            accessibilityLabel="Ehliyet ve motor türünü düzenle"
+          >
             {licenseLabel(user?.license_type) || bikeLabel(user?.bike_type) ? (
               <>
                 <RiderChips licenseType={user?.license_type} bikeType={user?.bike_type} style={styles.riderChipsInline} />
@@ -306,28 +300,48 @@ export default function ProfileScreen() {
           </Pressable>
 
           <View style={styles.statsRow}>
-            <View style={styles.statItem}>
+            <View style={styles.statItem} accessibilityRole="text" accessibilityLabel={`${stats.postCount} gönderi`}>
               <Text style={styles.statNum}>{stats.postCount}</Text>
               <Text style={styles.statLabel}>Gönderi</Text>
             </View>
-            <Pressable style={styles.statItem} onPress={() => navigation.navigate('Follows')} hitSlop={8}>
+            {/* Both counters used to open Follows with no param, so tapping
+                "Takipçi" could land you on the "Takip" tab. */}
+            <Pressable
+              style={styles.statItem}
+              onPress={() => navigation.navigate('Follows', { tab: 'followers' })}
+              hitSlop={8}
+              accessibilityRole="button"
+              accessibilityLabel={`${stats.followerCount} takipçi, listeyi aç`}
+            >
               <Text style={styles.statNum}>{stats.followerCount}</Text>
               <Text style={styles.statLabel}>Takipçi</Text>
             </Pressable>
-            <Pressable style={styles.statItem} onPress={() => navigation.navigate('Follows')} hitSlop={8}>
+            <Pressable
+              style={styles.statItem}
+              onPress={() => navigation.navigate('Follows', { tab: 'following' })}
+              hitSlop={8}
+              accessibilityRole="button"
+              accessibilityLabel={`${stats.followingCount} kişiyi takip ediyorsun, listeyi aç`}
+            >
               <Text style={styles.statNum}>{stats.followingCount}</Text>
               <Text style={styles.statLabel}>Takip</Text>
             </Pressable>
           </View>
 
-          <Pressable style={styles.editBtn} onPress={() => navigation.navigate('EditProfile')} hitSlop={8}>
+          <Pressable
+            style={styles.editBtn}
+            onPress={() => navigation.navigate('EditProfile')}
+            hitSlop={8}
+            accessibilityRole="button"
+            accessibilityLabel="Profili düzenle"
+          >
             <MaterialCommunityIcons name="account-edit" size={16} color={colors.primary} />
             <Text style={styles.editBtnText}>Profili Düzenle</Text>
           </Pressable>
 
-          {showcased.length > 0 && (
+          {headerBadges.length > 0 && (
             <View style={styles.badges}>
-              {showcased.map((r) => {
+              {headerBadges.map((r) => {
                 const tm = tierMeta(r.tier);
                 return (
                   <View key={r.id} style={[styles.chip, { borderColor: tm.color }]}>
@@ -344,7 +358,7 @@ export default function ProfileScreen() {
           <QuickTile icon="history" label="Sürüşlerim" onPress={() => navigation.navigate('Rides')} />
           <QuickTile icon="map-marker-path" label="Rotalarım" onPress={() => navigation.navigate('RoutesList')} />
           <QuickTile icon="garage-variant" label="Garaj" onPress={() => navigation.navigate('Garage')} />
-          <QuickTile icon="trophy-outline" label="Meydan Okuma" onPress={() => navigation.navigate('Challenges')} />
+          <QuickTile icon="trophy-outline" label="Görevler" onPress={() => navigation.navigate('Challenges')} />
         </View>
 
         <SectionTitle icon="chart-box" title="Haftalık Özet" />
@@ -352,19 +366,25 @@ export default function ProfileScreen() {
           {recap && (recap.week.ride_count > 0 || recap.prev_week.ride_count > 0) ? (
             <RecapBody recap={recap} />
           ) : (
-            <Text style={styles.muted}>Bu hafta henüz sürüş kaydın yok. Hadi bir tura çık! 🏍️</Text>
+            <EmptyState compact icon="motorbike" title="Bu hafta sürüş yok" hint="Hadi bir tura çık — özetin burada birikir." />
           )}
         </Card>
 
         <SectionTitle icon="image-multiple" title="Paylaşımlarım" />
         {posts.length === 0 ? (
           <Card>
-            <Text style={styles.muted}>Henüz paylaşım yok. Akış sekmesinden ilk fotoğrafını paylaş! 📸</Text>
+            <EmptyState compact icon="camera-plus-outline" title="Henüz paylaşım yok" hint="Akış sekmesinden ilk fotoğrafını paylaş." />
           </Card>
         ) : (
           <View style={styles.grid}>
             {posts.map((p) => (
-              <Pressable key={p.id} style={[styles.gridItem, { width: thumb, height: thumb }]} onPress={() => setViewer(p)}>
+              <Pressable
+                key={p.id}
+                style={[styles.gridItem, { width: thumb, height: thumb }]}
+                onPress={() => setViewer(p)}
+                accessibilityRole="button"
+                accessibilityLabel="Paylaşımı aç"
+              >
                 <Image source={{ uri: apiBaseURL() + p.photos[0] }} style={styles.gridImg} />
                 {p.photos.length > 1 && (
                   <View style={styles.multi}>
@@ -378,14 +398,10 @@ export default function ProfileScreen() {
 
         {level && (
           <>
-            <View style={styles.sectionRowBetween}>
-              <SectionTitle icon="star-four-points" title="Seviye" />
-              <LevelInfoButton />
-            </View>
+            <SectionTitle icon="star-four-points" title="Seviye" right={<LevelInfoButton />} />
             <Card style={styles.levelCard}>
               <View style={styles.levelBadge}>
                 <Text style={styles.levelNum}>{level.level}</Text>
-                <Text style={styles.levelNumLabel}>SVY</Text>
               </View>
               <View style={styles.flex}>
                 <View style={styles.levelTopRow}>
@@ -404,27 +420,48 @@ export default function ProfileScreen() {
           </>
         )}
 
-        <View style={styles.sectionRowBetween}>
-          <SectionTitle icon="trophy-variant" title="Rozetlerim" />
-          {rewards.length > 0 && (
-            <Pressable onPress={openManage} hitSlop={8}>
-              <Text style={styles.manageLink}>Tüm Rozetler ({rewards.length})</Text>
-            </Pressable>
-          )}
-        </View>
+        <SectionTitle
+          icon="trophy-variant"
+          title="Rozetlerim"
+          right={
+            rewards.length > 0 ? (
+              <Pressable
+                onPress={openManage}
+                hitSlop={12}
+                style={styles.manageLinkWrap}
+                accessibilityRole="button"
+                accessibilityLabel={`Sergilenecek rozetleri seç, ${rewards.length} rozetin var`}
+              >
+                <Text style={styles.manageLink}>Sergilenenleri seç</Text>
+              </Pressable>
+            ) : undefined
+          }
+        />
         <Card>
           {rewards.length === 0 ? (
-            <Text style={styles.muted}>Henüz rozet kazanmadın. İlk sürüşünü yap! 🏍️</Text>
-          ) : showcased.length === 0 ? (
-            <Text style={styles.muted}>Profilinde sergilemek için "Tüm Rozetler"den rozet seç.</Text>
+            <EmptyState compact icon="medal-outline" title="Henüz rozet yok" hint="İlk sürüşünü tamamla, rozetler burada birikmeye başlasın." />
           ) : (
+            // Every earned badge, not just the showcased ones. The old card sat
+            // empty behind an instruction ("go pick some") even when the rider
+            // had a dozen — and repeated the header's chips when they hadn't.
             <View style={styles.chips}>
-              {showcased.map((r) => {
+              {rewards.map((r) => {
                 const tm = tierMeta(r.tier);
                 return (
-                  <View key={r.id} style={[styles.chip, { borderColor: tm.color }]}>
-                    <MaterialCommunityIcons name="medal" size={14} color={tm.color} />
-                    <Text style={styles.chipText}>{r.description || r.type}</Text>
+                  <View
+                    key={r.id}
+                    style={[styles.chip, { borderColor: r.showcased ? tm.color : colors.border }]}
+                    accessibilityRole="text"
+                    accessibilityLabel={`${r.description || r.type}${r.showcased ? ', profilde sergileniyor' : ''}`}
+                  >
+                    <MaterialCommunityIcons
+                      name={r.showcased ? 'star' : 'medal'}
+                      size={14}
+                      color={r.showcased ? tm.color : colors.textMuted}
+                    />
+                    <Text style={[styles.chipText, !r.showcased && { color: colors.textMuted }]}>
+                      {r.description || r.type}
+                    </Text>
                   </View>
                 );
               })}
@@ -442,7 +479,7 @@ export default function ProfileScreen() {
           {(() => {
             if (lbScope === 'season') {
               if (seasonLeaders.length === 0) {
-                return <Text style={styles.muted}>Bu ay henüz XP kazanan yok.</Text>;
+                return <EmptyState compact icon="calendar-star" title="Bu ay henüz kimse XP kazanmadı" hint="İlk sen ol." />;
               }
               return seasonLeaders.map((l, i) => (
                 <SeasonRow
@@ -457,7 +494,17 @@ export default function ProfileScreen() {
             }
             const list = lbScope === 'following' ? following : leaders;
             if (list.length === 0) {
-              return <Text style={styles.muted}>Veri yok.</Text>;
+              // "Veri yok." told the rider nothing and offered no way out; each
+              // scope is empty for a different, actionable reason.
+              return lbScope === 'following' ? (
+                <EmptyState
+                  icon="account-search-outline"
+                  title="Takip ettiğin kimse yok"
+                  hint="Sürücü ara ve takip et, sıralamanız burada yan yana görünsün."
+                />
+              ) : (
+                <EmptyState compact icon="podium" title="Sıralama henüz oluşmadı" hint="Kayıtlı sürüşler biriktikçe burası dolacak." />
+              );
             }
             return list.map((l, i) => (
               <LeaderRow
@@ -472,51 +519,9 @@ export default function ProfileScreen() {
           })()}
         </Card>
 
-        <SectionTitle icon="map-marker-account" title="Konum & Gizlilik" />
-        <Card style={styles.emRow}>
-          <MaterialCommunityIcons name="map-marker-radius" size={22} color={colors.primary} />
-          <View style={styles.flex}>
-            <Text style={styles.emTitle}>Haritada Görün</Text>
-            <Text style={styles.muted}>
-              Açıkken yakındaki sürücüler seni haritada görebilir (konumun yaklaşık gösterilir).
-            </Text>
-          </View>
-          <Switch
-            value={!!user?.share_live_location}
-            onValueChange={toggleLocationSharing}
-            disabled={savingLoc}
-            trackColor={{ false: colors.surfaceAlt, true: colors.primary }}
-            thumbColor="#fff"
-          />
-        </Card>
-
-        <SectionTitle icon="shield-alert-outline" title="Güvenlik" />
-        <Pressable onPress={openEmergencyEdit}>
-          <Card style={styles.emRow}>
-            <MaterialCommunityIcons name="phone-alert" size={22} color={colors.primary} />
-            <View style={styles.flex}>
-              <Text style={styles.emTitle}>Acil Durum Kişisi</Text>
-              <Text style={styles.muted}>
-                {emergencyPhone || 'Kayıtlı değil — kaza algılandığında SMS taslağı için ekle'}
-              </Text>
-            </View>
-            <MaterialCommunityIcons name="chevron-right" size={22} color={colors.textMuted} />
-          </Card>
-        </Pressable>
-
-        <Pressable onPress={replayOnboarding}>
-          <Card style={styles.emRow}>
-            <MaterialCommunityIcons name="compass-outline" size={22} color={colors.primary} />
-            <View style={styles.flex}>
-              <Text style={styles.emTitle}>Uygulama Turu</Text>
-              <Text style={styles.muted}>Ana özellikleri ekran üzerinde adım adım tekrar gör</Text>
-            </View>
-            <MaterialCommunityIcons name="chevron-right" size={22} color={colors.textMuted} />
-          </Card>
-        </Pressable>
-
-        <View style={{ height: spacing.lg }} />
-        <Button title="Çıkış Yap" variant="ghost" icon="logout" onPress={signOut} />
+        {/* Privacy, safety, the app tour, sign-out and account deletion now
+            live in Settings (gear, top right). They were settings sitting in
+            the middle of a content screen, below a leaderboard. */}
       </ScrollView>
 
       <PostDetail
@@ -531,34 +536,15 @@ export default function ProfileScreen() {
 
       <AvatarViewer uri={zoomUri} onClose={() => setZoomUri(null)} />
 
-      {/* Edit emergency contact (device-only; never sent to the backend) */}
-      <Modal visible={editEmergency} animationType="slide" transparent statusBarTranslucent onRequestClose={() => setEditEmergency(false)}>
-        <KeyboardAvoidingView style={styles.flex} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
-          <Pressable style={styles.backdrop} onPress={() => setEditEmergency(false)}>
-            <Pressable style={styles.usernameSheet} onPress={() => {}}>
-              <Text style={styles.sheetTitle}>Acil Durum Kişisi</Text>
-              <Text style={styles.muted}>
-                Kaza algılandığında bu numaraya konumunu içeren SMS taslağı hazırlanır. Numara yalnız bu cihazda saklanır.
-              </Text>
-              <TextField
-                icon="phone"
-                placeholder="+90 5xx xxx xx xx"
-                value={emergencyInput}
-                onChangeText={setEmergencyInput}
-                keyboardType="phone-pad"
-                autoFocus
-              />
-              <View style={{ height: spacing.sm }} />
-              <Button title="Kaydet" icon="content-save" onPress={saveEmergency} />
-            </Pressable>
-          </Pressable>
-        </KeyboardAvoidingView>
-      </Modal>
-
       {/* Edit rider profile (license + bike type) */}
       <Modal visible={editRider} animationType="slide" transparent statusBarTranslucent onRequestClose={() => setEditRider(false)}>
-        <Pressable style={styles.backdrop} onPress={() => setEditRider(false)}>
-          <Pressable style={styles.usernameSheet} onPress={() => {}}>
+        <Pressable
+          style={styles.backdrop}
+          onPress={() => setEditRider(false)}
+          accessibilityRole="button"
+          accessibilityLabel="Kapat"
+        >
+          <Pressable style={styles.usernameSheet} onPress={() => {}} accessible={false}>
             <Text style={styles.sheetTitle}>Sürücü Profili</Text>
             <Text style={styles.muted}>Sana uygun rota ve etkinlik önerileri için kullanılır.</Text>
 
@@ -569,6 +555,9 @@ export default function ProfileScreen() {
                   key={t}
                   style={[styles.pill, riderLicense === t && styles.pillOn]}
                   onPress={() => setRiderLicense((cur) => (cur === t ? '' : t))}
+                  accessibilityRole="radio"
+                  accessibilityLabel={LICENSE_LABELS[t]}
+                  accessibilityState={{ selected: riderLicense === t }}
                 >
                   <Text style={[styles.pillText, riderLicense === t && styles.pillTextOn]}>{LICENSE_LABELS[t]}</Text>
                 </Pressable>
@@ -582,6 +571,9 @@ export default function ProfileScreen() {
                   key={t}
                   style={[styles.pill, riderBike === t && styles.pillOn]}
                   onPress={() => setRiderBike((cur) => (cur === t ? '' : t))}
+                  accessibilityRole="radio"
+                  accessibilityLabel={BIKE_LABELS[t]}
+                  accessibilityState={{ selected: riderBike === t }}
                 >
                   <Text style={[styles.pillText, riderBike === t && styles.pillTextOn]}>{BIKE_LABELS[t]}</Text>
                 </Pressable>
@@ -596,19 +588,36 @@ export default function ProfileScreen() {
 
       {/* Manage showcased badges */}
       <Modal visible={manage} animationType="slide" onRequestClose={() => setManage(false)}>
-        <View style={styles.sheetHeader}>
+        <View style={[styles.sheetHeader, { paddingTop: insets.top + spacing.sm }]}>
           <Text style={styles.sheetTitle}>Rozetleri Sergile</Text>
-          <Pressable onPress={() => setManage(false)} hitSlop={12}>
+          <Pressable
+            onPress={() => setManage(false)}
+            hitSlop={12}
+            accessibilityRole="button"
+            accessibilityLabel="Kapat"
+          >
             <MaterialCommunityIcons name="close" size={24} color={colors.text} />
           </Pressable>
         </View>
-        <ScrollView style={styles.container} contentContainerStyle={styles.manageContent}>
-          <Text style={styles.muted}>Profilinde göstermek istediğin rozetleri seç.</Text>
+        <ScrollView
+          style={styles.container}
+          contentContainerStyle={[styles.manageContent, { paddingBottom: insets.bottom + spacing.lg }]}
+        >
+          <Text style={styles.muted}>
+            Profilinde göstermek istediğin rozetleri seç · {selected.length}/{SHOWCASE_MAX}
+          </Text>
           {rewards.map((r) => {
             const on = selected.includes(r.type);
             const tm = tierMeta(r.tier);
             return (
-              <Pressable key={r.id} style={styles.manageRow} onPress={() => toggle(r.type)}>
+              <Pressable
+                key={r.id}
+                style={styles.manageRow}
+                onPress={() => toggle(r.type)}
+                accessibilityRole="checkbox"
+                accessibilityLabel={r.description || r.type}
+                accessibilityState={{ checked: on }}
+              >
                 <MaterialCommunityIcons name="medal" size={20} color={tm.color} />
                 <View style={styles.flex}>
                   <Text style={styles.manageName}>{r.description || r.type}</Text>
@@ -635,21 +644,19 @@ export default function ProfileScreen() {
 
 const MEDALS = ['#FFD24A', '#C7CEDB', '#E08945'];
 
-function SectionTitle({ icon, title }: { icon: any; title: string }) {
-  return (
-    <View style={styles.sectionRow}>
-      <MaterialCommunityIcons name={icon} size={18} color={colors.primary} />
-      <Text style={styles.section}>{title}</Text>
-    </View>
-  );
-}
-
 // Quick-access tile to a personal collection (history, routes, follows).
 function QuickTile({ icon, label, onPress }: { icon: any; label: string; onPress: () => void }) {
   return (
-    <Pressable style={({ pressed }) => [styles.quickTile, pressed && styles.quickTilePressed]} onPress={onPress}>
+    <Pressable
+      style={({ pressed }) => [styles.quickTile, pressed && styles.quickTilePressed]}
+      onPress={onPress}
+      accessibilityRole="button"
+      accessibilityLabel={label}
+    >
       <MaterialCommunityIcons name={icon} size={24} color={colors.primary} />
-      <Text style={styles.quickLabel} numberOfLines={1} adjustsFontSizeToFit>
+      {/* Two lines instead of adjustsFontSizeToFit: at four tiles across a
+          375pt screen the auto-shrink took long labels down to ~9pt. */}
+      <Text style={styles.quickLabel} numberOfLines={2}>
         {label}
       </Text>
     </Pressable>
@@ -695,7 +702,14 @@ function RecapBody({ recap }: { recap: Recap }) {
 // SegBtn is one option of the leaderboard scope segmented control.
 function SegBtn({ label, active, onPress }: { label: string; active: boolean; onPress: () => void }) {
   return (
-    <Pressable style={[styles.segBtn, active && styles.segBtnOn]} onPress={onPress} hitSlop={4}>
+    <Pressable
+      style={[styles.segBtn, active && styles.segBtnOn]}
+      onPress={onPress}
+      hitSlop={8}
+      accessibilityRole="tab"
+      accessibilityLabel={label}
+      accessibilityState={{ selected: active }}
+    >
       <Text style={[styles.segText, active && styles.segTextOn]}>{label}</Text>
     </Pressable>
   );
@@ -789,12 +803,14 @@ const styles = StyleSheet.create({
   profile: {
     alignItems: 'center',
     paddingVertical: spacing.xl,
-    borderRadius: 22,
+    borderRadius: radius.lg,
     borderWidth: 1,
     borderColor: colors.border,
     ...shadow.card,
   },
-  avatar: { width: 84, height: 84, borderRadius: 42, alignItems: 'center', justifyContent: 'center', marginBottom: spacing.sm, ...shadow.glow },
+  // No shadow.glow: an 18pt orange bloom around the avatar was one more place
+  // the accent colour fired without meaning anything.
+  avatar: { width: 84, height: 84, borderRadius: 42, alignItems: 'center', justifyContent: 'center', marginBottom: spacing.sm, ...shadow.soft },
   avatarText: { color: '#fff', fontSize: 34, fontWeight: '900' },
   avatarBadge: {
     position: 'absolute',
@@ -824,9 +840,8 @@ const styles = StyleSheet.create({
     borderColor: colors.border,
   },
   quickTilePressed: { opacity: 0.7, transform: [{ scale: 0.98 }] },
-  quickLabel: { color: colors.text, fontWeight: '700', fontSize: 12, textAlign: 'center' },
-  username: { color: colors.primary, fontWeight: '700', marginTop: 2 },
-  email: { color: colors.textMuted, marginTop: 2 },
+  quickLabel: { color: colors.text, fontWeight: '700', fontSize: 12, textAlign: 'center', lineHeight: 15 },
+  username: { color: colors.textMuted, fontWeight: '700', fontSize: 14, marginTop: 2 },
   bio: { color: colors.text, textAlign: 'center', marginTop: spacing.sm, paddingHorizontal: spacing.lg, lineHeight: 19 },
   riderRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.xs, marginTop: spacing.sm, flexWrap: 'wrap', justifyContent: 'center' },
   // The shared RiderChips row carries its own top margin; cancel it here since
@@ -837,8 +852,8 @@ const styles = StyleSheet.create({
   pillRow: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.xs, marginTop: spacing.xs },
   pill: {
     paddingHorizontal: spacing.md,
-    paddingVertical: spacing.sm,
-    borderRadius: 999,
+    paddingVertical: spacing.sm + 3,
+    borderRadius: radius.pill,
     borderWidth: 1,
     borderColor: colors.border,
     backgroundColor: colors.surfaceAlt,
@@ -847,8 +862,6 @@ const styles = StyleSheet.create({
   pillText: { color: colors.textMuted, fontWeight: '700', fontSize: 13 },
   pillTextOn: { color: colors.primary },
   flex: { flex: 1 },
-  emRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.md },
-  emTitle: { color: colors.text, fontWeight: '800' },
   backdrop: { flex: 1, backgroundColor: 'rgba(0,0,0,0.55)', justifyContent: 'flex-end' },
   usernameSheet: {
     backgroundColor: colors.surface,
@@ -873,18 +886,16 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: spacing.xs,
     marginTop: spacing.md,
-    paddingVertical: spacing.sm,
+    paddingVertical: spacing.sm + 2,
     paddingHorizontal: spacing.lg,
-    borderRadius: 999,
+    borderRadius: radius.pill,
     borderWidth: 1,
     borderColor: colors.border,
     backgroundColor: colors.surface,
   },
   editBtnText: { color: colors.primary, fontWeight: '800', fontSize: 13 },
   badges: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.xs, justifyContent: 'center', marginTop: spacing.md, paddingHorizontal: spacing.md },
-  sectionRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.xs, marginTop: spacing.md, marginBottom: spacing.xs },
-  sectionRowBetween: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
-  section: { color: colors.text, fontWeight: '800', fontSize: 15, letterSpacing: 0.3 },
+  manageLinkWrap: { paddingVertical: spacing.sm + 2, paddingLeft: spacing.md },
   manageLink: { color: colors.primary, fontWeight: '700', fontSize: 13 },
   muted: { color: colors.textMuted },
   chips: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm },
@@ -897,7 +908,7 @@ const styles = StyleSheet.create({
     borderColor: colors.border,
     paddingHorizontal: spacing.md,
     paddingVertical: spacing.sm,
-    borderRadius: 999,
+    borderRadius: radius.pill,
   },
   chipIcon: { fontSize: 14 },
   chipText: { color: colors.text, fontWeight: '700', fontSize: 13 },
@@ -923,8 +934,8 @@ const styles = StyleSheet.create({
   recapLabel: { color: colors.textMuted, fontSize: 12, fontWeight: '600' },
   recapCompare: { color: colors.textMuted, fontSize: 12, textAlign: 'center', marginTop: spacing.xs },
   // Leaderboard scope toggle.
-  segment: { flexDirection: 'row', backgroundColor: colors.surfaceAlt, borderRadius: 999, padding: 3, borderWidth: 1, borderColor: colors.border },
-  segBtn: { flex: 1, paddingVertical: spacing.sm, alignItems: 'center', borderRadius: 999 },
+  segment: { flexDirection: 'row', backgroundColor: colors.surfaceAlt, borderRadius: radius.pill, padding: 3, borderWidth: 1, borderColor: colors.border },
+  segBtn: { flex: 1, paddingVertical: spacing.sm + 4, alignItems: 'center', borderRadius: radius.pill },
   segBtnOn: { backgroundColor: colors.primary },
   segText: { color: colors.textMuted, fontWeight: '700', fontSize: 13 },
   segTextOn: { color: '#fff' },
@@ -942,7 +953,7 @@ const styles = StyleSheet.create({
   manageContent: { padding: spacing.md, gap: spacing.xs },
   manageRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, paddingVertical: spacing.md, borderBottomWidth: 1, borderBottomColor: colors.border },
   manageIcon: { fontSize: 18 },
-  manageTier: { fontSize: 11, fontWeight: '700', marginTop: 1 },
+  manageTier: { fontSize: 12, fontWeight: '700', marginTop: 1 },
   levelCard: { flexDirection: 'row', alignItems: 'center', gap: spacing.md },
   levelBadge: {
     width: 56,
@@ -954,11 +965,10 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  levelNum: { color: colors.accent, fontSize: 22, fontWeight: '900', lineHeight: 24 },
-  levelNumLabel: { color: colors.textMuted, fontSize: 9, fontWeight: '800', letterSpacing: 1 },
+  levelNum: { color: colors.accent, fontSize: 24, fontWeight: '900', lineHeight: 28 },
   levelTopRow: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 6 },
   levelXp: { color: colors.text, fontWeight: '900', fontSize: 15 },
   seasonXp: { color: colors.textMuted, fontWeight: '700', fontSize: 12 },
-  levelHint: { color: colors.textMuted, fontSize: 11, marginTop: 4 },
+  levelHint: { color: colors.textMuted, fontSize: 12, marginTop: 4 },
   manageName: { color: colors.text, flex: 1, fontWeight: '600' },
 });

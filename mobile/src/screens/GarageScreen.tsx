@@ -142,7 +142,7 @@ const styles = StyleSheet.create({
     paddingVertical: 3,
   },
   chipDot: { width: 7, height: 7, borderRadius: 4 },
-  chipText: { color: colors.text, fontSize: 11, fontWeight: '700' },
+  chipText: { color: colors.text, fontSize: 12, fontWeight: '700' },
   emptyWrap: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: spacing.md, marginTop: spacing.xxl },
   empty: { color: colors.textMuted, textAlign: 'center', lineHeight: 22 },
 });

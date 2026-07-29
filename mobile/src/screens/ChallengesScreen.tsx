@@ -165,7 +165,7 @@ const styles = StyleSheet.create({
   card: { gap: spacing.xs },
   headRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm },
   title: { color: colors.text, fontWeight: '900', fontSize: 15, flex: 1 },
-  window: { color: colors.textMuted, fontSize: 11, fontWeight: '700' },
+  window: { color: colors.textMuted, fontSize: 12, fontWeight: '700' },
   goal: { color: colors.textMuted, fontSize: 12 },
   progressWrap: { marginTop: spacing.xs, gap: 4 },
   progressText: { color: colors.text, fontSize: 12, fontWeight: '700' },

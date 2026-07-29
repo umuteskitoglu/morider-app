@@ -82,8 +82,13 @@ export function CreateChallengeModal({
   return (
     <Modal visible={visible} animationType="slide" transparent statusBarTranslucent onRequestClose={onClose}>
       <KeyboardAvoidingView style={styles.flex} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
-        <Pressable style={styles.backdrop} onPress={onClose}>
-          <Pressable style={styles.sheet} onPress={() => {}}>
+        <Pressable
+          style={styles.backdrop}
+          onPress={onClose}
+          accessibilityRole="button"
+          accessibilityLabel="Kapat"
+        >
+          <Pressable style={styles.sheet} onPress={() => {}} accessible={false}>
             <Text style={styles.sheetTitle}>
               {inviteUserId ? `${inviteName ?? 'Sürücüye'} Meydan Oku` : 'Yeni Meydan Okuma'}
             </Text>
@@ -147,7 +152,6 @@ const styles = StyleSheet.create({
     color: colors.textMuted,
     fontSize: 12,
     fontWeight: '700',
-    textTransform: 'uppercase',
     letterSpacing: 0.5,
     marginTop: spacing.sm,
     marginBottom: spacing.xs,

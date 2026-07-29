@@ -274,8 +274,13 @@ export default function EventCreateScreen({ navigation, route }: Props) {
       </View>
 
       <Modal visible={routePickerOpen} animationType="slide" transparent onRequestClose={() => setRoutePickerOpen(false)}>
-        <Pressable style={styles.modalBackdrop} onPress={() => setRoutePickerOpen(false)}>
-          <Pressable style={styles.sheet} onPress={() => {}}>
+        <Pressable
+          style={styles.modalBackdrop}
+          onPress={() => setRoutePickerOpen(false)}
+          accessibilityRole="button"
+          accessibilityLabel="Kapat"
+        >
+          <Pressable style={styles.sheet} onPress={() => {}} accessible={false}>
             <View style={styles.sheetHandle} />
             <Text style={styles.sheetTitle}>Rota seç</Text>
             <ScrollView style={styles.sheetList}>
@@ -408,8 +413,13 @@ function DateTimeField({
 
       {Platform.OS === 'ios' && (
         <Modal visible={iosOpen} animationType="slide" transparent onRequestClose={() => setIosOpen(false)}>
-          <Pressable style={styles.modalBackdrop} onPress={() => setIosOpen(false)}>
-            <Pressable style={styles.sheet} onPress={() => {}}>
+          <Pressable
+            style={styles.modalBackdrop}
+            onPress={() => setIosOpen(false)}
+            accessibilityRole="button"
+            accessibilityLabel="Kapat"
+          >
+            <Pressable style={styles.sheet} onPress={() => {}} accessible={false}>
               <View style={styles.sheetHandle} />
               <DateTimePicker
                 value={iosTemp}
@@ -458,7 +468,6 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: '700',
     letterSpacing: 0.5,
-    textTransform: 'uppercase',
   },
   selectRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.md },
   selectText: { color: colors.text, fontSize: 16, fontWeight: '600', flex: 1 },

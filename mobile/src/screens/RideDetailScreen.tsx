@@ -38,6 +38,7 @@ import {
 import axios from 'axios';
 
 import { Effort, fmtSeconds, Segment, thin } from '../lib/segments';
+import { createRouteFromTrack, defaultRouteName } from '../lib/routeFromRide';
 import { api, errorMessage } from '../api/client';
 import { colors, radius, shadow, spacing } from '../theme';
 
@@ -87,6 +88,9 @@ export default function RideDetailScreen({ route, navigation }: Props) {
   const [trackPts, setTrackPts] = useState<TrackPoint[]>([]);
   const [efforts, setEfforts] = useState<Effort[]>([]);
   const [creatingSeg, setCreatingSeg] = useState(false);
+  const [askRoute, setAskRoute] = useState(false);
+  const [routeName, setRouteName] = useState('');
+  const [savingRoute, setSavingRoute] = useState(false);
   const [segName, setSegName] = useState('');
   const [savingSeg, setSavingSeg] = useState(false);
   const [segments, setSegments] = useState<{ color: string; coordinates: Coord[] }[]>([]);
@@ -416,10 +420,10 @@ export default function RideDetailScreen({ route, navigation }: Props) {
 
       {coords.length > 1 && (
         <View style={styles.replayBar}>
-          <Pressable style={styles.replayBtn} onPress={toggleReplay}>
+          <Pressable style={styles.replayBtn} onPress={toggleReplay} accessibilityRole="button" accessibilityLabel="Sürüşü haritada oynat veya durdur">
             <MaterialCommunityIcons name={playing ? 'pause' : 'play'} size={22} color={colors.text} />
           </Pressable>
-          <Pressable style={styles.multBtn} onPress={cycleMult}>
+          <Pressable style={styles.multBtn} onPress={cycleMult} accessibilityRole="button" accessibilityLabel={`Oynatma hızı ${mult} kat, değiştir`}>
             <Text style={styles.multText}>{mult}×</Text>
           </Pressable>
         </View>
@@ -511,6 +515,20 @@ export default function RideDetailScreen({ route, navigation }: Props) {
           <View style={{ height: spacing.md }} />
           <Button title="Bu Sürüşten Kapışma Oluştur" variant="ghost" icon="flag-checkered" onPress={() => setCreatingSeg(true)} />
           <View style={{ height: spacing.sm }} />
+          {/* A ride you enjoyed is the best possible route — this is the only
+              way to ever ride it again, or hand it to someone else. */}
+          <Button
+            title="Rota Olarak Kaydet"
+            variant="ghost"
+            icon="map-marker-path"
+            disabled={coords.length < 2}
+            onPress={() => {
+              setRouteName(ride?.title?.trim() || defaultRouteName(new Date(ride?.start_time ?? Date.now())));
+              setSavingRoute(false);
+              setAskRoute(true);
+            }}
+          />
+          <View style={{ height: spacing.sm }} />
           <Button title="Paylaş" variant="ghost" icon="share-variant" onPress={share} />
           <View style={{ height: spacing.sm }} />
           <Button title="Düzenle" variant="ghost" icon="pencil-outline" onPress={openEdit} />
@@ -521,8 +539,13 @@ export default function RideDetailScreen({ route, navigation }: Props) {
 
       <Modal visible={editing} animationType="slide" transparent statusBarTranslucent onRequestClose={() => setEditing(false)}>
         <KeyboardAvoidingView style={styles.flexFill} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
-          <Pressable style={styles.backdrop} onPress={() => setEditing(false)}>
-            <Pressable style={styles.modalSheet} onPress={() => {}}>
+          <Pressable
+            style={styles.backdrop}
+            onPress={() => setEditing(false)}
+            accessibilityRole="button"
+            accessibilityLabel="Kapat"
+          >
+            <Pressable style={styles.modalSheet} onPress={() => {}} accessible={false}>
               <Text style={styles.modalTitle}>Sürüşü Düzenle</Text>
             <TextField label="Başlık" value={editTitle} onChangeText={setEditTitle} placeholder="Sabah turu" />
             <TextField label="Not" value={editNotes} onChangeText={setEditNotes} placeholder="Hava güzeldi…" multiline />
@@ -551,10 +574,50 @@ export default function RideDetailScreen({ route, navigation }: Props) {
         </KeyboardAvoidingView>
       </Modal>
 
+      <Modal visible={askRoute} animationType="slide" transparent statusBarTranslucent onRequestClose={() => setAskRoute(false)}>
+        <Pressable
+          style={styles.backdrop}
+          onPress={() => setAskRoute(false)}
+          accessibilityRole="button"
+          accessibilityLabel="Kapat"
+        >
+          <Pressable style={styles.modalSheet} onPress={() => {}} accessible={false}>
+            <Text style={styles.modalTitle}>Rota Olarak Kaydet</Text>
+            <Text style={styles.muted}>
+              Bu sürüşün izi rotalarına eklenir. Aynı yolu navigasyonla tekrar sürebilir ya da paylaşabilirsin.
+            </Text>
+            <TextField label="Rota adı" icon="map-marker-path" value={routeName} onChangeText={setRouteName} maxLength={80} />
+            <Button
+              title="Kaydet"
+              icon="content-save"
+              loading={savingRoute}
+              disabled={!routeName.trim()}
+              onPress={async () => {
+                setSavingRoute(true);
+                try {
+                  const created = await createRouteFromTrack(routeName, coords);
+                  setAskRoute(false);
+                  Alert.alert('Rota kaydedildi', `${created.name} • ${created.distance.toFixed(1)} km`);
+                } catch (err) {
+                  Alert.alert('Kaydedilemedi', errorMessage(err));
+                } finally {
+                  setSavingRoute(false);
+                }
+              }}
+            />
+          </Pressable>
+        </Pressable>
+      </Modal>
+
       <Modal visible={creatingSeg} animationType="slide" transparent statusBarTranslucent onRequestClose={() => setCreatingSeg(false)}>
         <KeyboardAvoidingView style={styles.flexFill} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
-          <Pressable style={styles.backdrop} onPress={() => setCreatingSeg(false)}>
-            <Pressable style={styles.modalSheet} onPress={() => {}}>
+          <Pressable
+            style={styles.backdrop}
+            onPress={() => setCreatingSeg(false)}
+            accessibilityRole="button"
+            accessibilityLabel="Kapat"
+          >
+            <Pressable style={styles.modalSheet} onPress={() => {}} accessible={false}>
               <Text style={styles.modalTitle}>Kapışma Oluştur</Text>
               <Text style={styles.muted}>
                 Bu sürüşün izinden herkese açık bir kapışma yaratılır. Buradan geçen herkes otomatik sıralanır.
@@ -593,12 +656,12 @@ const styles = StyleSheet.create({
   legend: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, marginTop: spacing.sm },
   legendItem: { flexDirection: 'row', alignItems: 'center', gap: 4 },
   legendDot: { width: 10, height: 10, borderRadius: 5 },
-  legendText: { color: colors.textMuted, fontSize: 11, fontWeight: '700' },
-  legendUnit: { color: colors.textMuted, fontSize: 11, marginLeft: 'auto' },
+  legendText: { color: colors.textMuted, fontSize: 12, fontWeight: '700' },
+  legendUnit: { color: colors.textMuted, fontSize: 12, marginLeft: 'auto' },
   grid: { flexDirection: 'row', flexWrap: 'wrap', marginTop: spacing.md },
   cell: { width: '33.33%', alignItems: 'center', paddingVertical: spacing.sm, gap: 2 },
   cellValue: { color: colors.text, fontSize: 18, fontWeight: '900', fontVariant: ['tabular-nums'] },
-  cellLabel: { color: colors.textMuted, fontSize: 11, fontWeight: '700' },
+  cellLabel: { color: colors.textMuted, fontSize: 12, fontWeight: '700' },
   poiRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.xs, marginTop: spacing.sm },
   muted: { color: colors.textMuted },
   notes: { color: colors.text, marginTop: spacing.sm, lineHeight: 20 },
@@ -615,7 +678,7 @@ const styles = StyleSheet.create({
     borderColor: colors.border,
   },
   modalTitle: { color: colors.text, fontSize: 18, fontWeight: '900', marginBottom: spacing.md },
-  fieldLabel: { color: colors.textMuted, fontSize: 12, fontWeight: '700', textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: spacing.xs },
+  fieldLabel: { color: colors.textMuted, fontSize: 12, fontWeight: '700', letterSpacing: 0.5, marginBottom: spacing.xs },
   motoRow: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm },
   motoPill: { paddingHorizontal: spacing.md, paddingVertical: spacing.sm, borderRadius: radius.pill, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.bgAlt },
   motoPillActive: { borderColor: colors.primary, backgroundColor: 'rgba(255,106,26,0.12)' },
@@ -687,6 +750,6 @@ const styles = StyleSheet.create({
     paddingHorizontal: 6,
     paddingVertical: 1,
   },
-  prBadgeText: { color: colors.bg, fontSize: 10, fontWeight: '900' },
+  prBadgeText: { color: colors.bg, fontSize: 12, fontWeight: '900' },
 });
 

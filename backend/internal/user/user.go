@@ -49,6 +49,9 @@ func registerRoutes(d *server.Deps) {
 	protected.GET("/search", h.searchUsers)
 	protected.POST("/push-token", h.registerPushToken)
 	protected.PUT("/:id", h.update)
+	// "me" rather than "/:id": deleting an account is not something you should
+	// be able to aim at an id, even your own.
+	protected.DELETE("/me", h.deleteAccount)
 
 	f := d.Engine.Group("/api/follows", d.JWT.Middleware())
 	f.GET("/following", h.listFollowing)

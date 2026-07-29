@@ -145,7 +145,6 @@ const styles = StyleSheet.create({
     fontWeight: '800',
     fontSize: 12,
     letterSpacing: 1,
-    textTransform: 'uppercase',
     marginTop: spacing.md,
     marginBottom: spacing.sm,
   },
