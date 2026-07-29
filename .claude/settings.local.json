@@ -40,7 +40,28 @@
       "Bash(exit 0)",
       "Bash(timeout 1 echo noop)",
       "Bash(xargs grep -l \"api\\\\\\\\.get\\\\|api\\\\\\\\.post\\\\|api\\\\\\\\.delete\\\\|api\\\\\\\\.put\")",
-      "PowerShell(Set-Location C:\\\\Projects\\\\morider-app\\\\mobile; $b = npx eas-cli build:list --platform ios --limit 3 --non-interactive --json 2>$null | ConvertFrom-Json; foreach \\($x in $b\\) { \"build $\\($x.appBuildVersion\\) | $\\($x.status\\) | commit $\\($x.gitCommitHash.Substring\\(0,7\\)\\) | $\\($x.createdAt\\)\" })"
+      "PowerShell(Set-Location C:\\\\Projects\\\\morider-app\\\\mobile; $b = npx eas-cli build:list --platform ios --limit 3 --non-interactive --json 2>$null | ConvertFrom-Json; foreach \\($x in $b\\) { \"build $\\($x.appBuildVersion\\) | $\\($x.status\\) | commit $\\($x.gitCommitHash.Substring\\(0,7\\)\\) | $\\($x.createdAt\\)\" })",
+      "Bash(xargs wc -l)",
+      "PowerShell(Set-Location C:\\\\Projects\\\\morider-app\\\\mobile; node node_modules\\\\typescript\\\\bin\\\\tsc --noEmit; \"tsc exit: $LASTEXITCODE\")",
+      "Bash(echo \"go exit: $?\")",
+      "PowerShell(Set-Location C:\\\\Projects\\\\morider-app\\\\mobile; node node_modules\\\\typescript\\\\bin\\\\tsc --noEmit; \"tsc: $LASTEXITCODE\"; Set-Location C:\\\\Projects\\\\morider-app; git status --short)",
+      "PowerShell(Set-Location C:\\\\Projects\\\\morider-app\\\\mobile; node node_modules\\\\typescript\\\\bin\\\\tsc --noEmit; \"tsc: $LASTEXITCODE\")",
+      "Bash(python -)",
+      "PowerShell(Set-Location C:\\\\Projects\\\\morider-app\\\\mobile; node node_modules\\\\typescript\\\\bin\\\\tsc --noEmit 2>&1 | Select-Object -First 30; \"tsc: $LASTEXITCODE\")",
+      "Bash(echo \"backend exit: $?\")",
+      "PowerShell(Set-Location C:\\\\Projects\\\\morider-app\\\\mobile; node node_modules\\\\typescript\\\\bin\\\\tsc --noEmit 2>&1 | Select-Object -First 25; \"tsc: $LASTEXITCODE\")",
+      "Bash(echo \"tsc: $?\")",
+      "Bash(echo \"backend: $?\")",
+      "PowerShell(Set-Location C:\\\\Projects\\\\morider-app\\\\mobile; node node_modules\\\\typescript\\\\bin\\\\tsc --noEmit 2>&1 | Select-Object -First 20; \"tsc: $LASTEXITCODE\")",
+      "Bash(node node_modules/typescript/bin/tsc src/lib/groupCohesion.ts --outDir C:/Users/UMUT~1.ESK/AppData/Local/Temp/claude/cohtest --module esnext --target es2020 --moduleResolution bundler)",
+      "Bash(rm -rf C:/Users/UMUT~1.ESK/AppData/Local/Temp/claude/cohtest)",
+      "Bash(node node_modules/typescript/bin/tsc --noEmit)",
+      "Read(//c/Projects/**)",
+      "Bash(git commit *)",
+      "Bash(git push *)",
+      "Bash(gh pr *)",
+      "PowerShell($c = Get-Command gh -ErrorAction SilentlyContinue; if \\($c\\) { $c.Source; gh --version } else { \"gh bulunamadi\"; Get-ChildItem \"$env:ProgramFiles\\\\GitHub CLI\\\\gh.exe\",\"$env:LOCALAPPDATA\\\\GitHubCLI\\\\gh.exe\" -ErrorAction SilentlyContinue | Select-Object -ExpandProperty FullName })",
+      "Bash(git add *)"
     ]
   }
 }
