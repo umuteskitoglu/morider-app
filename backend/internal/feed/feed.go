@@ -20,6 +20,7 @@ import (
 	authpkg "github.com/morider/backend/pkg/auth"
 	"github.com/morider/backend/pkg/config"
 	"github.com/morider/backend/pkg/httpx"
+	"github.com/morider/backend/pkg/notify"
 )
 
 const (
@@ -34,7 +35,7 @@ func Run(cfg config.Config) error {
 	if err != nil {
 		return err
 	}
-	h := &handler{d: deps, uploadDir: cfg.UploadDir}
+	h := &handler{d: deps, notifier: notify.New(deps.DB, cfg, deps.Log), uploadDir: cfg.UploadDir}
 	if err := os.MkdirAll(h.uploadDir, 0o755); err != nil {
 		return fmt.Errorf("could not create upload dir %q: %w", h.uploadDir, err)
 	}
@@ -65,6 +66,7 @@ func registerRoutes(d *server.Deps, h *handler) {
 
 type handler struct {
 	d         *server.Deps
+	notifier  *notify.Notifier
 	uploadDir string
 }
 
@@ -356,11 +358,17 @@ func (h *handler) like(c *gin.Context) {
 	if !ok {
 		return
 	}
-	if _, err := h.d.DB.Exec(c,
+	tag, err := h.d.DB.Exec(c,
 		`INSERT INTO post_likes (post_id, user_id) VALUES ($1, $2) ON CONFLICT DO NOTHING`,
-		id, authpkg.UserID(c)); err != nil {
+		id, authpkg.UserID(c))
+	if err != nil {
 		httpx.Internal(c, "could not like post")
 		return
+	}
+	// Only a like that did not already exist is news; an unlike/relike cycle is
+	// not, so it folds onto the same row rather than re-announcing itself.
+	if tag.RowsAffected() == 1 {
+		h.notifyPostLike(c, id, authpkg.UserID(c))
 	}
 	h.respondLikeCount(c, id, true)
 }
@@ -492,6 +500,7 @@ func (h *handler) addComment(c *gin.Context) {
 		httpx.Internal(c, "could not add comment")
 		return
 	}
+	h.notifyPostComment(c, id, req.ParentID, cm.UserID, cm.Author, cm.Body)
 	c.JSON(http.StatusCreated, cm)
 }
 

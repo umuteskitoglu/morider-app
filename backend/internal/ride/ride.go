@@ -18,6 +18,7 @@ import (
 	"github.com/morider/backend/pkg/config"
 	"github.com/morider/backend/pkg/events"
 	"github.com/morider/backend/pkg/httpx"
+	"github.com/morider/backend/pkg/notify"
 )
 
 // Run boots the ride service.
@@ -26,7 +27,7 @@ func Run(cfg config.Config) error {
 	if err != nil {
 		return err
 	}
-	h := &handler{d: deps}
+	h := &handler{d: deps, notifier: notify.New(deps.DB, cfg, deps.Log)}
 
 	// NATS is optional: rides are still recorded without it, only the
 	// ride.completed event (which drives reward badges) is skipped.
@@ -63,6 +64,10 @@ const maxTrackPoints = 5000
 type handler struct {
 	d    *server.Deps
 	nats *nats.Conn
+	// Only used to tell a rider their kapışma record was taken. Deliberately
+	// detached (notify.To never blocks): segment matching runs on the ride-save
+	// path and must not wait on a push.
+	notifier *notify.Notifier
 }
 
 // Ride is the API representation of a recorded trip.

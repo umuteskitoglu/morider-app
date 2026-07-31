@@ -9,6 +9,7 @@ import (
 
 	authpkg "github.com/morider/backend/pkg/auth"
 	"github.com/morider/backend/pkg/httpx"
+	"github.com/morider/backend/pkg/notify"
 )
 
 // followUser is a follower / followee counterparty. Following reports whether
@@ -176,11 +177,25 @@ func (h *handler) follow(c *gin.Context) {
 		return
 	}
 
-	if _, err := h.d.DB.Exec(c,
+	// RETURNING reports whether this actually created the edge. Without it a
+	// client retry (or a double tap) would re-notify on a follow that already
+	// existed.
+	tag, err := h.d.DB.Exec(c,
 		`INSERT INTO follows (follower_id, followee_id) VALUES ($1, $2) ON CONFLICT DO NOTHING`,
-		me, target); err != nil {
+		me, target)
+	if err != nil {
 		httpx.Internal(c, "could not follow user")
 		return
+	}
+	if tag.RowsAffected() == 1 {
+		h.notifier.To(target, notify.Event{
+			Kind:    notify.KindFollow,
+			ActorID: me,
+			// The follower's own id: a tap opens their profile.
+			EntityID: me,
+			Title:    "Yeni takipçi",
+			Body:     h.notifier.UserName(c, me) + " seni takip etmeye başladı",
+		})
 	}
 	c.JSON(http.StatusOK, gin.H{"following": true})
 }

@@ -17,6 +17,7 @@ import (
 	authpkg "github.com/morider/backend/pkg/auth"
 	"github.com/morider/backend/pkg/events"
 	"github.com/morider/backend/pkg/httpx"
+	"github.com/morider/backend/pkg/notify"
 )
 
 // Segments: rider-defined stretches of road and the timed efforts riders post on
@@ -521,6 +522,17 @@ func (h *handler) matchRideSegments(c *gin.Context) {
 			`SELECT COALESCE(MIN(elapsed_seconds), 0) FROM segment_efforts WHERE segment_id = $1 AND user_id = $2`,
 			seg.ID, userID).Scan(&prevBest)
 
+		// Who holds the record right now, so we can tell them if this effort
+		// takes it. Must be read before the insert below, which would otherwise
+		// make the caller their own predecessor.
+		var prevLeaderID int64
+		var prevLeaderBest float64
+		_ = h.d.DB.QueryRow(c,
+			`SELECT user_id, MIN(elapsed_seconds) FROM segment_efforts
+			 WHERE segment_id = $1 AND user_id <> $2
+			 GROUP BY user_id ORDER BY 2 ASC LIMIT 1`,
+			seg.ID, userID).Scan(&prevLeaderID, &prevLeaderBest)
+
 		if _, err := h.d.DB.Exec(c,
 			`INSERT INTO segment_efforts (segment_id, ride_id, user_id, elapsed_seconds, avg_speed, started_at)
 			 VALUES ($1, $2, $3, $4, $5, $6)
@@ -544,10 +556,24 @@ func (h *handler) matchRideSegments(c *gin.Context) {
 			 FROM bests me WHERE me.user_id = $2`,
 			seg.ID, userID).Scan(&riderCount, &rank)
 
+		isPR := prevBest == 0 || elapsed < prevBest
+		// Tell the rider who just lost the record. Gated on isPR so a re-run of
+		// this endpoint stays silent: the effort insert is an upsert, so on a
+		// second pass prevBest already equals elapsed and isPR is false.
+		if isPR && rank == 1 && prevLeaderID != 0 && elapsed < prevLeaderBest {
+			h.notifier.To(prevLeaderID, notify.Event{
+				Kind:     notify.KindSegmentKOM,
+				ActorID:  userID,
+				EntityID: seg.ID,
+				Title:    "Rekorun geçildi",
+				Body:     h.notifier.UserName(c, userID) + " \"" + seg.Name + "\" kapışmasındaki rekorunu kırdı",
+			})
+		}
+
 		efforts = append(efforts, Effort{
 			SegmentID: seg.ID, SegmentName: seg.Name, RideID: rideID,
 			ElapsedSeconds: elapsed, AvgSpeed: avgSpeed,
-			IsPR:       prevBest == 0 || elapsed < prevBest,
+			IsPR:       isPR,
 			Rank:       rank,
 			RiderCount: riderCount,
 		})

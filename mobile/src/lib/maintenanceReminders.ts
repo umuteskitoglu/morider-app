@@ -115,7 +115,8 @@ export async function syncMaintenanceReminders(
         content: {
           title: 'Morider Bakım',
           body: r.body,
-          data: { bikeId, itemId: r.itemId },
+          // `type` routes the tap through lib/notificationRoute, same as a push.
+          data: { type: 'maintenance_reminder', bikeId, itemId: r.itemId },
         },
         trigger: {
           type: N.SchedulableTriggerInputTypes.DATE,

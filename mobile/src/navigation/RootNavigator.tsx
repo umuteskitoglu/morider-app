@@ -9,8 +9,12 @@ import { MaterialCommunityIcons } from '@expo/vector-icons';
 
 import { useAuth } from '../store/auth';
 import { useChatUnread } from '../store/chatUnread';
-import { registerForPush } from '../lib/push';
+import { useNotifications } from '../store/notifications';
+import { installPushHandlers, registerForPush } from '../lib/push';
+import { flushPendingRoute, installLocalNotificationHandler } from '../lib/notificationRoute';
+import InAppBanner, { showBanner } from '../components/InAppBanner';
 import OnboardingTour from '../components/OnboardingTour';
+import NotificationBell from '../components/NotificationBell';
 import { registerTourNode } from '../components/TourTarget';
 import { navigationRef } from './navigationRef';
 import { colors, gradients, radius, shadow, spacing } from '../theme';
@@ -32,6 +36,7 @@ import LocationPickerScreen from '../screens/LocationPickerScreen';
 import UserProfileScreen from '../screens/UserProfileScreen';
 import UserSearchScreen from '../screens/UserSearchScreen';
 import CommentsScreen from '../screens/CommentsScreen';
+import NotificationsScreen from '../screens/NotificationsScreen';
 import ProfileScreen from '../screens/ProfileScreen';
 import EditProfileScreen from '../screens/EditProfileScreen';
 import SettingsScreen from '../screens/SettingsScreen';
@@ -87,6 +92,7 @@ export type FeedStackParams = {
   // Without params: the caller's own follows. With userId: that user's lists
   // (subject to the connection-based visibility rule), opened on `tab`.
   Follows: { userId?: number; name?: string; tab?: 'following' | 'followers' } | undefined;
+  Notifications: undefined;
 };
 
 // "You" hub: account plus everything that belongs to the rider — ride history,
@@ -112,6 +118,7 @@ export type ProfileStackParams = {
   SegmentDetail: { id: number; name: string };
   Challenges: undefined;
   ChallengeDetail: { id: number; name: string };
+  Notifications: undefined;
 };
 
 export type EventsStackParams = {
@@ -123,6 +130,7 @@ export type EventsStackParams = {
   // Picked location is delivered via the eventDraft store, not params, so both
   // start and end survive the create screen remounting during the round-trip.
   EventLocationPicker: { target: 'start' | 'end' };
+  Notifications: undefined;
 };
 
 // Community + private messaging. Global is the single community room; the DM
@@ -141,11 +149,14 @@ export type ChatStackParams = {
   CommunityMembers: { id: number; myRole: string };
   CommunityPostCreate: { id: number };
   CommunityComments: { postId: number };
+  Notifications: undefined;
 };
 
 export type AppTabParams = {
   Ride: NavigatorScreenParams<RideStackParams> | undefined;
-  Feed: undefined;
+  // Nested params rather than undefined: a tapped like/comment notification
+  // routes straight to Feed → Comments from outside React.
+  Feed: NavigatorScreenParams<FeedStackParams> | undefined;
   Events: NavigatorScreenParams<EventsStackParams> | undefined;
   Chat: NavigatorScreenParams<ChatStackParams> | undefined;
   Profile: NavigatorScreenParams<ProfileStackParams> | undefined;
@@ -214,7 +225,12 @@ function ProfileNavigator() {
           title: 'Profil',
           // Settings belong behind a gear, not stacked under the leaderboard at
           // the bottom of the profile scroll.
-          headerRight: () => <HeaderIconButton icon="cog-outline" onPress={() => navigation.navigate('Settings')} />,
+          headerRight: () => (
+            <View style={styles.headerRow}>
+              <NotificationBell onPress={() => navigation.navigate('Notifications')} />
+              <HeaderIconButton icon="cog-outline" onPress={() => navigation.navigate('Settings')} />
+            </View>
+          ),
         })}
       />
       <ProfileStack.Screen name="EditProfile" component={EditProfileScreen} options={{ title: 'Profili Düzenle' }} />
@@ -250,6 +266,7 @@ function ProfileNavigator() {
       <ProfileStack.Screen name="SegmentDetail" component={SegmentDetailScreen} options={{ title: 'Kapışma' }} />
       <ProfileStack.Screen name="Challenges" component={ChallengesScreen} options={{ title: 'Meydan Okumalar' }} />
       <ProfileStack.Screen name="ChallengeDetail" component={ChallengeDetailScreen} options={{ title: 'Meydan Okuma' }} />
+      <ProfileStack.Screen name="Notifications" component={NotificationsScreen} options={{ title: 'Bildirimler' }} />
     </ProfileStack.Navigator>
   );
 }
@@ -264,11 +281,19 @@ function EventsNavigator() {
         contentStyle: { backgroundColor: colors.bg },
       }}
     >
-      <EventsStack.Screen name="EventsList" component={EventsScreen} options={{ title: 'Etkinlikler' }} />
+      <EventsStack.Screen
+        name="EventsList"
+        component={EventsScreen}
+        options={({ navigation }) => ({
+          title: 'Etkinlikler',
+          headerRight: () => <NotificationBell onPress={() => navigation.navigate('Notifications')} />,
+        })}
+      />
       <EventsStack.Screen name="EventCreate" component={EventCreateScreen} options={{ title: 'Yeni Etkinlik' }} />
       <EventsStack.Screen name="EventDetail" component={EventDetailScreen} options={{ title: 'Etkinlik' }} />
       <EventsStack.Screen name="EventChat" component={EventChatScreen} options={{ title: 'Sohbet' }} />
       <EventsStack.Screen name="EventLocationPicker" component={EventLocationPickerScreen} options={{ title: 'Konum Seç' }} />
+      <EventsStack.Screen name="Notifications" component={NotificationsScreen} options={{ title: 'Bildirimler' }} />
     </EventsStack.Navigator>
   );
 }
@@ -283,7 +308,14 @@ function ChatNavigator() {
         contentStyle: { backgroundColor: colors.bg },
       }}
     >
-      <ChatStack.Screen name="Conversations" component={ConversationsScreen} options={{ title: 'Mesajlar' }} />
+      <ChatStack.Screen
+        name="Conversations"
+        component={ConversationsScreen}
+        options={({ navigation }) => ({
+          title: 'Mesajlar',
+          headerRight: () => <NotificationBell onPress={() => navigation.navigate('Notifications')} />,
+        })}
+      />
       <ChatStack.Screen name="GlobalChat" component={GlobalChatScreen} options={{ title: 'Topluluk Sohbeti' }} />
       <ChatStack.Screen name="ChatThread" component={ChatThreadScreen} options={{ title: 'Sohbet' }} />
       <ChatStack.Screen name="Communities" component={CommunitiesScreen} options={{ title: 'Topluluklar' }} />
@@ -296,6 +328,7 @@ function ChatNavigator() {
       <ChatStack.Screen name="CommunityMembers" component={CommunityMembersScreen} options={{ title: 'Üyeler' }} />
       <ChatStack.Screen name="CommunityPostCreate" component={CommunityPostCreateScreen} options={{ title: 'Yeni Yayın' }} />
       <ChatStack.Screen name="CommunityComments" component={CommunityCommentsScreen} options={{ title: 'Yorumlar' }} />
+      <ChatStack.Screen name="Notifications" component={NotificationsScreen} options={{ title: 'Bildirimler' }} />
     </ChatStack.Navigator>
   );
 }
@@ -318,6 +351,7 @@ function FeedNavigator() {
       <FeedStack.Screen name="RouteDetail" component={RouteDetailScreen} options={{ title: 'Rota' }} />
       <FeedStack.Screen name="Follows" component={FollowsScreen} options={{ title: 'Takip' }} />
       <FeedStack.Screen name="Comments" component={CommentsScreen} options={{ title: 'Yorumlar' }} />
+      <FeedStack.Screen name="Notifications" component={NotificationsScreen} options={{ title: 'Bildirimler' }} />
     </FeedStack.Navigator>
   );
 }
@@ -482,11 +516,28 @@ function AuthFlow() {
 
 export default function RootNavigator() {
   const { token, loading } = useAuth();
+  const { refresh: refreshChatUnread } = useChatUnread();
+  const { bumpUnread } = useNotifications();
 
-  // Register this device for push once the rider is signed in (best effort).
+  // Register this device for push once the rider is signed in, and wire tapped
+  // notifications to the screens they are about (best effort).
   useEffect(() => {
-    if (token) registerForPush();
-  }, [token]);
+    if (!token) return;
+    registerForPush();
+    const off = installPushHandlers((data, title, body) => {
+      showBanner(title, body, data);
+      if (data?.type === 'dm') refreshChatUnread();
+      else bumpUnread();
+    });
+    const offLocal = installLocalNotificationHandler();
+    // A push tapped on a cold start is handled before the container mounts, so
+    // its route waits in a queue; flush it now that we are past hydration.
+    flushPendingRoute();
+    return () => {
+      off();
+      offLocal();
+    };
+  }, [token, refreshChatUnread, bumpUnread]);
 
   if (loading) {
     return (
@@ -497,10 +548,13 @@ export default function RootNavigator() {
   }
 
   return (
-    <NavigationContainer ref={navigationRef} theme={navTheme} linking={linking}>
+    <NavigationContainer ref={navigationRef} theme={navTheme} linking={linking} onReady={flushPendingRoute}>
       {token ? (
         <>
           <AppTabs />
+          {/* Draws pushes that arrive while the app is open, where the OS shows
+              nothing. Signed-in only — there is nothing to receive otherwise. */}
+          <InAppBanner />
           {/* First-run spotlight tutorial; self-hides once the rider has seen it. */}
           <OnboardingTour />
         </>

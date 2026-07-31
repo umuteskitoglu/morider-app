@@ -10,4 +10,16 @@ import './src/lib/backgroundLocation';
 // once at startup, before the app renders.
 registerGlobals();
 
+// FCM requires a background handler to be registered outside of any React
+// component, or it warns and drops data-only messages that arrive while the app
+// is killed. It deliberately does nothing: there is no UI in this context, and a
+// tap is handled by getInitialNotification on the next launch (see lib/push).
+try {
+  // eslint-disable-next-line @typescript-eslint/no-var-requires
+  const messaging = require('@react-native-firebase/messaging').default;
+  messaging().setBackgroundMessageHandler(async () => {});
+} catch {
+  // Native module absent (Expo Go / web sandbox) — nothing to register.
+}
+
 registerRootComponent(App);

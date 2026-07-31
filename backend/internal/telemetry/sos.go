@@ -10,7 +10,7 @@ import (
 
 	authpkg "github.com/morider/backend/pkg/auth"
 	"github.com/morider/backend/pkg/httpx"
-	"github.com/morider/backend/pkg/push"
+	"github.com/morider/backend/pkg/notify"
 )
 
 // SOS delivery.
@@ -167,34 +167,32 @@ func (h *handler) notifySOS(
 	sessionID *int64,
 	lat, lon *float64,
 ) int {
-	if h.push == nil || sessionID == nil {
+	if h.notifier == nil || sessionID == nil {
 		// Solo riders have no in-app audience. Recording the event is all this
 		// endpoint can do for them until an SMS provider exists.
 		return 0
 	}
 
 	rows, err := h.d.DB.Query(ctx,
-		`SELECT t.token FROM push_tokens t
-		 JOIN session_participants p ON p.user_id = t.user_id
-		 WHERE p.session_id = $1 AND p.user_id <> $2`,
+		`SELECT user_id FROM session_participants WHERE session_id = $1 AND user_id <> $2`,
 		*sessionID, userID)
 	if err != nil {
 		return 0
 	}
 	defer rows.Close()
-	var tokens []string
+	var responders []int64
 	for rows.Next() {
-		var tok string
-		if err := rows.Scan(&tok); err == nil && tok != "" {
-			tokens = append(tokens, tok)
+		var id int64
+		if err := rows.Scan(&id); err == nil && id != 0 {
+			responders = append(responders, id)
 		}
 	}
-	if len(tokens) == 0 {
+	if len(responders) == 0 {
 		return 0
 	}
 
 	body := name + " kaza yapmış olabilir!"
-	data := map[string]any{"type": "sos", "sos_id": sosID, "user_id": userID}
+	data := map[string]any{"sos_id": sosID, "user_id": userID}
 	if lat != nil && lon != nil {
 		body += fmt.Sprintf(" Konum: %.5f, %.5f", *lat, *lon)
 		data["lat"] = *lat
@@ -203,18 +201,19 @@ func (h *handler) notifySOS(
 		body += " (Konum alınamadı.)"
 	}
 
-	// Fire and forget with its own context: the caller's request context is
-	// cancelled the moment we respond, and this must not be cut short.
-	go func() {
-		sendCtx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
-		defer cancel()
-		_ = h.push.SendToTokens(sendCtx, tokens, push.Notification{
-			Title: "🚨 ACİL DURUM",
-			Body:  body,
-			Data:  data,
-		})
-	}()
-	return len(tokens)
+	// Deliver writes the rows synchronously (so the count below is real) and
+	// detaches the send itself, so responding to the rider is never held up by
+	// FCM. IgnoreBlocks: a social block is a preference, not a reason to
+	// withhold a crash alert from someone riding right next to them.
+	return h.notifier.Deliver(ctx, responders, notify.Event{
+		Kind:         notify.KindSOS,
+		ActorID:      userID,
+		EntityID:     sosID,
+		Title:        "🚨 ACİL DURUM",
+		Body:         body,
+		Data:         data,
+		IgnoreBlocks: true,
+	})
 }
 
 func valueOr(p *float64, fallback float64) float64 {

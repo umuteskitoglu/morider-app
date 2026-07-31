@@ -17,6 +17,7 @@ import (
 	authpkg "github.com/morider/backend/pkg/auth"
 	"github.com/morider/backend/pkg/config"
 	"github.com/morider/backend/pkg/httpx"
+	"github.com/morider/backend/pkg/notify"
 )
 
 // usernamePattern bounds a @username to a safe, predictable charset/length.
@@ -37,17 +38,23 @@ func Run(cfg config.Config) error {
 	if err != nil {
 		return err
 	}
-	registerRoutes(deps)
+	notifier := notify.New(deps.DB, cfg, deps.Log)
+	// The user service owns the notification read API, so it also owns the
+	// retention sweep. Exactly one service must run it.
+	notifier.StartPruner(context.Background())
+
+	registerRoutes(deps, notifier)
 	return deps.Run(config.ResolvePort("USER_PORT", "8082"))
 }
 
-func registerRoutes(d *server.Deps) {
-	h := &handler{d: d}
+func registerRoutes(d *server.Deps, notifier *notify.Notifier) {
+	h := &handler{d: d, notifier: notifier}
 	g := d.Engine.Group("/api/users")
 	g.GET("/:id", h.get)
 	protected := g.Use(d.JWT.Middleware())
 	protected.GET("/search", h.searchUsers)
 	protected.POST("/push-token", h.registerPushToken)
+	protected.DELETE("/push-token", h.deletePushToken)
 	protected.PUT("/:id", h.update)
 	// "me" rather than "/:id": deleting an account is not something you should
 	// be able to aim at an id, even your own.
@@ -67,9 +74,14 @@ func registerRoutes(d *server.Deps) {
 	bl.GET("/status/:userId", h.blockStatus)
 	bl.PUT("/:userId", h.blockUser)
 	bl.DELETE("/:userId", h.unblockUser)
+
+	registerNotificationRoutes(d, h)
 }
 
-type handler struct{ d *server.Deps }
+type handler struct {
+	d        *server.Deps
+	notifier *notify.Notifier
+}
 
 type profile struct {
 	ID                int64  `json:"id"`
@@ -110,6 +122,28 @@ func (h *handler) registerPushToken(c *gin.Context) {
 		req.Token, authpkg.UserID(c), req.Platform,
 	); err != nil {
 		httpx.Internal(c, "could not register push token")
+		return
+	}
+	c.Status(http.StatusNoContent)
+}
+
+// deletePushToken drops a device from the caller's account on sign-out.
+//
+// Without it the row keeps pointing at the rider who just signed out until they
+// next sign in somewhere, so the next person to use the phone would receive
+// their notifications. Scoped to the caller so one account cannot unregister
+// another's device.
+func (h *handler) deletePushToken(c *gin.Context) {
+	var req pushTokenReq
+	if err := c.ShouldBindJSON(&req); err != nil {
+		httpx.BadRequest(c, err.Error())
+		return
+	}
+	if _, err := h.d.DB.Exec(c,
+		`DELETE FROM push_tokens WHERE token = $1 AND user_id = $2`,
+		req.Token, authpkg.UserID(c),
+	); err != nil {
+		httpx.Internal(c, "could not remove push token")
 		return
 	}
 	c.Status(http.StatusNoContent)

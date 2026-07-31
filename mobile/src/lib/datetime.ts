@@ -41,6 +41,21 @@ export function timeUntil(value: string | Date): string {
   return `${Math.round(diffMin / (24 * 60))} gün`;
 }
 
+// Elapsed time since a past moment: "şimdi", "12 dk", "3 sa", "5 gün", then the
+// date once it stops being useful to count. Used by the notification list, where
+// "2 sa" reads faster than a timestamp you have to compare against the clock.
+export function timeAgo(value: string | Date): string {
+  const d = typeof value === 'string' ? new Date(value) : value;
+  if (isNaN(d.getTime())) return '';
+  const diffMin = Math.round((Date.now() - d.getTime()) / 60_000);
+  if (diffMin < 1) return 'şimdi';
+  if (diffMin < 60) return `${diffMin} dk`;
+  if (diffMin < 24 * 60) return `${Math.floor(diffMin / 60)} sa`;
+  const days = Math.floor(diffMin / (24 * 60));
+  if (days < 7) return `${days} gün`;
+  return `${d.getDate()} ${MONTHS[d.getMonth()]}`;
+}
+
 // "Bugün" / "Yarın" for near dates, otherwise null (caller falls back to the
 // full date).
 export function dayLabel(value: string | Date): 'Bugün' | 'Yarın' | null {

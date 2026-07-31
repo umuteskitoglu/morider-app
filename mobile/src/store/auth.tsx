@@ -3,6 +3,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 
 import { api, setUnauthorizedHandler, TOKEN_KEY } from '../api/client';
 import { getGoogleIdToken, googleSignOut } from '../api/googleAuth';
+import { unregisterPushToken } from '../lib/push';
 
 export type User = {
   id: number;
@@ -80,6 +81,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }
 
   async function signOut() {
+    // Drop this device from the account first, while the auth token is still
+    // valid. Otherwise the push_tokens row keeps pointing at this rider and the
+    // next person to use the phone receives their notifications.
+    await unregisterPushToken();
     setToken(null);
     setUser(null);
     await AsyncStorage.multiRemove([TOKEN_KEY, USER_KEY]);

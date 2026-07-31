@@ -12,7 +12,7 @@ import (
 
 	authpkg "github.com/morider/backend/pkg/auth"
 	"github.com/morider/backend/pkg/httpx"
-	"github.com/morider/backend/pkg/push"
+	"github.com/morider/backend/pkg/notify"
 	"github.com/morider/backend/pkg/wshub"
 )
 
@@ -463,35 +463,22 @@ func (h *handler) dmWS(c *gin.Context) {
 		})
 
 		// Notify the recipient if they are not currently viewing this conversation.
+		//
+		// PushOnly: a DM leaves no row in the notification center. The DM inbox
+		// already is its own inbox and the Chat tab already badges unread
+		// conversations, so a row here would only double-count.
 		if !suppressPush && !h.isPresent(convID, other) {
-			h.notifyDM(other, name, in.Body, convID)
+			h.notifier.To(other, notify.Event{
+				Kind:     notify.KindDM,
+				ActorID:  me,
+				EntityID: convID,
+				Title:    name,
+				Body:     in.Body,
+				Data:     map[string]any{"conversation_id": convID},
+				PushOnly: true,
+			})
 		}
 	}
-}
-
-// notifyDM pushes a direct-message notification to all of a user's devices in the
-// background (best effort, never blocks the WebSocket read loop).
-func (h *handler) notifyDM(userID int64, senderName, body string, convID int64) {
-	go func() {
-		ctx := context.Background()
-		rows, err := h.d.DB.Query(ctx, `SELECT token FROM push_tokens WHERE user_id = $1`, userID)
-		if err != nil {
-			return
-		}
-		defer rows.Close()
-		var tokens []string
-		for rows.Next() {
-			var t string
-			if err := rows.Scan(&t); err == nil {
-				tokens = append(tokens, t)
-			}
-		}
-		_ = h.push.SendToTokens(ctx, tokens, push.Notification{
-			Title: senderName,
-			Body:  body,
-			Data:  map[string]any{"type": "dm", "conversation_id": convID},
-		})
-	}()
 }
 
 // --- per-conversation connection presence (local replica) ---

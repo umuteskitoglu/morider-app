@@ -385,7 +385,7 @@ func (h *handler) createPost(c *gin.Context) {
 	post.Event = event
 	post.Author = authpkg.Email(c) // best-effort; the list endpoint returns the real name
 
-	h.notifyNewPost(id, uid, body)
+	h.notifyNewPost(c, id, post.ID, uid, body)
 	c.JSON(http.StatusCreated, post)
 }
 

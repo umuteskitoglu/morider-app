@@ -54,7 +54,7 @@ func (h *handler) join(c *gin.Context) {
 		return
 	}
 	if status == "pending" {
-		h.notifyJoinRequest(id, uid)
+		h.notifyJoinRequest(c, id, uid)
 	}
 	c.JSON(http.StatusCreated, gin.H{"role": "member", "status": status})
 }
@@ -154,7 +154,7 @@ func (h *handler) approveRequest(c *gin.Context) {
 		httpx.Error(c, http.StatusNotFound, "join request not found")
 		return
 	}
-	h.notifyApproved(id, target)
+	h.notifyApproved(c, id, target, authpkg.UserID(c))
 	c.Status(http.StatusNoContent)
 }
 

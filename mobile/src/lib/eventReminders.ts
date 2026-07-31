@@ -81,7 +81,13 @@ export async function scheduleEventReminders(code: string, title: string, meetAt
     const fireAt = meet - off * 60_000;
     if (fireAt <= Date.now() + 5_000) continue; // already passed (or too soon)
     const id = await N.scheduleNotificationAsync({
-      content: { title: 'Morider Etkinlik', body: reminderBody(title, off), data: { code } },
+      // `type` matches the vocabulary lib/notificationRoute switches on, so a
+      // tapped local reminder routes through the same map as a remote push.
+      content: {
+        title: 'Morider Etkinlik',
+        body: reminderBody(title, off),
+        data: { type: 'event_reminder', code },
+      },
       trigger: {
         type: N.SchedulableTriggerInputTypes.DATE,
         date: new Date(fireAt),

@@ -24,7 +24,7 @@ import (
 	authpkg "github.com/morider/backend/pkg/auth"
 	"github.com/morider/backend/pkg/config"
 	"github.com/morider/backend/pkg/httpx"
-	"github.com/morider/backend/pkg/push"
+	"github.com/morider/backend/pkg/notify"
 )
 
 const (
@@ -35,7 +35,7 @@ const (
 
 type handler struct {
 	d         *server.Deps
-	push      push.Sender
+	notifier  *notify.Notifier
 	uploadDir string
 }
 
@@ -45,21 +45,9 @@ func Run(cfg config.Config) error {
 	if err != nil {
 		return err
 	}
-	h := &handler{d: deps, push: push.ExpoSender{}, uploadDir: cfg.UploadDir}
+	h := &handler{d: deps, notifier: notify.New(deps.DB, cfg, deps.Log), uploadDir: cfg.UploadDir}
 	if err := os.MkdirAll(h.uploadDir, 0o755); err != nil {
 		return fmt.Errorf("could not create upload dir %q: %w", h.uploadDir, err)
-	}
-
-	// Push sender: FCM when a service-account file is configured, else Expo relay.
-	if cfg.FCMCredentialsFile != "" {
-		if sa, err := os.ReadFile(cfg.FCMCredentialsFile); err != nil {
-			deps.Log.Warn().Err(err).Msg("could not read FCM credentials, falling back to Expo push")
-		} else if sender, err := push.NewFCMSender(sa); err != nil {
-			deps.Log.Warn().Err(err).Msg("invalid FCM credentials, falling back to Expo push")
-		} else {
-			h.push = sender
-			deps.Log.Info().Msg("push: using FCM HTTP v1")
-		}
 	}
 
 	registerRoutes(deps, h)

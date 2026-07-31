@@ -22,6 +22,7 @@ import { MaterialCommunityIcons } from '@expo/vector-icons';
 
 import { FeedStackParams } from '../navigation/RootNavigator';
 import { LikersSheet } from '../components/LikersSheet';
+import NotificationBell from '../components/NotificationBell';
 import { ZoomableImage } from '../components/ZoomableImage';
 import { EmptyState } from '../components/ui';
 import { api, apiBaseURL, errorMessage } from '../api/client';
@@ -173,6 +174,12 @@ export default function FeedScreen({ navigation }: Props) {
       >
         <MaterialCommunityIcons name="magnify" size={22} color="#fff" />
       </Pressable>
+
+      {/* Beside search rather than top-right: the multi-photo counter already
+          owns that corner. */}
+      <View style={[styles.bellBtn, { top: insets.top + spacing.sm }]}>
+        <NotificationBell onPress={() => navigation.navigate('Notifications')} />
+      </View>
 
       <Pressable
         style={styles.fab}
@@ -418,6 +425,16 @@ const styles = StyleSheet.create({
   searchBtn: {
     position: 'absolute',
     left: spacing.md,
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: 'rgba(0,0,0,0.45)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  bellBtn: {
+    position: 'absolute',
+    left: spacing.md + 40 + spacing.sm,
     width: 40,
     height: 40,
     borderRadius: 20,

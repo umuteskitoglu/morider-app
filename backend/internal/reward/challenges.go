@@ -13,7 +13,7 @@ import (
 
 	authpkg "github.com/morider/backend/pkg/auth"
 	"github.com/morider/backend/pkg/httpx"
-	"github.com/morider/backend/pkg/push"
+	"github.com/morider/backend/pkg/notify"
 )
 
 // Challenges: time-boxed competitions over a rider metric. Progress is always
@@ -335,12 +335,13 @@ func (h *handler) inviteToChallenge(c *gin.Context) {
 		return
 	}
 
-	var inviterName string
-	_ = h.d.DB.QueryRow(c, `SELECT name FROM users WHERE id = $1`, inviter).Scan(&inviterName)
-	h.notify(req.UserID, push.Notification{
-		Title: "Sana meydan okundu! 🏍️",
-		Body:  inviterName + " seni \"" + title + "\" yarışmasına davet etti",
-		Data:  map[string]any{"type": "challenge_invite", "challenge_id": cid},
+	h.notifier.To(req.UserID, notify.Event{
+		Kind:     notify.KindChallengeInvite,
+		ActorID:  inviter,
+		EntityID: cid,
+		Title:    "Sana meydan okundu! 🏍️",
+		Body:     h.notifier.UserName(c, inviter) + " seni \"" + title + "\" yarışmasına davet etti",
+		Data:     map[string]any{"challenge_id": cid},
 	})
 	c.Status(http.StatusCreated)
 }
@@ -417,26 +418,6 @@ func (h *handler) declineInvite(c *gin.Context) {
 	c.Status(http.StatusNoContent)
 }
 
-// notify pushes a notification to all of a user's registered devices in the
-// background (best effort, never blocks or fails the request).
-func (h *handler) notify(userID int64, n push.Notification) {
-	go func() {
-		ctx := context.Background()
-		rows, err := h.d.DB.Query(ctx, `SELECT token FROM push_tokens WHERE user_id = $1`, userID)
-		if err != nil {
-			return
-		}
-		defer rows.Close()
-		var tokens []string
-		for rows.Next() {
-			var t string
-			if err := rows.Scan(&t); err == nil {
-				tokens = append(tokens, t)
-			}
-		}
-		_ = h.push.SendToTokens(ctx, tokens, n)
-	}()
-}
 
 // challengeBadgeType is the stable rewards.type for completing a challenge.
 func challengeBadgeType(id int64) string {

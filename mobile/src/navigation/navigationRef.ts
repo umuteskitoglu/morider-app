@@ -14,3 +14,17 @@ export function navigateToTab(tab: string) {
     navigationRef.navigate(tab as never);
   }
 }
+
+// Best-effort jump to a screen inside a tab's stack. Reports whether it landed,
+// so a caller that arrived before the container mounted (a push tapped on a cold
+// start) can queue and retry instead of silently losing the destination.
+export function navigateNested(tab: string, screen: string, params?: object): boolean {
+  if (!navigationRef.isReady()) return false;
+  // The typed overloads cannot express "any tab, any nested screen" for a
+  // caller that only learns both at runtime (a push payload), so the call is
+  // made through a widened signature. lib/notificationRoute is the single place
+  // that decides the pair, and its mapping is checked there.
+  const navigate = navigationRef.navigate as unknown as (name: string, params?: object) => void;
+  navigate(tab, { screen, params });
+  return true;
+}

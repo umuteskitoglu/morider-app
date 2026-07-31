@@ -9,7 +9,6 @@ import (
 	"fmt"
 	"math"
 	"net/http"
-	"os"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -22,7 +21,7 @@ import (
 	"github.com/morider/backend/pkg/config"
 	"github.com/morider/backend/pkg/events"
 	"github.com/morider/backend/pkg/httpx"
-	"github.com/morider/backend/pkg/push"
+	"github.com/morider/backend/pkg/notify"
 	"github.com/morider/backend/pkg/wshub"
 )
 
@@ -34,19 +33,7 @@ func Run(cfg config.Config) error {
 	}
 	upgrader = websocket.Upgrader{CheckOrigin: wshub.OriginChecker(cfg.AllowedWSOrigins)}
 
-	h := &handler{d: deps, push: push.ExpoSender{}}
-
-	// Push sender: FCM when a service-account file is configured, else Expo relay.
-	if cfg.FCMCredentialsFile != "" {
-		if sa, err := os.ReadFile(cfg.FCMCredentialsFile); err != nil {
-			deps.Log.Warn().Err(err).Msg("could not read FCM credentials, falling back to Expo push")
-		} else if sender, err := push.NewFCMSender(sa); err != nil {
-			deps.Log.Warn().Err(err).Msg("invalid FCM credentials, falling back to Expo push")
-		} else {
-			h.push = sender
-			deps.Log.Info().Msg("push: using FCM HTTP v1")
-		}
-	}
+	h := &handler{d: deps, notifier: notify.New(deps.DB, cfg, deps.Log)}
 
 	// NATS is optional: if it is unavailable the service still records points.
 	if nc, err := nats.Connect(cfg.NATSURL, nats.RetryOnFailedConnect(true), nats.MaxReconnects(-1)); err != nil {
@@ -106,7 +93,7 @@ type handler struct {
 	hub  *wshub.Hub
 	// Used to reach riders whose app is backgrounded — the audience an SOS
 	// most needs and the session WebSocket cannot serve.
-	push push.Sender
+	notifier *notify.Notifier
 }
 
 // Point is a single GPS sample.

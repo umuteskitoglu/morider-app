@@ -111,7 +111,8 @@ export async function syncGarageReminders(motos: Motorcycle[], userId: number): 
         content: {
           title: 'Morider Garaj',
           body: r.body,
-          data: { motoId: r.motoId, doc: r.doc },
+          // `type` routes the tap through lib/notificationRoute, same as a push.
+          data: { type: 'garage_reminder', motoId: r.motoId, doc: r.doc },
         },
         trigger: {
           type: N.SchedulableTriggerInputTypes.DATE,
