@@ -61,7 +61,26 @@
       "Bash(git push *)",
       "Bash(gh pr *)",
       "PowerShell($c = Get-Command gh -ErrorAction SilentlyContinue; if \\($c\\) { $c.Source; gh --version } else { \"gh bulunamadi\"; Get-ChildItem \"$env:ProgramFiles\\\\GitHub CLI\\\\gh.exe\",\"$env:LOCALAPPDATA\\\\GitHubCLI\\\\gh.exe\" -ErrorAction SilentlyContinue | Select-Object -ExpandProperty FullName })",
-      "Bash(git add *)"
+      "Bash(git add *)",
+      "Bash(git fetch *)",
+      "Bash(git stash *)",
+      "Bash(git branch *)",
+      "Bash(grep -n \"^func \\\\|^//\" backend/internal/ride/segments.go)",
+      "Bash(grep -i -E \"firebase|\\\\.json$|secret|key\")",
+      "Bash(gofmt -w internal/chat/global.go internal/chat/dm.go)",
+      "Bash(gofmt -w internal/event/chat.go)",
+      "Bash(python -c ' *)",
+      "Bash(gofmt -w internal/event/event.go)",
+      "Bash(gofmt -w internal/auth/auth.go)",
+      "Bash(gofmt -w internal/auth/auth_test.go)",
+      "Bash(gofmt -l .)",
+      "Bash(gofmt -d internal/user/user.go)",
+      "Bash(go list *)",
+      "Bash(gofmt -w internal/auth/auth.go internal/auth/google.go)",
+      "Bash(gofmt -w pkg/oauth/google_test.go)",
+      "Bash(echo \"TSC_EXIT=$?\")",
+      "Bash(rm -rf backend/pkg/oauth backend/internal/auth/google.go backend/migrations/0043_google_signin.sql)",
+      "Bash(gofmt -w internal/auth/auth.go pkg/config/config.go)"
     ]
   }
 }
