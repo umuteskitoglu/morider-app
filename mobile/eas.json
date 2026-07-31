@@ -14,7 +14,8 @@
     "production": {
       "autoIncrement": true,
       "env": {
-        "EXPO_PUBLIC_API_URL": "http://138.197.178.107:8080"
+        "EXPO_PUBLIC_API_URL": "http://138.197.178.107:8080",
+        "EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID": "367727039605-lnoora6b6lb84inqbpi4plq4rtrlm4cm.apps.googleusercontent.com"
       }
     }
   },
