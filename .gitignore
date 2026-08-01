@@ -11,6 +11,8 @@ mobile/.expo/
 mobile/dist/
 mobile/web-build/
 npm-debug.*
+coverage/
+*.tsbuildinfo
 *.jks
 *.p8
 *.p12
@@ -18,8 +20,16 @@ npm-debug.*
 *.mobileprovision
 *.orig.*
 
+# Expo prebuild (CNG) ile uretilen native klasorler.
+# Tum native yapilandirma mobile/app.json icindeki plugins/infoPlist alanlarindan
+# gelir; bu klasorler `npx expo prebuild` ile yeniden uretilir, commit'lenmez.
+mobile/ios/
+mobile/android/
+
 # Env
 .env
+.env.*
+!.env.example
 *.local
 
 # Firebase service-account key (secret — never commit; mounted into the container
