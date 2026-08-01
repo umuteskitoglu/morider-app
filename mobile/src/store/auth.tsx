@@ -3,6 +3,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 
 import { api, setUnauthorizedHandler, TOKEN_KEY } from '../api/client';
 import { getGoogleIdToken, googleSignOut } from '../api/googleAuth';
+import { clearOfflineData } from '../lib/offlineCache';
 import { unregisterPushToken } from '../lib/push';
 
 export type User = {
@@ -27,6 +28,8 @@ type AuthState = {
   signIn: (email: string, password: string) => Promise<void>;
   signUp: (name: string, email: string, password: string) => Promise<void>;
   signInWithGoogle: () => Promise<void>;
+  requestPasswordReset: (email: string) => Promise<void>;
+  resetPassword: (email: string, code: string, password: string) => Promise<void>;
   signOut: () => Promise<void>;
   updateUser: (partial: Partial<User>) => Promise<void>;
 };
@@ -80,6 +83,21 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     await persist(data.token, data.user);
   }
 
+  // Mails a 6-digit code to the address. The server answers the same way for a
+  // registered and an unregistered address, so there is nothing here to branch
+  // on — the screen just moves to the code step either way.
+  async function requestPasswordReset(email: string) {
+    await api.post('/api/auth/password/forgot', { email });
+  }
+
+  // The reset endpoint returns a session, so choosing a new password logs the
+  // rider straight in rather than dropping them back on the login form to
+  // retype what they just typed.
+  async function resetPassword(email: string, code: string, password: string) {
+    const { data } = await api.post('/api/auth/password/reset', { email, code, password });
+    await persist(data.token, data.user);
+  }
+
   async function signOut() {
     // Drop this device from the account first, while the auth token is still
     // valid. Otherwise the push_tokens row keeps pointing at this rider and the
@@ -88,6 +106,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     setToken(null);
     setUser(null);
     await AsyncStorage.multiRemove([TOKEN_KEY, USER_KEY]);
+    // Everything screens kept for offline use is this rider's data — rides,
+    // garage, inbox, saved routes. It goes with the session.
+    await clearOfflineData();
     // Also drop the native Google session, so signing out and back in offers
     // the account picker instead of silently reusing the last account.
     await googleSignOut();
@@ -100,6 +121,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       setToken(null);
       setUser(null);
       AsyncStorage.multiRemove([TOKEN_KEY, USER_KEY]).catch(() => {});
+      clearOfflineData().catch(() => {});
     });
     return () => setUnauthorizedHandler(null);
   }, []);
@@ -112,7 +134,18 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }
 
   const value = useMemo<AuthState>(
-    () => ({ user, token, loading, signIn, signUp, signInWithGoogle, signOut, updateUser }),
+    () => ({
+      user,
+      token,
+      loading,
+      signIn,
+      signUp,
+      signInWithGoogle,
+      requestPasswordReset,
+      resetPassword,
+      signOut,
+      updateUser,
+    }),
     [user, token, loading],
   );
 

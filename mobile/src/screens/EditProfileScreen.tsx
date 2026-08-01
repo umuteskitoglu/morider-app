@@ -18,8 +18,9 @@ import { MaterialCommunityIcons } from '@expo/vector-icons';
 
 import { ProfileStackParams } from '../navigation/RootNavigator';
 import { Button, Card, TextField } from '../components/ui';
+import { AVATAR_MAX_EDGE, prepareImageUpload } from '../lib/image';
 import { useAuth } from '../store/auth';
-import { api, apiBaseURL, errorMessage } from '../api/client';
+import { MEDIA_THUMB, api, errorMessage, mediaURL } from '../api/client';
 import { colors, gradients, radius, shadow, spacing } from '../theme';
 
 type Props = NativeStackScreenProps<ProfileStackParams, 'EditProfile'>;
@@ -52,17 +53,17 @@ export default function EditProfileScreen({ navigation }: Props) {
       Alert.alert('İzin gerekli', source === 'camera' ? 'Kamera izni vermelisin.' : 'Galeri izni vermelisin.');
       return;
     }
-    const opts: ImagePicker.ImagePickerOptions = { mediaTypes: ['images'], allowsEditing: true, aspect: [1, 1], quality: 0.7 };
+    const opts: ImagePicker.ImagePickerOptions = { mediaTypes: ['images'], allowsEditing: true, aspect: [1, 1], quality: 0.9 };
     const res = source === 'camera' ? await ImagePicker.launchCameraAsync(opts) : await ImagePicker.launchImageLibraryAsync(opts);
     if (res.canceled || !res.assets[0]) return;
 
     try {
       setUploadingAvatar(true);
-      const asset = res.assets[0];
-      const type = asset.mimeType ?? 'image/jpeg';
-      const ext = type.split('/')[1] ?? 'jpg';
+      // The native crop UI hands back a square at the source resolution — still
+      // multi-megabyte. Nothing renders an avatar above 512px.
+      const photo = await prepareImageUpload(res.assets[0], AVATAR_MAX_EDGE);
       const form = new FormData();
-      form.append('photo', { uri: asset.uri, name: `avatar.${ext}`, type } as any);
+      form.append('photo', { uri: photo.uri, name: 'avatar.jpg', type: photo.mimeType } as any);
       const { data } = await api.post('/api/feed/avatar', form, { headers: { 'Content-Type': 'multipart/form-data' } });
       // Persist immediately so the avatar sticks even if the rest isn't saved.
       await api.put(`/api/users/${user!.id}`, { avatar_url: data.url });
@@ -118,7 +119,7 @@ export default function EditProfileScreen({ navigation }: Props) {
         <View style={styles.avatarWrap}>
           <Pressable onPress={changeAvatar} disabled={uploadingAvatar}>
             {avatarUrl ? (
-              <Image source={{ uri: apiBaseURL() + avatarUrl }} style={styles.avatar} />
+              <Image source={{ uri: mediaURL(avatarUrl, MEDIA_THUMB) }} style={styles.avatar} />
             ) : (
               <LinearGradient colors={gradients.primary} style={styles.avatar}>
                 <Text style={styles.avatarText}>{name.charAt(0).toUpperCase() || 'M'}</Text>

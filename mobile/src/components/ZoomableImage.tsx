@@ -87,6 +87,13 @@ export function ZoomableImage({
         source={uri}
         contentFit={contentFit}
         cachePolicy="memory-disk"
+        // Tell expo-image this view is reused across list items: it releases the
+        // previous bitmap instead of holding one per photo we ever scrolled past.
+        recyclingKey={uri}
+        // expo-image's default, pinned explicitly because the whole point here
+        // is to decode at view size: a pinch scales the already-decoded texture,
+        // so a multi-megapixel file never becomes a multi-megapixel bitmap.
+        allowDownscaling
         transition={150}
         style={[
           style,

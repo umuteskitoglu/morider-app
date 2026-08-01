@@ -8,7 +8,7 @@ import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { Card, EmptyState } from '../components/ui';
 import { BlockedUser, fetchBlockedUsers, unblockUser } from '../lib/block';
 import { useBlockedUsers } from '../store/blockedUsers';
-import { apiBaseURL } from '../api/client';
+import { MEDIA_THUMB, mediaURL } from '../api/client';
 import { colors, gradients, radius, spacing } from '../theme';
 
 /**
@@ -109,7 +109,7 @@ export default function BlockedUsersScreen() {
             {users.map((u, i) => (
               <View key={u.id} style={[styles.row, i > 0 && styles.divider]}>
                 {u.avatar_url ? (
-                  <Image source={{ uri: apiBaseURL() + u.avatar_url }} style={styles.avatar} />
+                  <Image source={{ uri: mediaURL(u.avatar_url, MEDIA_THUMB) }} style={styles.avatar} />
                 ) : (
                   <LinearGradient colors={gradients.primary} style={styles.avatar}>
                     <Text style={styles.avatarText}>{u.name?.charAt(0).toUpperCase() ?? '?'}</Text>

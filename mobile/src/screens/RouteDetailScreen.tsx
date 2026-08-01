@@ -1,4 +1,4 @@
-import React, { useCallback, useLayoutEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { Alert, Animated, Dimensions, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import MapView, { Marker, Polyline } from 'react-native-maps';
 import { useFocusEffect } from '@react-navigation/native';
@@ -14,6 +14,8 @@ import { Button, Card, Stars } from '../components/ui';
 import { ElevationChart, ElevationProfile } from '../components/ElevationChart';
 import { RouteWeatherCard, RouteWeather } from '../components/RouteWeatherCard';
 import { POI, poiColor, poiIcon, poiLabel } from '../lib/poi';
+import { loadCachedRoute, removeCachedRoute, RoutePoint, saveCachedRoute } from '../lib/routeCache';
+import { formatDateTime } from '../lib/datetime';
 import { api, errorMessage } from '../api/client';
 import { colors, shadow, spacing } from '../theme';
 
@@ -21,6 +23,8 @@ type Coord = { latitude: number; longitude: number };
 type Props = NativeStackScreenProps<ProfileStackParams, 'RouteDetail'>;
 
 const ISTANBUL = { latitude: 41.0082, longitude: 28.9784, latitudeDelta: 0.1, longitudeDelta: 0.1 };
+
+const toCoords = (pts: RoutePoint[]): Coord[] => pts.map((p) => ({ latitude: p.lat, longitude: p.lon }));
 
 const VISIBILITY: Record<string, { icon: any; label: string }> = {
   private: { icon: 'lock', label: 'Gizli' },
@@ -48,6 +52,10 @@ export default function RouteDetailScreen({ route, navigation }: Props) {
   const [elevation, setElevation] = useState<ElevationProfile | null>(null);
   const [weather, setWeather] = useState<RouteWeather | null>(null);
   const [expanded, setExpanded] = useState(false);
+  // Non-null while the screen is showing the offline copy: the timestamp it was
+  // taken. Cleared as soon as the network answers.
+  const [cachedAt, setCachedAt] = useState<number | null>(null);
+  const loadedFromNetwork = useRef(false);
   const mapRef = useRef<MapView | null>(null);
   const expandAnim = useRef(new Animated.Value(0)).current;
 
@@ -68,13 +76,56 @@ export default function RouteDetailScreen({ route, navigation }: Props) {
     navigation.setOptions({ title: name });
   }, [navigation, name]);
 
+  // Fit the map to the line once, on whichever paint gets there first (cache or
+  // network) — refitting on every focus fights the rider panning the map.
+  const fitted = useRef(false);
+  const fitTo = useCallback((pts: Coord[]) => {
+    if (fitted.current || pts.length < 2) return;
+    fitted.current = true;
+    setTimeout(
+      () =>
+        mapRef.current?.fitToCoordinates(pts, {
+          edgePadding: { top: 80, right: 60, bottom: 220, left: 60 },
+          animated: true,
+        }),
+      300,
+    );
+  }, []);
+
+  // Paint the offline copy first. This is the whole point of caching routes:
+  // the rider is standing at the trailhead with no bars, and the route they
+  // came to ride has not changed since they saved it.
+  useEffect(() => {
+    let cancelled = false;
+    loadCachedRoute(id).then((cached) => {
+      if (!cached || cancelled || loadedFromNetwork.current) return;
+      const pts = toCoords(cached.points);
+      setCoords(pts);
+      setDistance(cached.distance);
+      setDescription(cached.description);
+      setOwnerName(cached.owner_name);
+      setOwnerId(cached.user_id);
+      setVisibility(cached.visibility);
+      setAvgRating(cached.avg_rating);
+      setRatingCount(cached.rating_count);
+      setMyRating(cached.my_rating);
+      setPois(cached.pois ?? []);
+      setElevation(cached.elevation ?? null);
+      setCachedAt(cached.savedAt);
+      fitTo(pts);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [id, fitTo]);
+
   const load = useCallback(async () => {
+    let detail: any = null;
     try {
       const { data } = await api.get(`/api/routes/${id}`);
-      const pts: Coord[] = (data.points ?? []).map((p: { lat: number; lon: number }) => ({
-        latitude: p.lat,
-        longitude: p.lon,
-      }));
+      detail = data;
+      loadedFromNetwork.current = true;
+      const pts = toCoords(data.points ?? []);
       setCoords(pts);
       setDistance(data.distance ?? 0);
       setDescription(data.description ?? '');
@@ -84,41 +135,64 @@ export default function RouteDetailScreen({ route, navigation }: Props) {
       setAvgRating(data.avg_rating ?? 0);
       setRatingCount(data.rating_count ?? 0);
       setMyRating(data.my_rating ?? 0);
-      if (pts.length > 1) {
-        setTimeout(
-          () =>
-            mapRef.current?.fitToCoordinates(pts, {
-              edgePadding: { top: 80, right: 60, bottom: 220, left: 60 },
-              animated: true,
-            }),
-          300,
-        );
-      }
+      setCachedAt(null);
+      fitTo(pts);
     } catch (err) {
-      Alert.alert('Yüklenemedi', errorMessage(err));
+      // Ask the disk rather than the hydration effect: offline, axios fails
+      // long before the file read finishes, and an alert that lands a moment
+      // before the route appears is worse than no alert at all.
+      if (!(await loadCachedRoute(id))) Alert.alert('Yüklenemedi', errorMessage(err));
+      return;
     }
     // POIs within 1 km of the route (best effort — markers just stay absent).
+    let freshPois: POI[] | null = null;
     try {
       const { data } = await api.get(`/api/pois/route/${id}`);
-      setPois(data.pois ?? []);
+      freshPois = data.pois ?? [];
+      setPois(freshPois ?? []);
     } catch {
       // ignore
     }
     // Elevation profile (best effort — the chart section just stays hidden).
+    let freshElevation: ElevationProfile | null = null;
     try {
       const { data } = await api.get(`/api/routes/${id}/elevation`);
-      if ((data.points ?? []).length > 1) setElevation(data);
+      if ((data.points ?? []).length > 1) {
+        freshElevation = data;
+        setElevation(data);
+      }
     } catch {
       // ignore
     }
     // Weather along the route (best effort — the card just stays hidden).
+    // Never cached: a forecast shown a week later is worse than no forecast.
     try {
       const { data } = await api.get(`/api/routes/${id}/weather`);
       if ((data.points ?? []).length > 0) setWeather(data);
     } catch {
       // ignore
     }
-  }, [id]);
+    // Everything the screen (and the map's follow mode) needs to work without
+    // signal, written down as a side effect of simply opening the route.
+    // The two best-effort sections fall back to the previous copy: a timed-out
+    // POI request must not erase mola noktaları the rider had offline.
+    const prior = await loadCachedRoute(id);
+    void saveCachedRoute({
+      id,
+      name: detail.name ?? name,
+      description: detail.description ?? '',
+      distance: detail.distance ?? 0,
+      user_id: detail.user_id ?? null,
+      owner_name: detail.owner_name ?? '',
+      visibility: detail.visibility ?? 'private',
+      avg_rating: detail.avg_rating ?? 0,
+      rating_count: detail.rating_count ?? 0,
+      my_rating: detail.my_rating ?? 0,
+      points: detail.points ?? [],
+      pois: freshPois ?? prior?.pois ?? [],
+      elevation: freshElevation ?? prior?.elevation ?? null,
+    });
+  }, [id, name, fitTo]);
 
   useFocusEffect(
     useCallback(() => {
@@ -235,6 +309,9 @@ export default function RouteDetailScreen({ route, navigation }: Props) {
           try {
             setDeleting(true);
             await api.delete(`/api/routes/${id}`);
+            // Otherwise the offline copy outlives the route and the list keeps
+            // offering it as "available offline".
+            await removeCachedRoute(id);
             navigation.goBack();
           } catch (err) {
             Alert.alert('Silinemedi', errorMessage(err));
@@ -315,6 +392,13 @@ export default function RouteDetailScreen({ route, navigation }: Props) {
           )}
         </View>
 
+        {cachedAt != null && (
+          <View style={styles.cachedRow}>
+            <MaterialCommunityIcons name="cloud-off-outline" size={13} color={colors.accent} />
+            <Text style={styles.cachedText}>Çevrimdışı kopya · {formatDateTime(new Date(cachedAt))}</Text>
+          </View>
+        )}
+
         <Animated.View style={{ maxHeight: panelMaxHeight, overflow: 'hidden' }}>
           <ScrollView showsVerticalScrollIndicator={false} nestedScrollEnabled>
             {weather && <RouteWeatherCard weather={weather} />}
@@ -386,6 +470,8 @@ const styles = StyleSheet.create({
   },
   visText: { color: colors.textMuted, fontSize: 12, fontWeight: '700' },
   metaRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.xs, marginTop: spacing.xs },
+  cachedRow: { flexDirection: 'row', alignItems: 'center', gap: 5, marginTop: spacing.xs },
+  cachedText: { color: colors.accent, fontSize: 12, fontWeight: '700' },
   muted: { color: colors.textMuted },
   dot: { color: colors.textMuted },
   ratingRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, marginTop: spacing.sm },

@@ -18,7 +18,7 @@ import { tierMeta, RiderLevel } from '../lib/rewards';
 import { useAuth } from '../store/auth';
 import { RiderChips } from '../components/RiderChips';
 import { ProfileStackParams } from '../navigation/RootNavigator';
-import { api, apiBaseURL } from '../api/client';
+import { MEDIA_FULL, MEDIA_THUMB, api, mediaURL } from '../api/client';
 import { colors, gradients, radius, shadow, spacing } from '../theme';
 
 type Badge = { id: number; type: string; description: string; tier?: string };
@@ -151,8 +151,8 @@ export default function UserProfileScreen({ route, navigation }: Props) {
       >
         <LinearGradient colors={gradients.surface} style={styles.header}>
           {avatarUrl ? (
-            <Pressable onPress={() => setZoomUri(apiBaseURL() + avatarUrl)}>
-              <Image source={{ uri: apiBaseURL() + avatarUrl }} style={styles.avatar} />
+            <Pressable onPress={() => setZoomUri(mediaURL(avatarUrl, MEDIA_FULL))}>
+              <Image source={{ uri: mediaURL(avatarUrl, MEDIA_THUMB) }} style={styles.avatar} />
             </Pressable>
           ) : (
             <LinearGradient colors={gradients.primary} style={styles.avatar}>
@@ -287,7 +287,7 @@ export default function UserProfileScreen({ route, navigation }: Props) {
           <View style={styles.grid}>
             {posts.map((p) => (
               <Pressable key={p.id} style={[styles.gridItem, { width: thumb, height: thumb }]} onPress={() => setViewer(p)}>
-                <Image source={{ uri: apiBaseURL() + p.photos[0] }} style={styles.gridImg} />
+                <Image source={{ uri: mediaURL(p.photos[0], MEDIA_THUMB) }} style={styles.gridImg} recyclingKey={p.photos[0]} />
                 {p.photos.length > 1 && (
                   <View style={styles.multi}>
                     <MaterialCommunityIcons name="image-multiple" size={14} color="#fff" />

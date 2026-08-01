@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Alert, KeyboardAvoidingView, Platform, StyleSheet, Text, View } from 'react-native';
+import { Alert, KeyboardAvoidingView, Platform, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -54,69 +54,81 @@ export default function LoginScreen({ navigation }: Props) {
 
   return (
     <LinearGradient colors={gradients.hero} style={styles.container}>
-      <KeyboardAvoidingView
-        style={[styles.flex, { paddingTop: insets.top, paddingBottom: insets.bottom }]}
-        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-      >
-        <View style={styles.header}>
-          <View style={styles.logoHalo}>
-            <LinearGradient colors={gradients.primary} style={styles.logoBadge}>
-              <MaterialCommunityIcons name="motorbike" size={46} color="#fff" />
-            </LinearGradient>
+      <KeyboardAvoidingView style={styles.flex} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+        <ScrollView
+          contentContainerStyle={[styles.scroll, { paddingTop: insets.top, paddingBottom: insets.bottom }]}
+          keyboardShouldPersistTaps="handled"
+          showsVerticalScrollIndicator={false}
+        >
+          <View style={styles.header}>
+            <View style={styles.logoHalo}>
+              <LinearGradient colors={gradients.primary} style={styles.logoBadge}>
+                <MaterialCommunityIcons name="motorbike" size={46} color="#fff" />
+              </LinearGradient>
+            </View>
+            <Text style={styles.logo}>MORIDER</Text>
+            <Text style={styles.tagline}>SÜR · KAYDET · PAYLAŞ</Text>
+            <Text style={styles.subtitle}>Motor tutkunları için yol arkadaşın</Text>
           </View>
-          <Text style={styles.logo}>MORIDER</Text>
-          <Text style={styles.tagline}>SÜR · KAYDET · PAYLAŞ</Text>
-          <Text style={styles.subtitle}>Motor tutkunları için yol arkadaşın</Text>
-        </View>
 
-        <View style={styles.form}>
-          <TextField
-            label="E-posta"
-            icon="email-outline"
-            value={email}
-            onChangeText={setEmail}
-            autoCapitalize="none"
-            keyboardType="email-address"
-            placeholder="ornek@morider.app"
-          />
-          <TextField
-            label="Şifre"
-            icon="lock-outline"
-            value={password}
-            onChangeText={setPassword}
-            secureTextEntry
-            placeholder="••••••••"
-          />
+          <View style={styles.form}>
+            <TextField
+              label="E-posta"
+              icon="email-outline"
+              value={email}
+              onChangeText={setEmail}
+              autoCapitalize="none"
+              keyboardType="email-address"
+              placeholder="ornek@morider.app"
+            />
+            <TextField
+              label="Şifre"
+              icon="lock-outline"
+              value={password}
+              onChangeText={setPassword}
+              secureTextEntry
+              placeholder="••••••••"
+            />
 
-          <Button
-            title="Giriş Yap"
-            icon="login"
-            onPress={onSubmit}
-            loading={loading}
-            disabled={googleLoading}
-          />
+            <Button
+              title="Giriş Yap"
+              icon="login"
+              onPress={onSubmit}
+              loading={loading}
+              disabled={googleLoading}
+            />
 
-          {googleSignInAvailable ? (
-            <>
-              <OrDivider />
-              <GoogleSignInButton
-                title="Google ile giriş yap"
-                onPress={onGoogle}
-                loading={googleLoading}
-                disabled={loading}
-              />
-            </>
-          ) : null}
+            <Pressable
+              onPress={() => navigation.navigate('ForgotPassword', { email: email.trim() || undefined })}
+              disabled={loading || googleLoading}
+              hitSlop={8}
+              style={styles.forgot}
+            >
+              <Text style={styles.forgotText}>Şifremi unuttum</Text>
+            </Pressable>
 
-          <View style={{ height: spacing.md }} />
-          <Button
-            title="Hesap Oluştur"
-            variant="ghost"
-            icon="account-plus-outline"
-            onPress={() => navigation.navigate('Signup')}
-            disabled={loading || googleLoading}
-          />
-        </View>
+            {googleSignInAvailable ? (
+              <>
+                <OrDivider />
+                <GoogleSignInButton
+                  title="Google ile giriş yap"
+                  onPress={onGoogle}
+                  loading={googleLoading}
+                  disabled={loading}
+                />
+              </>
+            ) : null}
+
+            <View style={{ height: spacing.md }} />
+            <Button
+              title="Hesap Oluştur"
+              variant="ghost"
+              icon="account-plus-outline"
+              onPress={() => navigation.navigate('Signup')}
+              disabled={loading || googleLoading}
+            />
+          </View>
+        </ScrollView>
       </KeyboardAvoidingView>
     </LinearGradient>
   );
@@ -124,7 +136,8 @@ export default function LoginScreen({ navigation }: Props) {
 
 const styles = StyleSheet.create({
   container: { flex: 1 },
-  flex: { flex: 1, padding: spacing.lg, justifyContent: 'center' },
+  flex: { flex: 1 },
+  scroll: { flexGrow: 1, justifyContent: 'center', padding: spacing.lg },
   header: { alignItems: 'center', marginBottom: spacing.xl },
   logoHalo: {
     width: 124,
@@ -146,6 +159,8 @@ const styles = StyleSheet.create({
     transform: [{ rotate: '-6deg' }],
     ...shadow.glow,
   },
+  forgot: { alignSelf: 'center', paddingVertical: spacing.sm },
+  forgotText: { color: colors.primary, fontSize: 13, fontWeight: '700' },
   logo: { color: colors.text, fontSize: 42, fontWeight: '900', letterSpacing: 4 },
   tagline: { color: colors.primary, marginTop: spacing.xs, fontWeight: '800', fontSize: 12, letterSpacing: 2 },
   subtitle: { color: colors.textMuted, marginTop: spacing.sm, fontSize: 13, fontWeight: '500' },

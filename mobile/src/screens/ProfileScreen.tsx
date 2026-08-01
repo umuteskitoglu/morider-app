@@ -1,4 +1,4 @@
-import React, { useCallback, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -29,9 +29,11 @@ import { RiderChips } from '../components/RiderChips';
 import { ProgressBar } from '../components/ProgressBar';
 import { LevelInfoButton } from '../components/LevelInfoButton';
 import { tierMeta, RiderLevel } from '../lib/rewards';
+import { AVATAR_MAX_EDGE, prepareImageUpload } from '../lib/image';
+import { readCache, writeCache } from '../lib/offlineCache';
 import { useAuth, User } from '../store/auth';
 import { ProfileStackParams } from '../navigation/RootNavigator';
-import { api, apiBaseURL, errorMessage } from '../api/client';
+import { MEDIA_FULL, MEDIA_THUMB, api, errorMessage, mediaURL } from '../api/client';
 import { colors, gradients, radius, shadow, spacing } from '../theme';
 
 type Reward = { id: number; type: string; description: string; showcased: boolean; tier?: string; xp?: number };
@@ -46,6 +48,22 @@ type LeaderEntry = {
 };
 type RecapStat = { week_start: string; distance: number; duration_seconds: number; avg_speed: number; max_speed: number; ride_count: number };
 type Recap = { week: RecapStat; prev_week: RecapStat };
+type ProfileStats = { bio: string; postCount: number; followerCount: number; followingCount: number };
+
+// The profile is eight endpoints wide, so it is cached as one blob rather than
+// eight keys: it is only ever read and written together, and half a profile
+// (badges but no level, posts but no follower count) looks broken.
+type ProfileSnapshot = {
+  rewards: Reward[];
+  leaders: LeaderEntry[];
+  following: LeaderEntry[];
+  seasonLeaders: SeasonEntry[];
+  level: RiderLevel | null;
+  recap: Recap | null;
+  posts: DetailPost[];
+  stats: ProfileStats;
+};
+const PROFILE_CACHE_KEY = 'profile';
 
 export default function ProfileScreen() {
   const { user, updateUser } = useAuth();
@@ -66,7 +84,7 @@ export default function ProfileScreen() {
   const [manage, setManage] = useState(false);
   const [selected, setSelected] = useState<string[]>([]);
   const [saving, setSaving] = useState(false);
-  const [stats, setStats] = useState({ bio: '', postCount: 0, followerCount: 0, followingCount: 0 });
+  const [stats, setStats] = useState<ProfileStats>({ bio: '', postCount: 0, followerCount: 0, followingCount: 0 });
   const [zoomUri, setZoomUri] = useState<string | null>(null);
   const [editRider, setEditRider] = useState(false);
   const [riderLicense, setRiderLicense] = useState('');
@@ -79,6 +97,11 @@ export default function ProfileScreen() {
   // into a wall of chips.
   const SHOWCASE_MAX = 3;
   const headerBadges = showcased.slice(0, SHOWCASE_MAX);
+
+  // Guards for the cache round-trip: hydration must not overwrite a fresher
+  // network answer, and the writer must not run before hydration finishes.
+  const loadedFromNetwork = useRef(false);
+  const hydrated = useRef(false);
 
   const load = useCallback(async () => {
     try {
@@ -95,6 +118,9 @@ export default function ProfileScreen() {
         api.get('/api/leaderboard/season'),
       ]);
       const val = (s: PromiseSettledResult<any>) => (s.status === 'fulfilled' ? s.value : null);
+      // `u` is excluded: it resolves to a plain null when there is no signed-in
+      // user, which says nothing about whether the network answered.
+      if ([r, l, p, fl, rc, sm, sl].some((s) => s.status === 'fulfilled')) loadedFromNetwork.current = true;
       const rv = val(r), lv = val(l), pv = val(p), flv = val(fl), rcv = val(rc), uv = val(u);
       const smv = val(sm), slv = val(sl);
       if (rv) setRewards(rv.data.rewards ?? []);
@@ -130,6 +156,49 @@ export default function ProfileScreen() {
     }
   }, [user, updateUser]);
 
+  // Paint the last known profile before the eight requests come back — and it
+  // is the whole screen when they never do.
+  useEffect(() => {
+    let cancelled = false;
+    readCache<ProfileSnapshot>(PROFILE_CACHE_KEY)
+      .then((env) => {
+        if (cancelled) return;
+        const s = env?.value;
+        if (s && !loadedFromNetwork.current) {
+          setRewards(s.rewards ?? []);
+          setLeaders(s.leaders ?? []);
+          setFollowing(s.following ?? []);
+          setSeasonLeaders(s.seasonLeaders ?? []);
+          setLevel(s.level ?? null);
+          setRecap(s.recap ?? null);
+          setPosts(s.posts ?? []);
+          if (s.stats) setStats(s.stats);
+        }
+      })
+      .finally(() => {
+        // Only now may the writer below run: before hydration it would save the
+        // empty initial state over a perfectly good cache.
+        hydrated.current = true;
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!hydrated.current) return;
+    void writeCache<ProfileSnapshot>(PROFILE_CACHE_KEY, {
+      rewards,
+      leaders,
+      following,
+      seasonLeaders,
+      level,
+      recap,
+      posts,
+      stats,
+    });
+  }, [rewards, leaders, following, seasonLeaders, level, recap, posts, stats]);
+
   useFocusEffect(
     useCallback(() => {
       load();
@@ -164,7 +233,7 @@ export default function ProfileScreen() {
       mediaTypes: ['images'],
       allowsEditing: true,
       aspect: [1, 1],
-      quality: 0.7,
+      quality: 0.9,
     };
     const res = source === 'camera' ? await ImagePicker.launchCameraAsync(opts) : await ImagePicker.launchImageLibraryAsync(opts);
     if (!res.canceled && res.assets[0]) {
@@ -176,10 +245,11 @@ export default function ProfileScreen() {
     if (!user) return;
     try {
       setUploadingAvatar(true);
-      const type = asset.mimeType ?? 'image/jpeg';
-      const ext = type.split('/')[1] ?? 'jpg';
+      // The native crop UI hands back a square at the source resolution — still
+      // multi-megabyte. Nothing renders an avatar above 512px.
+      const photo = await prepareImageUpload(asset, AVATAR_MAX_EDGE);
       const form = new FormData();
-      form.append('photo', { uri: asset.uri, name: `avatar.${ext}`, type } as any);
+      form.append('photo', { uri: photo.uri, name: 'avatar.jpg', type: photo.mimeType } as any);
       const { data } = await api.post('/api/feed/avatar', form, { headers: { 'Content-Type': 'multipart/form-data' } });
       await api.put(`/api/users/${user.id}`, { avatar_url: data.url });
       await updateUser({ avatar_url: data.url });
@@ -250,11 +320,11 @@ export default function ProfileScreen() {
           <Pressable
             accessibilityRole="button"
             accessibilityLabel={user?.avatar_url ? 'Profil fotoğrafını büyüt' : 'Profil fotoğrafı ekle'}
-            onPress={() => (user?.avatar_url ? setZoomUri(apiBaseURL() + user.avatar_url) : changeAvatar())}
+            onPress={() => (user?.avatar_url ? setZoomUri(mediaURL(user.avatar_url, MEDIA_FULL)) : changeAvatar())}
             disabled={uploadingAvatar}
           >
             {user?.avatar_url ? (
-              <Image source={{ uri: apiBaseURL() + user.avatar_url }} style={styles.avatar} />
+              <Image source={{ uri: mediaURL(user.avatar_url, MEDIA_THUMB) }} style={styles.avatar} />
             ) : (
               <LinearGradient colors={gradients.primary} style={styles.avatar}>
                 <Text style={styles.avatarText}>{user?.name?.charAt(0).toUpperCase() ?? 'M'}</Text>
@@ -385,7 +455,7 @@ export default function ProfileScreen() {
                 accessibilityRole="button"
                 accessibilityLabel="Paylaşımı aç"
               >
-                <Image source={{ uri: apiBaseURL() + p.photos[0] }} style={styles.gridImg} />
+                <Image source={{ uri: mediaURL(p.photos[0], MEDIA_THUMB) }} style={styles.gridImg} recyclingKey={p.photos[0]} />
                 {p.photos.length > 1 && (
                   <View style={styles.multi}>
                     <MaterialCommunityIcons name="image-multiple" size={14} color="#fff" />
@@ -739,7 +809,7 @@ function LeaderRow({
         <Text style={[styles.rankText, rank > 2 && { color: colors.textMuted }]}>{rank + 1}</Text>
       </View>
       {entry.avatar_url ? (
-        <Image source={{ uri: apiBaseURL() + entry.avatar_url }} style={styles.leaderAvatar} />
+        <Image source={{ uri: mediaURL(entry.avatar_url, MEDIA_THUMB) }} style={styles.leaderAvatar} />
       ) : (
         <LinearGradient colors={gradients.primary} style={styles.leaderAvatar}>
           <Text style={styles.leaderAvatarText}>{entry.name?.charAt(0).toUpperCase() ?? '?'}</Text>
@@ -780,7 +850,7 @@ function SeasonRow({
         <Text style={[styles.rankText, rank > 2 && { color: colors.textMuted }]}>{rank + 1}</Text>
       </View>
       {entry.avatar_url ? (
-        <Image source={{ uri: apiBaseURL() + entry.avatar_url }} style={styles.leaderAvatar} />
+        <Image source={{ uri: mediaURL(entry.avatar_url, MEDIA_THUMB) }} style={styles.leaderAvatar} />
       ) : (
         <LinearGradient colors={gradients.primary} style={styles.leaderAvatar}>
           <Text style={styles.leaderAvatarText}>{entry.name?.charAt(0).toUpperCase() ?? '?'}</Text>

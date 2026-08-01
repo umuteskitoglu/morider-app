@@ -19,6 +19,26 @@ Yanıt `201`:
 ```
 Yanıt `200`: signup ile aynı gövde.
 
+### POST /api/auth/password/forgot
+```json
+{ "email": "umut@example.com" }
+```
+Yanıt her zaman `202` — adresin kayıtlı olup olmadığı sızdırılmaz:
+```json
+{ "message": "if the address has an account, a reset code has been sent" }
+```
+Adres kayıtlıysa 6 haneli kod e-posta ile gönderilir, 15 dakika geçerlidir. Yeni
+kod istemek öncekini geçersiz kılar. Gönderim için `SMTP_HOST` gerekir;
+ayarlanmadığında kod (production dışında) servis log'una yazılır.
+
+### POST /api/auth/password/reset
+```json
+{ "email": "umut@example.com", "code": "123456", "password": "yeni_sifre" }
+```
+Yanıt `200`: login ile aynı gövde — kullanıcı doğrudan oturum açmış olur.
+Hatalı/süresi dolmuş/hakkı tükenmiş kodların hepsi aynı `400 invalid or expired
+code` yanıtını verir. Kod başına 5 deneme hakkı vardır.
+
 ### GET /api/auth/me  *(korumalı)*
 ```json
 { "user_id": 1, "email": "umut@example.com" }

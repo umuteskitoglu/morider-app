@@ -19,7 +19,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { useNavigation } from '@react-navigation/native';
 
-import { api, apiBaseURL, errorMessage } from '../api/client';
+import { MEDIA_FULL, api, errorMessage, mediaURL } from '../api/client';
 import { useAuth } from '../store/auth';
 import { ZoomableImage } from './ZoomableImage';
 import { CommentsView } from './CommentsView';
@@ -182,10 +182,16 @@ export function PostDetail({
               horizontal
               pagingEnabled
               showsHorizontalScrollIndicator={false}
+              // A post can carry 10 photos; mounting all of them up front means
+              // ten full-screen decodes for one visible frame.
+              initialNumToRender={1}
+              maxToRenderPerBatch={2}
+              windowSize={3}
+              getItemLayout={(_, index) => ({ length: width, offset: width * index, index })}
               onMomentumScrollEnd={onScroll}
               renderItem={({ item }) => (
                 <Pressable onPress={onPhotoTap}>
-                  <ZoomableImage uri={apiBaseURL() + item} width={width} height={height} style={{ width, height }} />
+                  <ZoomableImage uri={mediaURL(item, MEDIA_FULL)} width={width} height={height} style={{ width, height }} />
                 </Pressable>
               )}
             />

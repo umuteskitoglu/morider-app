@@ -49,7 +49,7 @@ flowchart TB
 | Servis | Sorumluluk | Önemli uçlar |
 |--------|-----------|--------------|
 | gateway | Tek giriş noktası, ters proxy | `/api/*` |
-| auth | Kayıt/giriş, JWT üretimi | `/api/auth/signup`, `/api/auth/login`, `/api/auth/me` |
+| auth | Kayıt/giriş, şifre sıfırlama, JWT üretimi | `/api/auth/signup`, `/api/auth/login`, `/api/auth/password/forgot`, `/api/auth/password/reset`, `/api/auth/me` |
 | user | Profil okuma/güncelleme | `/api/users/:id` |
 | ride | Sürüş CRUD | `/api/rides` |
 | route | PostGIS rota CRUD + yola oturtma (OSRM) | `/api/routes`, `/api/routes/plan` |

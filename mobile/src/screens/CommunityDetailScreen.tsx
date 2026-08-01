@@ -30,7 +30,7 @@ import {
   votePoll,
 } from '../lib/communities';
 import { useAuth } from '../store/auth';
-import { apiBaseURL, errorMessage } from '../api/client';
+import { MEDIA_FULL, errorMessage, mediaURL } from '../api/client';
 import { formatDateTime } from '../lib/datetime';
 import { colors, gradients, radius, shadow, spacing } from '../theme';
 
@@ -323,7 +323,7 @@ function PostCard({
       {post.photos.length > 0 && (
         <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.photoStrip}>
           {post.photos.map((url) => (
-            <Image key={url} source={{ uri: apiBaseURL() + url }} style={styles.photo} contentFit="cover" />
+            <Image key={url} source={{ uri: mediaURL(url, MEDIA_FULL) }} style={styles.photo} contentFit="cover" />
           ))}
         </ScrollView>
       )}

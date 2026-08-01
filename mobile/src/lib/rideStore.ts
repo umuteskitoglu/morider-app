@@ -270,11 +270,25 @@ export async function saveOrQueueRide(draft: RideDraft): Promise<SaveOutcome> {
   }
 }
 
+// Two callers now race for the queue — the ride screen on focus, and the
+// reconnect handler in store/connectivity — and both reading the same pending
+// file would post the same ride twice. Concurrent calls share one run instead.
+let inFlight: Promise<{ sent: number; failed: number }> | null = null;
+
 /**
- * Retries every queued ride. Safe to call often (app start, ride screen focus);
- * failures stay queued for the next attempt.
+ * Retries every queued ride. Safe to call often (app start, ride screen focus,
+ * regaining signal); failures stay queued for the next attempt.
  */
-export async function flushPendingRides(): Promise<{ sent: number; failed: number }> {
+export function flushPendingRides(): Promise<{ sent: number; failed: number }> {
+  if (!inFlight) {
+    inFlight = flushOnce().finally(() => {
+      inFlight = null;
+    });
+  }
+  return inFlight;
+}
+
+async function flushOnce(): Promise<{ sent: number; failed: number }> {
   const files = await pendingFiles();
   let sent = 0;
   let failed = 0;

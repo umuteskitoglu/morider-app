@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import {
   Alert,
+  KeyboardAvoidingView,
   LayoutAnimation,
   Platform,
   Pressable,
@@ -239,7 +240,7 @@ export default function RouteCreateScreen({ navigation }: Props) {
   const line = snapped.length > 1 ? snapped : points;
 
   return (
-    <View style={styles.container}>
+    <KeyboardAvoidingView style={styles.container} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
       <MapView
         ref={mapRef}
         style={StyleSheet.absoluteFill}
@@ -377,7 +378,7 @@ export default function RouteCreateScreen({ navigation }: Props) {
         <View style={{ height: spacing.sm }} />
         <Button title={`Kaydet (${points.length})`} icon="content-save" onPress={save} loading={saving} />
       </Card>
-    </View>
+    </KeyboardAvoidingView>
   );
 }
 

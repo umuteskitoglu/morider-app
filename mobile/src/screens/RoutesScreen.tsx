@@ -1,4 +1,4 @@
-import React, { useCallback, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { Alert, FlatList, Pressable, RefreshControl, StyleSheet, Text, View } from 'react-native';
 import { Swipeable } from 'react-native-gesture-handler';
 import { useFocusEffect } from '@react-navigation/native';
@@ -9,6 +9,9 @@ import * as FileSystem from 'expo-file-system/legacy';
 
 import { ProfileStackParams } from '../navigation/RootNavigator';
 import { Button, Card, EmptyState } from '../components/ui';
+import { useCachedState } from '../lib/offlineCache';
+import { cachedRouteIds, removeCachedRoute } from '../lib/routeCache';
+import { useConnectivity } from '../store/connectivity';
 import { api, errorMessage } from '../api/client';
 import { colors, radius, spacing } from '../theme';
 
@@ -16,10 +19,13 @@ type RouteItem = { id: number; name: string; description: string; distance: numb
 type Props = NativeStackScreenProps<ProfileStackParams, 'RoutesList'>;
 
 export default function RoutesScreen({ navigation }: Props) {
-  const [routes, setRoutes] = useState<RouteItem[]>([]);
+  const { online } = useConnectivity();
+  const [routes, setRoutes] = useCachedState<RouteItem[]>('routes', []);
   const [loading, setLoading] = useState(false);
   const [importing, setImporting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Which of these can actually be opened without signal (lib/routeCache).
+  const [offlineIds, setOfflineIds] = useState<Set<number>>(new Set());
 
   const load = useCallback(async () => {
     try {
@@ -28,17 +34,23 @@ export default function RoutesScreen({ navigation }: Props) {
       const { data } = await api.get('/api/routes');
       setRoutes(data.routes ?? []);
     } catch (err) {
+      // The cached list stays on screen; the error is only worth showing when
+      // there is nothing behind it.
       setError(errorMessage(err));
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [setRoutes]);
 
   useFocusEffect(
     useCallback(() => {
       load();
     }, [load]),
   );
+
+  useEffect(() => {
+    cachedRouteIds().then(setOfflineIds).catch(() => {});
+  }, [routes]);
 
   // One "import from file" action: the backend sniffs GPX vs KML from the
   // content, so the rider never has to know which format they have.
@@ -60,24 +72,28 @@ export default function RoutesScreen({ navigation }: Props) {
     }
   }
 
-  const remove = useCallback((item: RouteItem, close: () => void) => {
-    Alert.alert('Rotayı sil', `"${item.name}" silinsin mi?`, [
-      { text: 'Vazgeç', style: 'cancel', onPress: close },
-      {
-        text: 'Sil',
-        style: 'destructive',
-        onPress: async () => {
-          try {
-            await api.delete(`/api/routes/${item.id}`);
-            setRoutes((prev) => prev.filter((r) => r.id !== item.id));
-          } catch (err) {
-            Alert.alert('Silinemedi', errorMessage(err));
-            close();
-          }
+  const remove = useCallback(
+    (item: RouteItem, close: () => void) => {
+      Alert.alert('Rotayı sil', `"${item.name}" silinsin mi?`, [
+        { text: 'Vazgeç', style: 'cancel', onPress: close },
+        {
+          text: 'Sil',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              await api.delete(`/api/routes/${item.id}`);
+              await removeCachedRoute(item.id);
+              setRoutes(routes.filter((r) => r.id !== item.id));
+            } catch (err) {
+              Alert.alert('Silinemedi', errorMessage(err));
+              close();
+            }
+          },
         },
-      },
-    ]);
-  }, []);
+      ]);
+    },
+    [routes, setRoutes],
+  );
 
   return (
     <View style={styles.container}>
@@ -104,6 +120,9 @@ export default function RoutesScreen({ navigation }: Props) {
         renderItem={({ item }) => (
           <RouteRow
             item={item}
+            // Offline, "which of these can I still open?" is the only question
+            // worth answering on this screen.
+            offlineReady={!online && offlineIds.has(item.id)}
             onOpen={() => navigation.navigate('RouteDetail', { id: item.id, name: item.name })}
             onDelete={remove}
           />
@@ -115,10 +134,12 @@ export default function RoutesScreen({ navigation }: Props) {
 
 function RouteRow({
   item,
+  offlineReady,
   onOpen,
   onDelete,
 }: {
   item: RouteItem;
+  offlineReady?: boolean;
   onOpen: () => void;
   onDelete: (item: RouteItem, close: () => void) => void;
 }) {
@@ -142,7 +163,15 @@ function RouteRow({
           <View style={styles.cardBody}>
             <Text style={styles.name} numberOfLines={1}>{item.name}</Text>
             {item.description ? <Text style={styles.desc} numberOfLines={1}>{item.description}</Text> : null}
-            <Text style={styles.distance}>{item.distance.toFixed(2)} km</Text>
+            <View style={styles.distanceRow}>
+              <Text style={styles.distance}>{item.distance.toFixed(2)} km</Text>
+              {offlineReady && (
+                <View style={styles.offlineChip}>
+                  <MaterialCommunityIcons name="cloud-check-outline" size={12} color={colors.accent} />
+                  <Text style={styles.offlineChipText}>Çevrimdışı hazır</Text>
+                </View>
+              )}
+            </View>
           </View>
           <MaterialCommunityIcons name="chevron-right" size={24} color={colors.textMuted} />
         </Card>
@@ -167,7 +196,10 @@ const styles = StyleSheet.create({
   },
   cardBody: { flex: 1 },
   name: { color: colors.text, fontSize: 17, fontWeight: '800' },
-  distance: { color: colors.primary, fontWeight: '800', marginTop: 2 },
+  distance: { color: colors.primary, fontWeight: '800' },
+  distanceRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.sm, marginTop: 2 },
+  offlineChip: { flexDirection: 'row', alignItems: 'center', gap: 3 },
+  offlineChipText: { color: colors.accent, fontSize: 12, fontWeight: '700' },
   desc: { color: colors.textMuted, fontSize: 13 },
   deleteAction: {
     backgroundColor: colors.danger,

@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { Alert, Image, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, Alert, Image, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
@@ -9,6 +9,7 @@ import { FeedStackParams } from '../navigation/RootNavigator';
 import { Button, Card, TextField } from '../components/ui';
 import { invalidateFeedCache } from './FeedScreen';
 import { api, errorMessage } from '../api/client';
+import { prepareImageUploads } from '../lib/image';
 import { colors, radius, spacing } from '../theme';
 
 type Asset = { uri: string; mimeType?: string };
@@ -21,6 +22,7 @@ export default function CreatePostScreen({ navigation, route }: Props) {
   const [locationName, setLocationName] = useState('');
   const [coords, setCoords] = useState<Coords | null>(null);
   const [saving, setSaving] = useState(false);
+  const [preparing, setPreparing] = useState(false);
 
   // Apply a location chosen on the map picker (returned via merged params).
   const picked = route.params;
@@ -36,10 +38,19 @@ export default function CreatePostScreen({ navigation, route }: Props) {
       mediaTypes: ['images'],
       allowsMultipleSelection: true,
       selectionLimit: 10,
-      quality: 0.7,
+      // High, not maximal: we re-encode below anyway, and a lower value here
+      // would stack a second round of lossy compression on the same pixels.
+      quality: 0.9,
     });
-    if (!res.canceled) {
-      setPhotos(res.assets.map((a) => ({ uri: a.uri, mimeType: a.mimeType })));
+    if (res.canceled) return;
+    // Downscale right after picking rather than at submit: the thumbnails below
+    // then preview the same lightweight files we upload, so the composer never
+    // decodes a 12MP original.
+    try {
+      setPreparing(true);
+      setPhotos(await prepareImageUploads(res.assets));
+    } finally {
+      setPreparing(false);
     }
   }
 
@@ -106,9 +117,18 @@ export default function CreatePostScreen({ navigation, route }: Props) {
   return (
     <ScrollView style={styles.container} contentContainerStyle={styles.content}>
       {photos.length === 0 ? (
-        <Pressable style={styles.picker} onPress={pickPhotos}>
-          <MaterialCommunityIcons name="image-plus" size={42} color={colors.primary} />
-          <Text style={styles.pickerText}>Fotoğraf seç (en fazla 10)</Text>
+        <Pressable style={styles.picker} onPress={pickPhotos} disabled={preparing}>
+          {preparing ? (
+            <>
+              <ActivityIndicator color={colors.primary} />
+              <Text style={styles.pickerText}>Fotoğraflar hazırlanıyor...</Text>
+            </>
+          ) : (
+            <>
+              <MaterialCommunityIcons name="image-plus" size={42} color={colors.primary} />
+              <Text style={styles.pickerText}>Fotoğraf seç (en fazla 10)</Text>
+            </>
+          )}
         </Pressable>
       ) : (
         <View>
@@ -122,9 +142,11 @@ export default function CreatePostScreen({ navigation, route }: Props) {
               </View>
             ))}
           </ScrollView>
-          <Pressable onPress={pickPhotos} style={styles.changeRow}>
+          <Pressable onPress={pickPhotos} style={styles.changeRow} disabled={preparing}>
             <MaterialCommunityIcons name="image-edit" size={16} color={colors.primary} />
-            <Text style={styles.changeText}>Fotoğrafları değiştir ({photos.length})</Text>
+            <Text style={styles.changeText}>
+              {preparing ? 'Hazırlanıyor...' : `Fotoğrafları değiştir (${photos.length})`}
+            </Text>
           </Pressable>
         </View>
       )}
@@ -157,7 +179,7 @@ export default function CreatePostScreen({ navigation, route }: Props) {
         {coords ? <Text style={styles.locOk}>📍 Konum eklendi{locationName ? `: ${locationName}` : ''}</Text> : null}
       </Card>
 
-      <Button title="Paylaş" icon="send" onPress={submit} loading={saving} />
+      <Button title="Paylaş" icon="send" onPress={submit} loading={saving} disabled={preparing} />
     </ScrollView>
   );
 }

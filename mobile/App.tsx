@@ -5,6 +5,7 @@ import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 
 import { AuthProvider } from './src/store/auth';
+import { ConnectivityProvider } from './src/store/connectivity';
 import { ChatUnreadProvider } from './src/store/chatUnread';
 import { NotificationsProvider } from './src/store/notifications';
 import { BlockedUsersProvider } from './src/store/blockedUsers';
@@ -21,15 +22,19 @@ export default function App() {
       <GestureHandlerRootView style={{ flex: 1 }}>
         <SafeAreaProvider>
           <AuthProvider>
-            <ChatUnreadProvider>
-              <NotificationsProvider>
-                <BlockedUsersProvider>
-                  <StatusBar style="light" />
-                  <RootNavigator />
-                  {!splashDone && <SplashOverlay onFinish={() => setSplashDone(true)} />}
-                </BlockedUsersProvider>
-              </NotificationsProvider>
-            </ChatUnreadProvider>
+            {/* Inside AuthProvider: draining the offline queues on reconnect
+                only makes sense for a signed-in rider. */}
+            <ConnectivityProvider>
+              <ChatUnreadProvider>
+                <NotificationsProvider>
+                  <BlockedUsersProvider>
+                    <StatusBar style="light" />
+                    <RootNavigator />
+                    {!splashDone && <SplashOverlay onFinish={() => setSplashDone(true)} />}
+                  </BlockedUsersProvider>
+                </NotificationsProvider>
+              </ChatUnreadProvider>
+            </ConnectivityProvider>
           </AuthProvider>
         </SafeAreaProvider>
       </GestureHandlerRootView>

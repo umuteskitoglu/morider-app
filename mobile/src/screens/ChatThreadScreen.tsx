@@ -28,16 +28,24 @@ import {
   startConversation,
 } from '../lib/chat';
 import { blockUser } from '../lib/block';
+import { readCache, writeCache } from '../lib/offlineCache';
 import { useBlockedUsers } from '../store/blockedUsers';
+import { useConnectivity } from '../store/connectivity';
 import { useChatSocket } from '../lib/useChatSocket';
 import { formatTime } from '../lib/datetime';
 import { colors, onAccent, radius, shadow, spacing } from '../theme';
 
 type Props = NativeStackScreenProps<ChatStackParams, 'ChatThread'>;
 
+// How much of a thread is kept on disk. Enough to read back a conversation in a
+// tunnel; short of keeping every message the rider has ever exchanged.
+const CACHE_LIMIT = 100;
+const threadKey = (convId: number) => `dm.${convId}`;
+
 export default function ChatThreadScreen({ navigation, route }: Props) {
   const { user } = useAuth();
   const { refresh: refreshBlocked } = useBlockedUsers();
+  const { online } = useConnectivity();
   const headerHeight = useHeaderHeight();
   const paramConvId = route.params.conversationId != null ? Number(route.params.conversationId) : undefined;
   const userId = route.params.userId;
@@ -93,9 +101,16 @@ export default function ChatThreadScreen({ navigation, route }: Props) {
       setMessages(msgs);
       setStatus(st);
     } catch {
-      // best effort
+      // best effort — with no signal the cached thread stays on screen
     }
   }, []);
+
+  // Persist whatever the thread currently holds, from either source (the fetch
+  // above or a live socket frame), so the next visit has something to show.
+  useEffect(() => {
+    if (convId == null || messages.length === 0) return;
+    void writeCache(threadKey(convId), messages.slice(-CACHE_LIMIT));
+  }, [convId, messages]);
 
   // Resolve the conversation id (creating it from a userId if needed), then load
   // history. The socket opens once convId is set (see useChatSocket below).
@@ -116,6 +131,13 @@ export default function ChatThreadScreen({ navigation, route }: Props) {
         return;
       }
       setConvId(id);
+      // Show the cached tail before the network answers — and it may be the
+      // only thing this screen ever gets to show.
+      const cached = await readCache<DmMsg[]>(threadKey(id));
+      if (cached && !cancelled) {
+        setMessages(cached.value);
+        setLoading(false);
+      }
       await loadMessages(id);
       if (!cancelled) setLoading(false);
     })();
@@ -259,9 +281,14 @@ export default function ChatThreadScreen({ navigation, route }: Props) {
         }}
       />
 
+      {/* "Bağlanıyor…" is a lie when the phone has no connection at all — it
+          suggests waiting will help. Say which of the two it is, and stop
+          offering a send button that silently drops the message. */}
       {!connected && !blocked && (
         <View style={styles.connBar}>
-          <Text style={styles.connText}>Bağlanıyor…</Text>
+          <Text style={styles.connText}>
+            {online ? 'Bağlanıyor…' : 'Çevrimdışısın · kayıtlı mesajları görüyorsun'}
+          </Text>
         </View>
       )}
 
@@ -291,12 +318,12 @@ export default function ChatThreadScreen({ navigation, route }: Props) {
             spellCheck={false}
           />
           <Pressable
-            style={[styles.sendBtn, !draft.trim() && styles.sendBtnOff]}
+            style={[styles.sendBtn, (!draft.trim() || !connected) && styles.sendBtnOff]}
             onPress={send}
-            disabled={!draft.trim()}
+            disabled={!draft.trim() || !connected}
             accessibilityRole="button"
             accessibilityLabel="Mesajı gönder"
-            accessibilityState={{ disabled: !draft.trim() }}
+            accessibilityState={{ disabled: !draft.trim() || !connected }}
           >
             <MaterialCommunityIcons name="send" size={20} color="#fff" style={{ marginLeft: 2 }} />
           </Pressable>

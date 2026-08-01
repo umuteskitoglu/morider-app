@@ -9,7 +9,9 @@ import { Button, EmptyState, TouchCard } from '../components/ui';
 import { BikeFormModal, BikeFormValues } from '../components/BikeFormModal';
 import { DOC_KEYS, DOC_LABELS, expiryStatus, Motorcycle } from '../lib/garage';
 import { syncGarageReminders } from '../lib/garageReminders';
+import { useCachedState } from '../lib/offlineCache';
 import { useAuth } from '../store/auth';
+import { useConnectivity } from '../store/connectivity';
 import { api, errorMessage } from '../api/client';
 import { colors, radius, spacing } from '../theme';
 
@@ -17,7 +19,10 @@ type Props = NativeStackScreenProps<ProfileStackParams, 'Garage'>;
 
 export default function GarageScreen({ navigation }: Props) {
   const { user } = useAuth();
-  const [motos, setMotos] = useState<Motorcycle[]>([]);
+  const { online } = useConnectivity();
+  // Cached because of what this screen is *for*: the sigorta/muayene dates a
+  // rider looks up at the roadside, which is not where the signal is.
+  const [motos, setMotos] = useCachedState<Motorcycle[]>('garage', []);
   const [loading, setLoading] = useState(false);
   const [adding, setAdding] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -36,7 +41,7 @@ export default function GarageScreen({ navigation }: Props) {
     } finally {
       setLoading(false);
     }
-  }, [userId]);
+  }, [userId, setMotos]);
 
   useFocusEffect(
     useCallback(() => {
@@ -72,9 +77,13 @@ export default function GarageScreen({ navigation }: Props) {
         ListEmptyComponent={
           !loading ? (
             <EmptyState
-              icon="garage-variant"
-              title="Garajın boş"
-              hint="Motorunu ekle; sigorta, muayene ve kasko bitişlerini sana hatırlatalım."
+              icon={online ? 'garage-variant' : 'wifi-off'}
+              title={online ? 'Garajın boş' : 'Çevrimdışısın'}
+              hint={
+                online
+                  ? 'Motorunu ekle; sigorta, muayene ve kasko bitişlerini sana hatırlatalım.'
+                  : 'Bağlantı gelince garajın burada olacak.'
+              }
             />
           ) : null
         }

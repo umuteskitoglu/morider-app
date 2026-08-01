@@ -19,6 +19,7 @@ import (
 	authpkg "github.com/morider/backend/pkg/auth"
 	"github.com/morider/backend/pkg/config"
 	"github.com/morider/backend/pkg/httpx"
+	"github.com/morider/backend/pkg/mail"
 	"github.com/morider/backend/pkg/oauth"
 	"github.com/morider/backend/pkg/ratelimit"
 )
@@ -48,14 +49,27 @@ func registerRoutes(d *server.Deps) {
 		perIP:      ratelimit.NewStore(credentialRatePerSec, credentialBurst),
 		perAccount: ratelimit.NewStore(credentialRatePerSec, credentialBurst),
 		google:     oauth.NewGoogleVerifier(d.Cfg.GoogleClientIDs),
+		mail: mail.New(mail.Config{
+			Host:     d.Cfg.SMTPHost,
+			Port:     d.Cfg.SMTPPort,
+			Username: d.Cfg.SMTPUsername,
+			Password: d.Cfg.SMTPPassword,
+			From:     d.Cfg.SMTPFrom,
+			FromName: d.Cfg.SMTPFromName,
+		}),
 	}
 	if !h.google.Configured() {
 		d.Log.Warn().Msg("GOOGLE_CLIENT_IDS not set: google sign-in disabled")
+	}
+	if !h.mail.Configured() {
+		d.Log.Warn().Msg("SMTP_HOST not set: password reset codes cannot be delivered")
 	}
 	g := d.Engine.Group("/api/auth")
 	g.POST("/signup", h.signup)
 	g.POST("/login", h.login)
 	g.POST("/google", h.googleSignIn)
+	g.POST("/password/forgot", h.forgotPassword)
+	g.POST("/password/reset", h.resetPassword)
 	g.GET("/me", d.JWT.Middleware(), h.me)
 }
 
@@ -71,6 +85,10 @@ type handler struct {
 	// google verifies Google ID tokens. Non-nil always; it rejects everything
 	// with ErrNotConfigured when no client id is configured.
 	google *oauth.GoogleVerifier
+
+	// mail delivers password reset codes. Like google, it is always non-nil
+	// and reports ErrNotConfigured when no relay is set up.
+	mail *mail.Sender
 }
 
 // normaliseEmail lowercases and trims an address so it maps to exactly one

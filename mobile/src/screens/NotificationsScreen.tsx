@@ -9,7 +9,7 @@ import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useFocusEffect } from '@react-navigation/native';
 
-import { apiBaseURL, errorMessage } from '../api/client';
+import { MEDIA_THUMB, errorMessage, mediaURL } from '../api/client';
 import { EmptyState } from '../components/ui';
 import { timeAgo } from '../lib/datetime';
 import { AppNotification, fetchNotifications } from '../lib/notifications';
@@ -148,7 +148,7 @@ function Row({ item, onPress }: { item: AppNotification; onPress: () => void }) 
       accessibilityLabel={`${item.title}. ${item.body}${others}`}
     >
       {item.actor_avatar ? (
-        <Image source={{ uri: apiBaseURL() + item.actor_avatar }} style={styles.avatar} />
+        <Image source={{ uri: mediaURL(item.actor_avatar, MEDIA_THUMB) }} style={styles.avatar} />
       ) : (
         <LinearGradient colors={gradients.surface} style={styles.avatar}>
           <MaterialCommunityIcons

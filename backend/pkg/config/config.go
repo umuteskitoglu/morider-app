@@ -35,6 +35,18 @@ type Config struct {
 	// in here. Empty disables Google sign-in.
 	GoogleClientIDs []string
 
+	// SMTP relay used for transactional mail (currently password reset codes).
+	// Empty SMTPHost disables delivery: outside production the auth service
+	// then logs the code instead of mailing it, so the flow stays testable
+	// locally without a relay. In production the code is never logged and
+	// password reset simply cannot complete until a relay is configured.
+	SMTPHost     string
+	SMTPPort     int
+	SMTPUsername string
+	SMTPPassword string
+	SMTPFrom     string
+	SMTPFromName string
+
 	// Per-client-IP rate limit applied by every service (token bucket).
 	RateLimitRPS   float64
 	RateLimitBurst int
@@ -113,6 +125,13 @@ func Load() Config {
 		JWTSecret:       getEnv("JWT_SECRET", defaultJWTSecret),
 		JWTTTL:          time.Duration(ttlHours) * time.Hour,
 		GoogleClientIDs: getList("GOOGLE_CLIENT_IDS", nil),
+
+		SMTPHost:     getEnv("SMTP_HOST", ""),
+		SMTPPort:     getInt("SMTP_PORT", 587),
+		SMTPUsername: getEnv("SMTP_USERNAME", ""),
+		SMTPPassword: getEnv("SMTP_PASSWORD", ""),
+		SMTPFrom:     getEnv("SMTP_FROM", ""),
+		SMTPFromName: getEnv("SMTP_FROM_NAME", "Morider"),
 
 		RateLimitRPS:   getFloat("RATE_LIMIT_RPS", 50),
 		RateLimitBurst: getInt("RATE_LIMIT_BURST", 100),

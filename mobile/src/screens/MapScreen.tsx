@@ -40,13 +40,14 @@ import {
 } from '../lib/navigation';
 import { POI, POI_CATEGORIES, POI_LABELS, poiColor, poiIcon } from '../lib/poi';
 import { clearCheckpoint, finalizeDraft, flushPendingRides, loadCheckpoint, saveOrQueueRide, setLastRideSummary } from '../lib/rideStore';
+import { loadCachedRoute } from '../lib/routeCache';
 import { useRideRecorder } from '../lib/useRideRecorder';
 import { RideDashboard } from '../components/RideDashboard';
 import { useAuth } from '../store/auth';
 import { useBlockedUsers } from '../store/blockedUsers';
 import { blockUser } from '../lib/block';
 import { fetchNearby, goOffline, heartbeat, NearbyRider } from '../lib/presence';
-import { api, apiBaseURL, errorMessage } from '../api/client';
+import { MEDIA_THUMB, api, errorMessage, mediaURL } from '../api/client';
 import { colors, radius, shadow, spacing } from '../theme';
 
 type Coord = { latitude: number; longitude: number };
@@ -185,7 +186,6 @@ export default function MapScreen({ route, navigation }: Props) {
   headingRef.current = heading;
   speedRef.current = speed;
 
-  // Peak lean is still recorded for the summary — it just isn't shown live.
   // Declared after the recorder because it reads `recording` from it.
   const { lean } = useLeanAngle(recording);
   useEffect(() => {
@@ -210,11 +210,20 @@ export default function MapScreen({ route, navigation }: Props) {
     }
     (async () => {
       try {
-        const { data } = await api.get(`/api/routes/${followRouteId}`);
-        const pts: Coord[] = (data.points ?? []).map((p: { lat: number; lon: number }) => ({
-          latitude: p.lat,
-          longitude: p.lon,
-        }));
+        // Following a saved route is the one thing that has to work in a dead
+        // zone, so a failed fetch falls back to the offline copy written when
+        // the rider last opened this route (lib/routeCache) rather than
+        // silently dropping the guide line.
+        let points: { lat: number; lon: number }[] | null = null;
+        try {
+          const { data } = await api.get(`/api/routes/${followRouteId}`);
+          points = data.points ?? [];
+        } catch {
+          points = (await loadCachedRoute(followRouteId))?.points ?? null;
+        }
+        // No signal and this route was never opened before: nothing to guide by.
+        if (!points) return;
+        const pts: Coord[] = points.map((p) => ({ latitude: p.lat, longitude: p.lon }));
         let reversed = followReverseParam;
         if (reversed === undefined && pts.length > 1) {
           try {
@@ -951,9 +960,8 @@ export default function MapScreen({ route, navigation }: Props) {
                 indistinguishable from standing still. */}
             <Stat icon="speedometer" label="Hız" value={gpsStale ? '--' : speed.toFixed(0)} unit="km/s" />
             <View style={styles.statDivider} />
-            {/* Live lean angle used to sit here. Showing a rider their peak
-                lean *while cornering* rewards looking at the screen mid-corner;
-                it belongs in the post-ride summary, and that is where it is now. */}
+            <Stat icon="angle-acute" label="Yatış" value={`${Math.round(Math.abs(lean))}`} unit="°" />
+            <View style={styles.statDivider} />
             <Stat icon="timer-outline" label="Süre" value={fmtDuration(rec.movingMs)} unit="" />
           </View>
           {recording && hasRouteToFollow && (
@@ -1084,7 +1092,7 @@ export default function MapScreen({ route, navigation }: Props) {
         >
           <Pressable style={styles.riderSheet} onPress={() => {}} accessible={false}>
             {selectedRider?.avatar_url ? (
-              <Image source={{ uri: apiBaseURL() + selectedRider.avatar_url }} style={styles.riderAvatar} />
+              <Image source={{ uri: mediaURL(selectedRider.avatar_url, MEDIA_THUMB) }} style={styles.riderAvatar} />
             ) : (
               <View style={styles.riderAvatarFallback}>
                 <MaterialCommunityIcons name="account" size={28} color="#fff" />

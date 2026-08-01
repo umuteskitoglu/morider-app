@@ -10,13 +10,15 @@ import { EmptyState } from '../components/ui';
 import { ChatStackParams } from '../navigation/RootNavigator';
 import { ConversationItem } from '../lib/chat';
 import { useChatUnread } from '../store/chatUnread';
-import { apiBaseURL } from '../api/client';
+import { useConnectivity } from '../store/connectivity';
+import { MEDIA_THUMB, mediaURL } from '../api/client';
 import { formatTime } from '../lib/datetime';
 import { colors, gradients, radius, spacing } from '../theme';
 
 export default function ConversationsScreen() {
   const navigation = useNavigation<NativeStackNavigationProp<ChatStackParams>>();
   const { conversations: items, refresh } = useChatUnread();
+  const { online } = useConnectivity();
   const [refreshing, setRefreshing] = useState(false);
 
   useFocusEffect(
@@ -79,9 +81,13 @@ export default function ConversationsScreen() {
       {items.length === 0 ? (
         <View style={styles.empty}>
           <EmptyState
-            icon="message-text-outline"
-            title="Henüz mesajın yok"
-            hint="Haritada yakındaki bir sürücüye dokunup mesaj gönderebilirsin."
+            icon={online ? 'message-text-outline' : 'wifi-off'}
+            title={online ? 'Henüz mesajın yok' : 'Çevrimdışısın'}
+            hint={
+              online
+                ? 'Haritada yakındaki bir sürücüye dokunup mesaj gönderebilirsin.'
+                : 'Bağlantı gelince sohbetlerin burada olacak.'
+            }
           />
         </View>
       ) : (
@@ -113,7 +119,7 @@ function Row({ item, onPress, isRequest }: { item: ConversationItem; onPress: ()
   return (
     <Pressable style={({ pressed }) => [styles.row, pressed && styles.rowPressed]} onPress={onPress}>
       {item.other_user.avatar_url ? (
-        <Image source={{ uri: apiBaseURL() + item.other_user.avatar_url }} style={styles.avatar} />
+        <Image source={{ uri: mediaURL(item.other_user.avatar_url, MEDIA_THUMB) }} style={styles.avatar} />
       ) : (
         <LinearGradient colors={gradients.primary} style={styles.avatar}>
           <Text style={styles.avatarText}>{item.other_user.name?.charAt(0).toUpperCase() ?? '?'}</Text>

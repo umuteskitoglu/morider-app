@@ -13,6 +13,7 @@ import { useNotifications } from '../store/notifications';
 import { installPushHandlers, registerForPush } from '../lib/push';
 import { flushPendingRoute, installLocalNotificationHandler } from '../lib/notificationRoute';
 import InAppBanner, { showBanner } from '../components/InAppBanner';
+import OfflineBanner from '../components/OfflineBanner';
 import OnboardingTour from '../components/OnboardingTour';
 import NotificationBell from '../components/NotificationBell';
 import { registerTourNode } from '../components/TourTarget';
@@ -20,6 +21,7 @@ import { navigationRef } from './navigationRef';
 import { colors, gradients, radius, shadow, spacing } from '../theme';
 import LoginScreen from '../screens/LoginScreen';
 import SignupScreen from '../screens/SignupScreen';
+import ForgotPasswordScreen from '../screens/ForgotPasswordScreen';
 import MapScreen from '../screens/MapScreen';
 import RidesScreen from '../screens/RidesScreen';
 import RideDetailScreen from '../screens/RideDetailScreen';
@@ -66,6 +68,9 @@ import CommunityCommentsScreen from '../screens/CommunityCommentsScreen';
 export type AuthStackParams = {
   Login: undefined;
   Signup: undefined;
+  // `email` carries over whatever was typed on the login form, so the rider who
+  // got their password wrong does not retype their address to recover it.
+  ForgotPassword: { email?: string } | undefined;
 };
 
 // Group riding lives under the Ride tab — it is a way to ride, not a route list.
@@ -510,6 +515,7 @@ function AuthFlow() {
     <AuthStack.Navigator screenOptions={{ headerShown: false }}>
       <AuthStack.Screen name="Login" component={LoginScreen} />
       <AuthStack.Screen name="Signup" component={SignupScreen} />
+      <AuthStack.Screen name="ForgotPassword" component={ForgotPasswordScreen} />
     </AuthStack.Navigator>
   );
 }
@@ -561,6 +567,9 @@ export default function RootNavigator() {
       ) : (
         <AuthFlow />
       )}
+      {/* Outside the signed-in branch: "neden giriş yapamıyorum" is exactly the
+          question a rider with no signal asks at the login screen. */}
+      <OfflineBanner />
     </NavigationContainer>
   );
 }

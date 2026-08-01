@@ -18,6 +18,7 @@ import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { Button, Card, Chip, EmptyState } from '../components/ui';
 import { ChatStackParams } from '../navigation/RootNavigator';
 import { createPost } from '../lib/communities';
+import { prepareImageUploads } from '../lib/image';
 import { api, errorMessage } from '../api/client';
 import { colors, radius, spacing } from '../theme';
 
@@ -36,6 +37,7 @@ export default function CommunityPostCreateScreen({ route, navigation }: Props) 
   const [body, setBody] = useState('');
   const [photos, setPhotos] = useState<PickedPhoto[]>([]);
   const [saving, setSaving] = useState(false);
+  const [preparing, setPreparing] = useState(false);
 
   const [routePick, setRoutePick] = useState<RouteOption | null>(null);
   const [eventPick, setEventPick] = useState<EventOption | null>(null);
@@ -50,10 +52,18 @@ export default function CommunityPostCreateScreen({ route, navigation }: Props) 
       mediaTypes: ['images'],
       allowsMultipleSelection: true,
       selectionLimit: 10,
-      quality: 0.7,
+      // High, not maximal: prepareImageUploads re-encodes anyway, and a lower
+      // value here would stack a second round of lossy compression.
+      quality: 0.9,
     });
-    if (!res.canceled) {
-      setPhotos(res.assets.map((a) => ({ uri: a.uri, mimeType: a.mimeType })));
+    if (res.canceled) return;
+    // Downscale before the previews render, so neither the composer nor the
+    // upload ever touches a full-res camera original.
+    try {
+      setPreparing(true);
+      setPhotos(await prepareImageUploads(res.assets));
+    } finally {
+      setPreparing(false);
     }
   }
 
@@ -132,7 +142,12 @@ export default function CommunityPostCreateScreen({ route, navigation }: Props) 
       )}
 
       <View style={styles.chipRow}>
-        <Chip label={photos.length > 0 ? `${photos.length} fotoğraf` : 'Fotoğraf'} icon="image-plus" active={photos.length > 0} onPress={pickPhotos} />
+        <Chip
+          label={preparing ? 'Hazırlanıyor...' : photos.length > 0 ? `${photos.length} fotoğraf` : 'Fotoğraf'}
+          icon="image-plus"
+          active={photos.length > 0}
+          onPress={preparing ? () => {} : pickPhotos}
+        />
         <Chip
           label={routePick ? routePick.name : 'Rota'}
           icon="map-marker-path"

@@ -7,6 +7,8 @@ import { MaterialCommunityIcons } from '@expo/vector-icons';
 
 import { ProfileStackParams } from '../navigation/RootNavigator';
 import { Card, EmptyState } from '../components/ui';
+import { useCachedState } from '../lib/offlineCache';
+import { useConnectivity } from '../store/connectivity';
 import { api, errorMessage } from '../api/client';
 import { colors, radius, spacing } from '../theme';
 
@@ -30,7 +32,10 @@ function fmtRideDuration(start: string | null, end: string | null): string {
 
 export default function RidesScreen() {
   const navigation = useNavigation<NativeStackNavigationProp<ProfileStackParams>>();
-  const [rides, setRides] = useState<Ride[]>([]);
+  const { online } = useConnectivity();
+  // A rider's own history is the least volatile thing in the app; there is no
+  // reason for it to disappear at the bottom of a valley.
+  const [rides, setRides] = useCachedState<Ride[]>('rides', []);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -45,7 +50,7 @@ export default function RidesScreen() {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [setRides]);
 
   useFocusEffect(
     useCallback(() => {
@@ -63,7 +68,7 @@ export default function RidesScreen() {
         onPress: async () => {
           try {
             await api.delete(`/api/rides/${item.id}`);
-            setRides((prev) => prev.filter((r) => r.id !== item.id));
+            setRides(rides.filter((r) => r.id !== item.id));
           } catch (err) {
             Alert.alert('Silinemedi', errorMessage(err));
             close();
@@ -71,7 +76,7 @@ export default function RidesScreen() {
         },
       },
     ]);
-  }, []);
+  }, [rides, setRides]);
 
   return (
     <View style={styles.container}>
@@ -82,7 +87,17 @@ export default function RidesScreen() {
         refreshControl={<RefreshControl refreshing={loading} onRefresh={load} tintColor={colors.primary} />}
         ListEmptyComponent={
           !loading ? (
-            <EmptyState icon="motorbike" title={error ?? 'Henüz sürüş yok'} hint={error ? undefined : 'İlk sürüşünü kaydet ve istatistiklerini gör!'} />
+            <EmptyState
+              icon={online ? 'motorbike' : 'wifi-off'}
+              title={online ? error ?? 'Henüz sürüş yok' : 'Çevrimdışısın'}
+              hint={
+                online
+                  ? error
+                    ? undefined
+                    : 'İlk sürüşünü kaydet ve istatistiklerini gör!'
+                  : 'Bağlantı gelince sürüşlerin burada olacak.'
+              }
+            />
           ) : null
         }
         renderItem={({ item }) => (

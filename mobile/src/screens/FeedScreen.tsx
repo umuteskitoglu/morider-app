@@ -25,7 +25,8 @@ import { LikersSheet } from '../components/LikersSheet';
 import NotificationBell from '../components/NotificationBell';
 import { ZoomableImage } from '../components/ZoomableImage';
 import { EmptyState } from '../components/ui';
-import { api, apiBaseURL, errorMessage } from '../api/client';
+import { registerCacheReset } from '../lib/offlineCache';
+import { MEDIA_FULL, api, errorMessage, mediaURL } from '../api/client';
 import { colors, gradients, spacing } from '../theme';
 
 type Post = {
@@ -46,10 +47,19 @@ type Props = NativeStackScreenProps<FeedStackParams, 'FeedList'>;
 // restarts (disk) so returning to the tab shows posts instantly — Instagram
 // style — instead of blanking out and refetching on every focus. The network
 // is only hit when the cache is stale or the user pulls to refresh.
-const FEED_CACHE_KEY = 'morider.feedCache';
+// Keyed under the shared cache prefix so signing out drops it with everything
+// else — the previous rider's photos must not still be here for the next one.
+const FEED_CACHE_KEY = 'morider.cache.feed';
 const FRESH_MS = 30_000;
 let feedMemCache: Post[] | null = null;
 let feedFetchedAt = 0;
+
+// The disk half is wiped by prefix; the module-level copy above outlives a
+// sign-out inside one process, so it has to be dropped by hand.
+registerCacheReset(() => {
+  feedMemCache = null;
+  feedFetchedAt = 0;
+});
 
 // Marks the cache stale so the next focus refetches — e.g. after creating a
 // post, which must appear at the top of the feed.
@@ -135,6 +145,15 @@ export default function FeedScreen({ navigation }: Props) {
           keyExtractor={(item) => String(item.id)}
           pagingEnabled
           showsVerticalScrollIndicator={false}
+          // Every post is a full-screen photo carousel. Without windowing the
+          // list mounts the whole page of posts at once and every one of them
+          // decodes its photos, which is what starved the UI thread on scroll
+          // and made a pinch stutter.
+          initialNumToRender={1}
+          maxToRenderPerBatch={2}
+          windowSize={3}
+          removeClippedSubviews
+          getItemLayout={(_, index) => ({ length: height, offset: height * index, index })}
           refreshControl={
             <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.primary} />
           }
@@ -298,11 +317,17 @@ function PostItem({
         pagingEnabled
         scrollEnabled={!zooming}
         showsHorizontalScrollIndicator={false}
+        // A post can carry 10 photos; mounting all of them up front means ten
+        // full-screen decodes for one visible frame.
+        initialNumToRender={1}
+        maxToRenderPerBatch={2}
+        windowSize={3}
+        getItemLayout={(_, index) => ({ length: width, offset: width * index, index })}
         onMomentumScrollEnd={onScroll}
         renderItem={({ item }) => (
           <Pressable onPress={onPhotoTap}>
             <ZoomableImage
-              uri={apiBaseURL() + item}
+              uri={mediaURL(item, MEDIA_FULL)}
               width={width}
               height={height}
               style={{ width, height }}

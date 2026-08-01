@@ -343,16 +343,6 @@ func (h *handler) respondPosts(c *gin.Context, extraWhere string, extraArg any) 
 	c.JSON(http.StatusOK, gin.H{"posts": posts})
 }
 
-func (h *handler) media(c *gin.Context) {
-	file := c.Param("file")
-	// Reject path traversal; filenames are plain hex + extension.
-	if strings.ContainsAny(file, "/\\") || strings.Contains(file, "..") {
-		c.Status(http.StatusBadRequest)
-		return
-	}
-	c.File(filepath.Join(h.uploadDir, file))
-}
-
 func (h *handler) like(c *gin.Context) {
 	id, ok := postID(c)
 	if !ok {

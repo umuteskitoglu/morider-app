@@ -24,7 +24,16 @@ export function navigateNested(tab: string, screen: string, params?: object): bo
   // caller that only learns both at runtime (a push payload), so the call is
   // made through a widened signature. lib/notificationRoute is the single place
   // that decides the pair, and its mapping is checked there.
+  //
+  // `initial: false` is required: by default React Navigation replaces the
+  // target tab's whole nested stack with just the destination screen (the
+  // stack's real initial screen never gets pushed underneath it), which
+  // leaves it with nothing to go back to — the header back button silently
+  // disappears until the app is restarted and the stack rebuilds normally.
+  // This is most visible on tabs other than the default one, since their
+  // stacks are lazily mounted and haven't initialized their own history yet
+  // the first time a notification jumps into them this session.
   const navigate = navigationRef.navigate as unknown as (name: string, params?: object) => void;
-  navigate(tab, { screen, params });
+  navigate(tab, { screen, params, initial: false });
   return true;
 }

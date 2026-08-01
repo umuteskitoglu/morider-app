@@ -87,7 +87,21 @@ export async function raiseSOS(payload: SosPayload): Promise<SosResult> {
  */
 const MAX_QUEUE_AGE_MS = 24 * 60 * 60 * 1000;
 
-export async function flushSOSQueue(): Promise<number> {
+// The ride screens and the reconnect handler (store/connectivity) both call
+// this; overlapping runs would read the same queue and re-send every alert.
+// The server collapses retries by client_id, but there is no reason to make it.
+let inFlight: Promise<number> | null = null;
+
+export function flushSOSQueue(): Promise<number> {
+  if (!inFlight) {
+    inFlight = flushOnce().finally(() => {
+      inFlight = null;
+    });
+  }
+  return inFlight;
+}
+
+async function flushOnce(): Promise<number> {
   const q = await readQueue();
   if (q.length === 0) return 0;
 
